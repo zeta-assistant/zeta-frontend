@@ -16,7 +16,7 @@ export default function LogoutPage() {
         console.error('Error signing out:', error.message);
       } else {
         console.log('Signed out successfully. Redirecting...');
-        router.replace('/'); // Use replace to avoid user going back to dashboard
+        router.replace('/login');
       }
     };
 
