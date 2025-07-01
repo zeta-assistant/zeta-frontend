@@ -5,23 +5,21 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function SignupPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
-  const router = useRouter();
 
   const handleSignup = async () => {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: 'http://localhost:3000/dashboard' }, // optional
     });
 
     if (error) {
       setAuthError(error.message);
     } else {
-      setAuthError(null);
-      router.push('/dashboard');
+      router.push('/onboarding');
     }
   };
 
@@ -29,7 +27,7 @@ export default function SignupPage() {
     <div className="min-h-screen flex items-center justify-center bg-white text-black">
       <div className="text-center space-y-6">
         <h1 className="text-4xl font-bold">🏛️ Pantheon</h1>
-        <p className="text-lg">Create your account</p>
+        <p className="text-lg">Join the ecosystem</p>
 
         <div className="space-y-2">
           <input
@@ -46,6 +44,7 @@ export default function SignupPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+
           {authError && <p className="text-red-500 text-sm">{authError}</p>}
 
           <button

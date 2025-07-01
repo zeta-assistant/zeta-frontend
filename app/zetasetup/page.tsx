@@ -1,45 +1,70 @@
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-export default function zetasetup() {
+export default function ZetaSetup() {
   const router = useRouter();
-
-  const [context, setContext] = useState('');
-  const [role, setRole] = useState('');
-  const [tone, setTone] = useState('');
-  const [goals, setGoals] = useState<string[]>([]);
-  const [initiative, setInitiative] = useState('');
-  const [tools, setTools] = useState<string[]>([]);
-
-  const toggleSelection = (value: string, list: string[], setter: (val: string[]) => void) => {
-    setter(list.includes(value) ? list.filter(v => v !== value) : [...list, value]);
-  };
+  const [projectName, setProjectName] = useState('');
+  const [assistantType, setAssistantType] = useState<string | null>(null);
+  const [systemInstructions, setSystemInstructions] = useState('');
 
   const handleSubmit = () => {
-    const profile = { context, role, tone, goals, initiative, tools };
-    console.log('Zeta Profile:', profile);
+    if (!projectName || !assistantType) return;
 
-    // TODO: Save to Supabase or context later
+    const profile = { projectName, assistantType, systemInstructions };
+    console.log('Zeta Initial Profile:', profile);
     router.push('/dashboard');
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4 py-8">
-      <div className="w-full max-w-3xl bg-white rounded-2xl shadow-lg p-8 space-y-6">
-        <h2 className="text-2xl font-bold mb-2">Zeta Setup</h2>
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
+      <div className="w-full max-w-xs space-y-8 text-center">
+        {/* Zeta Logo */}
+        <Image
+          src="/zeta-logo.png"
+          alt="Zeta Logo"
+          width={350}
+          height={350}
+          className="mx-auto mt-2"
+        />
 
-        {/* Question 1 */}
+        {/* Header */}
         <div>
-          <p className="font-semibold mb-2">1. Are you using Zeta for a project or as part of a business?</p>
-          <div className="flex gap-4 flex-wrap">
-            {['Personal Project', 'Business Owner', 'Manager', 'Employee', 'Just Exploring'].map(opt => (
+          <h1 className="text-4xl font-bold mb-2">Zeta Onboarding</h1>
+          <p className="text-gray-700 text-base">
+            Zeta AI is your intelligent executive assistant, built to automate tasks, analyze data, and support your
+            business or project like a real teammate.
+          </p>
+        </div>
+
+        {/* Project Name */}
+        <div className="bg-white rounded-2xl shadow px-4 py-4 space-y-2">
+          <p className="text-sm font-semibold text-gray-800">What's the name of your project?</p>
+          <div className="flex justify-center">
+            <input
+              type="text"
+              placeholder="e.g. Yogi’s Picks"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              className="w-72 px-3 py-2 rounded-lg bg-gray-100 text-gray-800 focus:outline-none focus:ring-2 focus:ring-black"
+            />
+          </div>
+        </div>
+
+        {/* Assistant Type */}
+        <div className="bg-white rounded-2xl shadow px-4 py-4 space-y-2">
+          <p className="text-sm font-semibold text-gray-800">What type of assistant do you need me to be?</p>
+          <div className="flex flex-col items-center gap-3">
+            {['Personal/Executive Assistant', 'Work/Career Assistant'].map((opt) => (
               <button
                 key={opt}
-                onClick={() => setContext(opt)}
-                className={`px-4 py-2 rounded-lg border ${
-                  context === opt ? 'bg-black text-white' : 'bg-gray-100'
+                onClick={() => setAssistantType(assistantType === opt ? null : opt)}
+                className={`w-72 px-4 py-2 rounded-xl text-sm font-medium border transition ${
+                  assistantType === opt
+                    ? 'bg-black text-white border-black ring-2 ring-black'
+                    : 'bg-white text-gray-800 border-gray-300 hover:border-black'
                 }`}
               >
                 {opt}
@@ -48,108 +73,23 @@ export default function zetasetup() {
           </div>
         </div>
 
-        {/* Question 2 (Role) */}
-        {context !== 'Personal Project' && context !== 'Just Exploring' && (
-          <div>
-            <p className="font-semibold mb-2">2. What's your role?</p>
-            <div className="flex gap-4 flex-wrap">
-              {['Owner', 'Executive', 'Manager', 'Marketing/Sales', 'Developer', 'Employee'].map(opt => (
-                <button
-                  key={opt}
-                  onClick={() => setRole(opt)}
-                  className={`px-4 py-2 rounded-lg border ${
-                    role === opt ? 'bg-black text-white' : 'bg-gray-100'
-                  }`}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Question 3 */}
-        <div>
-          <p className="font-semibold mb-2">3. How should Zeta speak to you?</p>
-          <div className="flex gap-4 flex-wrap">
-            {['Professional', 'Friendly', 'Energetic', 'Analytical', 'Adaptive'].map(opt => (
-              <button
-                key={opt}
-                onClick={() => setTone(opt)}
-                className={`px-4 py-2 rounded-lg border ${
-                  tone === opt ? 'bg-black text-white' : 'bg-gray-100'
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
+        {/* System Instructions */}
+        <div className="bg-white rounded-2xl shadow px-4 py-4 space-y-2">
+          <p className="text-sm font-semibold text-gray-800">Anything you want Zeta to know before we begin?</p>
+          <textarea
+            rows={4}
+            placeholder="Write system instructions here..."
+            value={systemInstructions}
+            onChange={(e) => setSystemInstructions(e.target.value)}
+            className="w-80 px-3 py-2 rounded-lg bg-gray-100 text-gray-800 focus:outline-none focus:ring-2 focus:ring-black resize-none"
+          />
         </div>
 
-        {/* Question 4 */}
-        <div>
-          <p className="font-semibold mb-2">4. What should Zeta help you with first?</p>
-          <div className="flex gap-3 flex-wrap">
-            {[
-              'Automation',
-              'Data Analysis',
-              'Task Management',
-              'Customer Tracking',
-              'Reporting',
-              'Workflow Optimization',
-            ].map(opt => (
-              <button
-                key={opt}
-                onClick={() => toggleSelection(opt, goals, setGoals)}
-                className={`px-4 py-2 rounded-lg border ${
-                  goals.includes(opt) ? 'bg-black text-white' : 'bg-gray-100'
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Question 5 */}
-        <div>
-          <p className="font-semibold mb-2">5. Should Zeta take initiative?</p>
-          <div className="flex gap-4 flex-wrap">
-            {['Yes, often', 'Occasionally', 'Only when asked'].map(opt => (
-              <button
-                key={opt}
-                onClick={() => setInitiative(opt)}
-                className={`px-4 py-2 rounded-lg border ${
-                  initiative === opt ? 'bg-black text-white' : 'bg-gray-100'
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Question 6 */}
-        <div>
-          <p className="font-semibold mb-2">6. Connect tools Zeta should work with:</p>
-          <div className="flex gap-3 flex-wrap">
-            {['QuickBooks', 'Lightspeed', 'HubSpot', 'Google Sheets', 'Excel', 'None Yet'].map(opt => (
-              <button
-                key={opt}
-                onClick={() => toggleSelection(opt, tools, setTools)}
-                className={`px-4 py-2 rounded-lg border ${
-                  tools.includes(opt) ? 'bg-black text-white' : 'bg-gray-100'
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        </div>
-
+        {/* Submit */}
         <button
           onClick={handleSubmit}
-          className="w-full bg-black text-white py-3 rounded-xl text-lg hover:bg-gray-800 transition"
+          disabled={!projectName || !assistantType}
+          className="w-72 bg-black text-white py-3 rounded-full text-lg hover:bg-gray-800 transition disabled:opacity-40"
         >
           Finish Setup
         </button>
