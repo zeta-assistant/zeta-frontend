@@ -1,6 +1,7 @@
 import './globals.css';
 import { Geist, Geist_Mono } from 'next/font/google';
 import LayoutWrapper from '@/components/LayoutWrapper';
+import SupabaseProvider from '@/components/SupabaseProvider'; // ✅ new wrapper
 
 const geistSans = Geist({
   subsets: ['latin'],
@@ -21,7 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <LayoutWrapper>{children}</LayoutWrapper>
+        <SupabaseProvider>
+          <LayoutWrapper>{children}</LayoutWrapper>
+        </SupabaseProvider>
       </body>
     </html>
   );

@@ -3,19 +3,61 @@
 import Image from 'next/image';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
+import { useUser } from '@supabase/auth-helpers-react';
 
 export default function ZetaSetup() {
   const router = useRouter();
+  const { user } = useUser(); // NEW way to access logged-in user
   const [projectName, setProjectName] = useState('');
   const [assistantType, setAssistantType] = useState<string | null>(null);
   const [systemInstructions, setSystemInstructions] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = () => {
-    if (!projectName || !assistantType) return;
+  const handleSubmit = async () => {
+    if (!projectName || !assistantType || !user) return;
 
-    const profile = { projectName, assistantType, systemInstructions };
-    console.log('Zeta Initial Profile:', profile);
-    router.push('/dashboard');
+    setLoading(true);
+
+    try {
+      // Step 1: Create assistant via API
+      const res = await fetch('/api/createAssistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectName, assistantType, systemInstructions }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create assistant.');
+      const assistantId = data.assistantId;
+
+      // Step 2: Insert into Supabase user_projects
+      const { data: projectData, error } = await supabase
+        .from('user_projects')
+        .insert([
+          {
+            user_id: user.id,
+            name: projectName,
+            assistant_id: assistantId,
+            description: '',
+            type: assistantType,
+            onboarding_complete: true,
+            system_instructions: systemInstructions,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      console.log('✅ Project saved to Supabase:', projectData);
+      router.push(`/dashboard/${projectData.id}`);
+    } catch (err) {
+      console.error('❌ Zeta Setup Error:', err);
+      alert('Something went wrong. Check the console.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -32,9 +74,9 @@ export default function ZetaSetup() {
 
         {/* Header */}
         <div>
-          <h1 className="text-4xl font-bold mb-2">Zeta Onboarding</h1>
+          <h1 className="text-4xl font-bold mb-2">Zeta Build Setup</h1>
           <p className="text-gray-700 text-base">
-            Zeta AI is your intelligent executive assistant, built to automate tasks, analyze data, and support your
+            Zeta Build AI is your intelligent executive assistant, built to automate tasks, analyze data, and support your
             business or project like a real teammate.
           </p>
         </div>
@@ -85,13 +127,13 @@ export default function ZetaSetup() {
           />
         </div>
 
-        {/* Submit */}
+        {/* Submit Button */}
         <button
           onClick={handleSubmit}
-          disabled={!projectName || !assistantType}
+          disabled={!projectName || !assistantType || loading}
           className="w-72 bg-black text-white py-3 rounded-full text-lg hover:bg-gray-800 transition disabled:opacity-40"
         >
-          Finish Setup
+          {loading ? 'Setting Up...' : 'Finish Setup'}
         </button>
       </div>
     </div>

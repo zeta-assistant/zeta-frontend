@@ -38,10 +38,10 @@ export default function LoginPage() {
 
     try {
       const userId = session.user.id;
-      const project = await checkOrCreateUserProject(userId);
-      const hasOnboarded = !!project.name && project.name !== 'New Zeta Project';
+      const project = await checkOrCreateUserProject(userId, 'zeta');
+      const hasOnboarded = project.onboarding_complete === true;
 
-      router.push(hasOnboarded ? '/dashboard' : '/onboarding');
+      router.push('/projects');
     } catch (err: any) {
       console.error('❌ Project setup failed:', err.message || err);
       setAuthError('Something went wrong setting up your Zeta project.');

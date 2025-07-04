@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { useRouter } from 'next/navigation';
 import CurrentMemoryPanel from '@/components/CurrentMemoryPanel';
 
 export default function DashboardPage() {
@@ -10,27 +10,43 @@ export default function DashboardPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string>('Loading...');
   const [sessionLoading, setSessionLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const params = useParams();
+  const projectId = params.projectId as string;
 
   useEffect(() => {
-  const checkSession = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const checkSessionAndProject = async () => {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-    if (!session || !session.user || !session.user.email) {
-      router.push('/login');
-    } else {
-      setUserEmail(session.user.email as string); // ✅ this line fixes the type error
-    }
+      if (sessionError || !session || !session.user?.email) {
+        router.push('/login');
+        return;
+      }
 
-    setSessionLoading(false);
-  };
+      setUserEmail(session.user.email);
 
-  checkSession();
-}, []);
+      const { data: project, error: projectError } = await supabase
+        .from('user_projects')
+        .select('name, user_id')
+        .eq('id', projectId)
+        .single();
+
+      if (projectError || !project || project.user_id !== session.user.id) {
+        console.error('Access denied or project not found');
+        router.push('/projects');
+        return;
+      }
+
+      setProjectName(project.name);
+      setSessionLoading(false);
+    };
+
+    checkSessionAndProject();
+  }, [projectId]);
+
   const sendMessage = async () => {
     if (!input.trim()) return;
 
@@ -40,9 +56,7 @@ export default function DashboardPage() {
     setLoading(true);
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
 
       const res = await fetch(
         'https://inprydzukperccgtxgvx.functions.supabase.co/functions/v1/chatwithzeta',
@@ -52,28 +66,29 @@ export default function DashboardPage() {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session?.access_token}`,
           },
-          body: JSON.stringify({ message: input }),
+          body: JSON.stringify({
+            message: input,
+            projectId,
+            projectName,
+            userEmail,
+          }),
         }
       );
 
-      if (!res.ok) {
-        setMessages((prev) => [
-          ...prev,
-          { role: 'assistant', content: '⚠️ Server error. Try again later.' },
-        ]);
-        return;
-      }
-
       const data = await res.json();
-      const replyMessage = {
+      const reply = {
         role: 'assistant',
         content: data.reply || '⚠️ No reply received.',
       };
-      setMessages((prev) => [...prev, replyMessage]);
-    } catch (error) {
+      setMessages((prev) => [...prev, reply]);
+    } catch (err) {
+      console.error('Zeta function error:', err);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: '⚠️ Failed to reach Zeta.' },
+        {
+          role: 'assistant',
+          content: '⚠️ Failed to reach Zeta.',
+        },
       ]);
     } finally {
       setLoading(false);
@@ -86,12 +101,7 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error('Logout failed:', error.message);
-      alert('Logout failed. Try again.');
-    } else {
-      router.replace('/');
-    }
+    if (!error) router.replace('/');
   };
 
   useEffect(() => {
@@ -101,7 +111,7 @@ export default function DashboardPage() {
   if (sessionLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-600">Loading...</p>
+        <p className="text-gray-500 text-sm">Loading project dashboard...</p>
       </div>
     );
   }
@@ -109,37 +119,35 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#fdf6ee] px-6 py-8 flex flex-col items-center">
       <div className="flex w-full max-w-7xl gap-6">
-        {/* Main Chat Panel */}
+        {/* Chat Panel */}
         <div className="flex flex-col flex-[3] bg-white shadow border rounded-2xl h-[70vh]">
-          {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b">
-            <h1 className="text-2xl font-semibold flex items-center gap-2">
-              🧠 Zeta Assistant
-            </h1>
+            <h1 className="text-2xl font-semibold">🧠 {projectName}</h1>
             <button
               onClick={handleLogout}
-              className="text-sm px-4 py-2 bg-[#1f1f3d] text-white rounded-md hover:bg-[#333]"
+              className="text-sm px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800"
             >
               Log Out
             </button>
           </div>
-
-          {/* User Info */}
           {userEmail && (
-            <p className="text-sm text-gray-600 px-6 pt-3">
-              Signed in as <span className="font-medium">{userEmail}</span>
-            </p>
-          )}
-
-          {/* Chat Messages */}
+  <div className="px-6 pt-3 text-sm text-gray-600">
+    <p>
+      Signed in as <span className="font-medium">{userEmail}</span>
+    </p>
+    <p className="mt-1">
+      Project ID: <span className="font-mono text-gray-800">{projectId}</span>
+    </p>
+  </div>
+)}
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
             {messages.map((msg, i) => (
               <div
                 key={i}
-                className={`max-w-[85%] px-4 py-2 rounded-xl whitespace-pre-line text-sm ${
+                className={`max-w-[85%] px-4 py-2 rounded-xl text-sm whitespace-pre-line ${
                   msg.role === 'user'
-                    ? 'bg-blue-100 text-black self-end ml-auto'
-                    : 'bg-gray-100 text-gray-800 self-start'
+                    ? 'bg-blue-100 text-black ml-auto'
+                    : 'bg-gray-100 text-gray-800'
                 }`}
               >
                 {msg.content}
@@ -147,12 +155,10 @@ export default function DashboardPage() {
             ))}
             <div ref={scrollRef} />
           </div>
-
-          {/* Chat Input (Restyled clean) */}
           <div className="border-t px-3 py-3 bg-white flex">
             <input
               type="text"
-              className="appearance-none bg-white text-black border border-gray-300 rounded-l-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm max-w-2xl autofill:shadow-[inset_0_0_0px_1000px_white] autofill:text-black"
+              className="appearance-none bg-white text-black border border-gray-300 rounded-l-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm max-w-2xl"
               placeholder="Ask Zeta something..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -174,11 +180,8 @@ export default function DashboardPage() {
         </aside>
       </div>
 
-      {/* Space below for widgets */}
-      <div className="w-full max-w-7xl mt-10">
-        <div className="text-center text-gray-400 text-sm italic">
-          [ Space reserved for insights / charts / widgets ]
-        </div>
+      <div className="w-full max-w-7xl mt-10 text-center text-gray-400 text-sm italic">
+        [ Space reserved for insights / charts / widgets ]
       </div>
     </div>
   );
