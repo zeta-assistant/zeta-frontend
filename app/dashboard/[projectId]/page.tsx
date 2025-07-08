@@ -10,7 +10,8 @@ export default function DashboardPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState<string>('Loading...');
+  const [projectName, setProjectName] = useState('Loading...');
+  const [assistantId, setAssistantId] = useState<string | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -20,27 +21,34 @@ export default function DashboardPage() {
   useEffect(() => {
     const checkSessionAndProject = async () => {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-      if (sessionError || !session || !session.user?.email) {
-        router.push('/login');
-        return;
-      }
+      if (sessionError || !session?.user?.email) return router.push('/login');
 
       setUserEmail(session.user.email);
 
       const { data: project, error: projectError } = await supabase
         .from('user_projects')
-        .select('name, user_id')
+        .select('name, user_id, assistant_id')
         .eq('id', projectId)
         .single();
 
       if (projectError || !project || project.user_id !== session.user.id) {
-        console.error('Access denied or project not found');
         router.push('/projects');
         return;
       }
 
       setProjectName(project.name);
+      setAssistantId(project.assistant_id);
+
+      const { data: history } = await supabase
+        .from('zeta_conversation_log')
+        .select('role, message, timestamp')
+        .eq('project_id', projectId)
+        .order('timestamp', { ascending: true });
+
+      if (history) {
+        setMessages(history.map((m) => ({ role: m.role, content: m.message })));
+      }
+
       setSessionLoading(false);
     };
 
@@ -48,7 +56,7 @@ export default function DashboardPage() {
   }, [projectId]);
 
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || !assistantId || !projectId) return;
 
     const userMessage = { role: 'user', content: input };
     setMessages((prev) => [...prev, userMessage]);
@@ -57,39 +65,39 @@ export default function DashboardPage() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      const user_id = session?.user?.id;
 
-      const res = await fetch(
-        'https://inprydzukperccgtxgvx.functions.supabase.co/functions/v1/chatwithzeta',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({
-            message: input,
-            projectId,
-            projectName,
-            userEmail,
-          }),
-        }
-      );
+      await supabase.from('zeta_conversation_log').insert({
+        project_id: projectId,
+        role: 'user',
+        message: input,
+        user_id,
+      });
+
+      const res = await fetch('https://inprydzukperccgtxgvx.functions.supabase.co/functions/v1/chatwithzeta', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.access_token ?? ''}`, // 🛡️ Type-safe
+        },
+        body: JSON.stringify({ message: input, projectId, projectName, userEmail, assistantId }),
+      });
 
       const data = await res.json();
-      const reply = {
+      const replyText = data.reply || '⚠️ No reply received.';
+      const assistantMessage = { role: 'assistant', content: replyText };
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      await supabase.from('zeta_conversation_log').insert({
+        project_id: projectId,
         role: 'assistant',
-        content: data.reply || '⚠️ No reply received.',
-      };
-      setMessages((prev) => [...prev, reply]);
+        message: replyText,
+        user_id,
+      });
+
     } catch (err) {
-      console.error('Zeta function error:', err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '⚠️ Failed to reach Zeta.',
-        },
-      ]);
+      console.error('❌ sendMessage() failed:', err);
+      setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ Failed to reach Zeta.' }]);
     } finally {
       setLoading(false);
     }
@@ -100,54 +108,56 @@ export default function DashboardPage() {
   };
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (!error) router.replace('/');
+    await supabase.auth.signOut();
+    router.replace('/');
   };
-
-  useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   if (sessionLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Loading project dashboard...</p>
+      <div className="min-h-screen flex items-center justify-center bg-blue-950 text-white">
+        <p className="text-sm">Loading project dashboard...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#fdf6ee] px-6 py-8 flex flex-col items-center">
+    <div className="min-h-screen bg-blue-950 text-white px-6 py-8 flex flex-col items-center">
       <div className="flex w-full max-w-7xl gap-6">
-        {/* Chat Panel */}
-        <div className="flex flex-col flex-[3] bg-white shadow border rounded-2xl h-[70vh]">
-          <div className="flex items-center justify-between px-6 py-4 border-b">
-            <h1 className="text-2xl font-semibold">🧠 {projectName}</h1>
-            <button
-              onClick={handleLogout}
-              className="text-sm px-4 py-2 bg-black text-white rounded-md hover:bg-gray-800"
-            >
-              Log Out
-            </button>
+        {/* Chat Section */}
+        <div className="flex flex-col flex-[3] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg h-[70vh]">
+          <div className="flex justify-between items-center px-6 py-4 border-b border-blue-700">
+            <h1 className="text-2xl font-bold flex items-center gap-3">
+              🧠 {projectName}
+              <div className="flex gap-2 ml-4">
+                <button
+                  onClick={() => router.push('/projects')}
+                  className="text-xs bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-md"
+                >
+                  Projects
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md"
+                >
+                  Log Out
+                </button>
+              </div>
+            </h1>
           </div>
+
           {userEmail && (
-  <div className="px-6 pt-3 text-sm text-gray-600">
-    <p>
-      Signed in as <span className="font-medium">{userEmail}</span>
-    </p>
-    <p className="mt-1">
-      Project ID: <span className="font-mono text-gray-800">{projectId}</span>
-    </p>
-  </div>
-)}
+            <div className="px-6 pt-2 text-sm text-gray-300">
+              <p>Signed in as <span className="font-medium">{userEmail}</span></p>
+              <p>Project ID: <span className="font-mono">{projectId}</span></p>
+            </div>
+          )}
+
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
             {messages.map((msg, i) => (
               <div
                 key={i}
                 className={`max-w-[85%] px-4 py-2 rounded-xl text-sm whitespace-pre-line ${
-                  msg.role === 'user'
-                    ? 'bg-blue-100 text-black ml-auto'
-                    : 'bg-gray-100 text-gray-800'
+                  msg.role === 'user' ? 'bg-purple-300 text-black ml-auto' : 'bg-blue-800 text-white'
                 }`}
               >
                 {msg.content}
@@ -155,10 +165,11 @@ export default function DashboardPage() {
             ))}
             <div ref={scrollRef} />
           </div>
-          <div className="border-t px-3 py-3 bg-white flex">
+
+          <div className="border-t border-blue-700 bg-blue-900 px-4 py-3 flex">
             <input
               type="text"
-              className="appearance-none bg-white text-black border border-gray-300 rounded-l-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm max-w-2xl"
+              className="bg-white text-black border border-gray-300 rounded-l-md px-4 py-2 focus:outline-none text-sm w-full max-w-xl"
               placeholder="Ask Zeta something..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -167,7 +178,7 @@ export default function DashboardPage() {
             <button
               onClick={sendMessage}
               disabled={loading}
-              className="bg-purple-500 text-white px-5 rounded-r-md text-sm hover:bg-purple-600 transition"
+              className="bg-purple-500 hover:bg-purple-600 text-white px-4 rounded-r-md text-sm"
             >
               {loading ? '...' : 'Send'}
             </button>
@@ -175,12 +186,12 @@ export default function DashboardPage() {
         </div>
 
         {/* Memory Panel */}
-        <aside className="flex-[1] bg-yellow-400 rounded-2xl p-6 shadow h-[70vh] overflow-y-auto">
+        <aside className="flex-[1] bg-white text-black rounded-2xl p-6 shadow h-[70vh] overflow-y-auto">
           <CurrentMemoryPanel />
         </aside>
       </div>
 
-      <div className="w-full max-w-7xl mt-10 text-center text-gray-400 text-sm italic">
+      <div className="w-full max-w-7xl mt-10 text-center text-gray-300 text-sm italic">
         [ Space reserved for insights / charts / widgets ]
       </div>
     </div>

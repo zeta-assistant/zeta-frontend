@@ -8,62 +8,85 @@ import { useUser } from '@supabase/auth-helpers-react';
 
 export default function ZetaSetup() {
   const router = useRouter();
-  const { user } = useUser(); // NEW way to access logged-in user
+  const user = useUser();
+
   const [projectName, setProjectName] = useState('');
   const [assistantType, setAssistantType] = useState<string | null>(null);
   const [systemInstructions, setSystemInstructions] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!projectName || !assistantType || !user) return;
+  console.log("🧪 handleSubmit triggered with:", {
+    projectName,
+    assistantType,
+    user,
+  });
 
-    setLoading(true);
+  if (!projectName || !assistantType || !user) {
+    alert('Missing required fields');
+    return;
+  }
 
-    try {
-      // Step 1: Create assistant via API
-      const res = await fetch('/api/createAssistant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName, assistantType, systemInstructions }),
-      });
+  setLoading(true);
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create assistant.');
-      const assistantId = data.assistantId;
+  try {
+    // Step 1: Insert a new project row first (without assistant ID)
+    const { data: projectData, error: insertError } = await supabase
+      .from('user_projects')
+      .insert([
+        {
+          user_id: user.id,
+          name: projectName,
+          description: '',
+          type: assistantType,
+          onboarding_complete: false, // Will set to true after assistant created
+          system_instructions: systemInstructions,
+        },
+      ])
+      .select()
+      .single();
 
-      // Step 2: Insert into Supabase user_projects
-      const { data: projectData, error } = await supabase
-        .from('user_projects')
-        .insert([
-          {
-            user_id: user.id,
-            name: projectName,
-            assistant_id: assistantId,
-            description: '',
-            type: assistantType,
-            onboarding_complete: true,
-            system_instructions: systemInstructions,
-          },
-        ])
-        .select()
-        .single();
+    if (insertError) throw insertError;
 
-      if (error) throw error;
+    const projectId = projectData.id;
+    console.log('🆕 Supabase project created with ID:', projectId);
 
-      console.log('✅ Project saved to Supabase:', projectData);
-      router.push(`/dashboard/${projectData.id}`);
-    } catch (err) {
-      console.error('❌ Zeta Setup Error:', err);
-      alert('Something went wrong. Check the console.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Step 2: Call OpenAI Assistant creation API with the project ID
+    const res = await fetch('/api/createAssistant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectName,
+        assistantType,
+        systemInstructions,
+        projectId, // ✅ pass this to the backend
+      }),
+    });
 
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create assistant');
+
+    const assistantId = data.assistantId;
+    console.log('✅ Assistant created with ID:', assistantId);
+
+    // Step 3: Update onboarding_complete = true
+    await supabase
+      .from('user_projects')
+      .update({ onboarding_complete: true })
+      .eq('id', projectId);
+
+    // Step 4: Redirect to dashboard
+    router.push(`/dashboard/${projectId}`);
+  } catch (err) {
+    console.error('❌ Zeta Setup Error:', err);
+    alert('Something went wrong. See console for details.');
+  } finally {
+    setLoading(false);
+  }
+};
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-xs space-y-8 text-center">
-        {/* Zeta Logo */}
         <Image
           src="/zeta-logo.png"
           alt="Zeta Logo"
@@ -72,27 +95,23 @@ export default function ZetaSetup() {
           className="mx-auto mt-2"
         />
 
-        {/* Header */}
         <div>
           <h1 className="text-4xl font-bold mb-2">Zeta Build Setup</h1>
           <p className="text-gray-700 text-base">
-            Zeta Build AI is your intelligent executive assistant, built to automate tasks, analyze data, and support your
-            business or project like a real teammate.
+            Zeta Build AI is your intelligent executive assistant, built to automate tasks, analyze data, and support your business or project like a real teammate.
           </p>
         </div>
 
         {/* Project Name */}
         <div className="bg-white rounded-2xl shadow px-4 py-4 space-y-2">
-          <p className="text-sm font-semibold text-gray-800">What's the name of your project?</p>
-          <div className="flex justify-center">
-            <input
-              type="text"
-              placeholder="e.g. Yogi’s Picks"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              className="w-72 px-3 py-2 rounded-lg bg-gray-100 text-gray-800 focus:outline-none focus:ring-2 focus:ring-black"
-            />
-          </div>
+          <p className="text-sm font-semibold text-gray-800">What’s the name of your project?</p>
+          <input
+            type="text"
+            placeholder="e.g. Yogi’s Picks"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            className="w-72 px-3 py-2 rounded-lg bg-gray-100 text-gray-800 focus:outline-none focus:ring-2 focus:ring-black"
+          />
         </div>
 
         {/* Assistant Type */}
@@ -115,19 +134,19 @@ export default function ZetaSetup() {
           </div>
         </div>
 
-        {/* System Instructions */}
+        {/* Instructions */}
         <div className="bg-white rounded-2xl shadow px-4 py-4 space-y-2">
-          <p className="text-sm font-semibold text-gray-800">Anything you want Zeta to know before we begin?</p>
+          <p className="text-sm font-semibold text-gray-800">Anything Zeta should know before we begin?</p>
           <textarea
             rows={4}
-            placeholder="Write system instructions here..."
+            placeholder="Optional system instructions..."
             value={systemInstructions}
             onChange={(e) => setSystemInstructions(e.target.value)}
             className="w-80 px-3 py-2 rounded-lg bg-gray-100 text-gray-800 focus:outline-none focus:ring-2 focus:ring-black resize-none"
           />
         </div>
 
-        {/* Submit Button */}
+        {/* Finish Setup Button */}
         <button
           onClick={handleSubmit}
           disabled={!projectName || !assistantType || loading}
