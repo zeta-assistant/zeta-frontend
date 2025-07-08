@@ -14,6 +14,7 @@ export default function ZetaSetup() {
   const [assistantType, setAssistantType] = useState<string | null>(null);
   const [systemInstructions, setSystemInstructions] = useState('');
   const [loading, setLoading] = useState(false);
+  const [files, setFiles] = useState<File[]>([]); // State for holding uploaded files
 
   const handleSubmit = async () => {
   console.log("🧪 handleSubmit triggered with:", {
@@ -30,19 +31,17 @@ export default function ZetaSetup() {
   setLoading(true);
 
   try {
-    // Step 1: Insert a new project row first (without assistant ID)
+    // Step 1: Create project
     const { data: projectData, error: insertError } = await supabase
       .from('user_projects')
-      .insert([
-        {
-          user_id: user.id,
-          name: projectName,
-          description: '',
-          type: assistantType,
-          onboarding_complete: false, // Will set to true after assistant created
-          system_instructions: systemInstructions,
-        },
-      ])
+      .insert([{
+        user_id: user.id,
+        name: projectName,
+        description: '',
+        type: assistantType,
+        onboarding_complete: false,
+        system_instructions: systemInstructions,
+      }])
       .select()
       .single();
 
@@ -51,7 +50,29 @@ export default function ZetaSetup() {
     const projectId = projectData.id;
     console.log('🆕 Supabase project created with ID:', projectId);
 
-    // Step 2: Call OpenAI Assistant creation API with the project ID
+    // Step 2: Upload files (if any)
+    const fileUrls: string[] = [];
+    for (let file of files) {
+      const { data, error } = await supabase.storage
+        .from('project-docs')
+        .upload(`documents/${projectId}/${file.name}`, file);
+
+      if (error) throw error;
+
+      const { error: insertDocError } = await supabase
+        .from('documents')
+        .insert([{
+          project_id: projectId,
+          file_name: file.name,
+          file_url: data?.path,
+        }]);
+
+      if (insertDocError) throw insertDocError;
+
+      fileUrls.push(data?.path);
+    }
+
+    // Step 3: Create OpenAI Assistant
     const res = await fetch('/api/createAssistant', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -59,31 +80,56 @@ export default function ZetaSetup() {
         projectName,
         assistantType,
         systemInstructions,
-        projectId, // ✅ pass this to the backend
+        projectId,
+        fileUrls,
       }),
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to create assistant');
+    const assistantRes = await res.json();
+    if (!res.ok) throw new Error(assistantRes.error || 'Failed to create assistant');
 
-    const assistantId = data.assistantId;
-    console.log('✅ Assistant created with ID:', assistantId);
+    console.log('✅ Assistant created with ID:', assistantRes.assistantId);
 
-    // Step 3: Update onboarding_complete = true
+    // Step 4: Mark onboarding complete
     await supabase
       .from('user_projects')
       .update({ onboarding_complete: true })
       .eq('id', projectId);
 
-    // Step 4: Redirect to dashboard
+    // Step 5: Redirect
     router.push(`/dashboard/${projectId}`);
-  } catch (err) {
+  } catch (err: any) {
     console.error('❌ Zeta Setup Error:', err);
+
+    if (err instanceof Response) {
+      const text = await err.text();
+      console.error('❌ Response body:', text);
+    } else if (err instanceof Error) {
+      console.error('❌ Error message:', err.message);
+    } else {
+      console.error('❌ Unknown error object:', JSON.stringify(err));
+    }
+
     alert('Something went wrong. See console for details.');
   } finally {
     setLoading(false);
   }
 };
+
+  // Handle file selection and append new files
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  if (e.target.files) {
+    // Convert the FileList into an array
+    const selectedFiles = Array.from(e.target.files);
+
+    // Check if the files are already in the state (prevent duplicates if needed)
+    setFiles((prevFiles) => {
+      // Append the new files to the existing ones
+      return [...prevFiles, ...selectedFiles];
+    });
+  }
+};
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-xs space-y-8 text-center">
@@ -143,6 +189,17 @@ export default function ZetaSetup() {
             value={systemInstructions}
             onChange={(e) => setSystemInstructions(e.target.value)}
             className="w-80 px-3 py-2 rounded-lg bg-gray-100 text-gray-800 focus:outline-none focus:ring-2 focus:ring-black resize-none"
+          />
+        </div>
+
+        {/* File Upload */}
+        <div className="bg-white rounded-2xl shadow px-4 py-4 space-y-2">
+          <p className="text-sm font-semibold text-gray-800">Upload any relevant documents for Zeta</p>
+          <input
+            type="file"
+            multiple
+            onChange={handleFileChange}
+            className="w-72 text-sm text-gray-700 border rounded-lg py-2 px-3 focus:outline-none focus:ring-2 focus:ring-black"
           />
         </div>
 
