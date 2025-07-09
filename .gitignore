@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Supabase local files (safe to ignore)
+.supabase/.temp/
+.supabase/.branches/
+.supabase/cli-latest/
+.supabase/gotrue-version
+.supabase/pooler-url
+.supabase/project-ref
+.supabase/rest-version
+.supabase/storage-version

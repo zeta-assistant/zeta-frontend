@@ -1,36 +1,108 @@
 import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
-import { createClient } from '@supabase/supabase-js';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import axios from 'axios';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY });
-const supabase = createClient(process.env.SUPABASE_URL!, process.env.SERVICE_ROLE!);
+export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
-  const { projectName, assistantType, systemInstructions, projectId } = await req.json();
-
   try {
-    // Create new assistant
-    const assistant = await openai.beta.assistants.create({
-      name: projectName,
-      instructions: systemInstructions || `You are a helpful ${assistantType}.`,
-      tools: [{ type: 'code_interpreter' }],
-      model: 'gpt-4o',
-    });
+    const body = await req.json();
+    const {
+      projectName,
+      assistantType,
+      systemInstructions,
+      projectId,
+      fileUrls,
+    } = body;
 
-    // Store the assistant ID in Supabase
-    const { error: updateError } = await supabase
-      .from('user_projects')
-      .update({ assistant_id: assistant.id }) // ✅ match naming across app
-      .eq('id', projectId);
-
-    if (updateError) {
-      console.error('Failed to update project with assistant ID:', updateError);
-      return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
+    if (!projectName || !assistantType || !projectId) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    return NextResponse.json({ assistantId: assistant.id }, { status: 200 });
-  } catch (error) {
-    console.error('Assistant creation error:', error);
-    return NextResponse.json({ error: 'Failed to create assistant' }, { status: 500 });
+    const OPENAI_API_KEY = process.env.OPENAI_KEY;
+    if (!OPENAI_API_KEY) {
+      return NextResponse.json({ error: 'Missing OpenAI API Key' }, { status: 500 });
+    }
+
+    const fileIds: string[] = [];
+
+    // Step 1: Upload files to OpenAI
+    for (const filePath of fileUrls) {
+      const { data: publicUrlData } = supabaseAdmin.storage
+        .from('project-docs')
+        .getPublicUrl(filePath);
+
+      const publicUrl = publicUrlData.publicUrl;
+      const fileResponse = await fetch(publicUrl);
+      const arrayBuffer = await fileResponse.arrayBuffer();
+      const blob = new Blob([arrayBuffer]);
+
+      const formData = new FormData();
+      formData.append('file', blob, filePath.split('/').pop());
+      formData.append('purpose', 'assistants');
+
+      const uploadRes = await axios.post(
+        'https://api.openai.com/v1/files',
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            'OpenAI-Beta': 'assistants=v2',
+            // Axios-specific workaround for multipart headers
+            ...(formData as any).getHeaders?.(),
+          },
+        }
+      );
+
+      fileIds.push(uploadRes.data.id);
+    }
+
+    // ✅ Step 2: Create Assistant using AXIOS
+    const createRes = await axios.post(
+      'https://api.openai.com/v1/assistants',
+      {
+        name: projectName,
+        instructions: systemInstructions || 'You are a helpful assistant.',
+        tools: [{ type: 'file_search' }],
+        model: 'gpt-4o',
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+          'OpenAI-Beta': 'assistants=v2',
+        },
+      }
+    );
+
+    const assistantId = createRes.data.id;
+
+    // ✅ Step 3: Attach Files using AXIOS
+    for (const fileId of fileIds) {
+      await axios.post(
+  `https://api.openai.com/v1/assistants/${assistantId}/files`,
+  { file_id: fileId },
+  {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+      'OpenAI-Beta': 'assistants=v2',
+    },
+  }
+);
+    }
+
+    // Step 4: Update Supabase
+    const { error: updateError } = await supabaseAdmin
+      .from('user_projects')
+      .update({ assistant_id: assistantId })
+      .eq('id', projectId);
+
+    if (updateError) throw updateError;
+
+    return NextResponse.json({ assistantId }, { status: 200 });
+  } catch (err: any) {
+    console.error('❌ Assistant creation error:', err);
+    return NextResponse.json({ error: err.message || 'Server error' }, { status: 500 });
   }
 }

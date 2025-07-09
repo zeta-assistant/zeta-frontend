@@ -64,8 +64,14 @@ export default function DashboardPage() {
     setLoading(true);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user_id = session?.user?.id;
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error || !session?.access_token || !session?.user?.id) {
+        console.error("❌ No valid session or access token", error);
+        setMessages((prev) => [...prev, { role: 'assistant', content: '❌ Not logged in properly.' }]);
+        return;
+      }
+
+      const user_id = session.user.id;
 
       await supabase.from('zeta_conversation_log').insert({
         project_id: projectId,
@@ -78,7 +84,7 @@ export default function DashboardPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${session?.access_token ?? ''}`, // 🛡️ Type-safe
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ message: input, projectId, projectName, userEmail, assistantId }),
       });
