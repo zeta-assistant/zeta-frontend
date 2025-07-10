@@ -56,7 +56,7 @@ export default function DashboardPage() {
   }, [projectId]);
 
   const sendMessage = async () => {
-    if (!input.trim() || !assistantId || !projectId) return;
+    if (!input.trim() || !projectId) return;
 
     const userMessage = { role: 'user', content: input };
     setMessages((prev) => [...prev, userMessage]);
@@ -80,13 +80,29 @@ export default function DashboardPage() {
         user_id,
       });
 
+      // 🔁 Refresh the assistantId before sending
+      const { data: refreshedProject } = await supabase
+        .from('user_projects')
+        .select('assistant_id')
+        .eq('id', projectId)
+        .single();
+
+      const finalAssistantId = refreshedProject?.assistant_id || assistantId;
+      setAssistantId(finalAssistantId); // update state too
+
       const res = await fetch('https://inprydzukperccgtxgvx.functions.supabase.co/functions/v1/chatwithzeta', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ message: input, projectId, projectName, userEmail, assistantId }),
+        body: JSON.stringify({
+          message: input,
+          projectId,
+          projectName,
+          userEmail,
+          assistantId: finalAssistantId,
+        }),
       });
 
       const data = await res.json();

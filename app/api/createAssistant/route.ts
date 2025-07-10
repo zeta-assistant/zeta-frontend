@@ -12,7 +12,6 @@ export async function POST(req: Request) {
       assistantType,
       systemInstructions,
       projectId,
-      fileUrls,
     } = body;
 
     if (!projectName || !assistantType || !projectId) {
@@ -24,40 +23,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing OpenAI API Key' }, { status: 500 });
     }
 
-    const fileIds: string[] = [];
-
-    // Step 1: Upload files to OpenAI
-    for (const filePath of fileUrls) {
-      const { data: publicUrlData } = supabaseAdmin.storage
-        .from('project-docs')
-        .getPublicUrl(filePath);
-
-      const publicUrl = publicUrlData.publicUrl;
-      const fileResponse = await fetch(publicUrl);
-      const arrayBuffer = await fileResponse.arrayBuffer();
-      const blob = new Blob([arrayBuffer]);
-
-      const formData = new FormData();
-      formData.append('file', blob, filePath.split('/').pop());
-      formData.append('purpose', 'assistants');
-
-      const uploadRes = await axios.post(
-        'https://api.openai.com/v1/files',
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'assistants=v2',
-            // Axios-specific workaround for multipart headers
-            ...(formData as any).getHeaders?.(),
-          },
-        }
-      );
-
-      fileIds.push(uploadRes.data.id);
-    }
-
-    // ✅ Step 2: Create Assistant using AXIOS
+    // ✅ Step 1: Create Assistant using OpenAI API
+    console.log("📋 Final systemInstructions being sent:", systemInstructions);
     const createRes = await axios.post(
       'https://api.openai.com/v1/assistants',
       {
@@ -76,26 +43,28 @@ export async function POST(req: Request) {
     );
 
     const assistantId = createRes.data.id;
+    console.log('🧠 Assistant created:', assistantId);
 
-    // ✅ Step 3: Attach Files using AXIOS
-    for (const fileId of fileIds) {
-      await axios.post(
-  `https://api.openai.com/v1/assistants/${assistantId}/files`,
-  { file_id: fileId },
-  {
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-      'OpenAI-Beta': 'assistants=v2',
-    },
-  }
-);
-    }
+    // 🔍 Step 1.5: Confirm assistant instructions actually embedded
+    const verifyRes = await axios.get(
+      `https://api.openai.com/v1/assistants/${assistantId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',
+        },
+      }
+    );
 
-    // Step 4: Update Supabase
+    console.log('📝 Instructions stored in OpenAI:', verifyRes.data.instructions);
+
+    // ✅ Step 2: Save Assistant ID and system instructions to Supabase
     const { error: updateError } = await supabaseAdmin
       .from('user_projects')
-      .update({ assistant_id: assistantId })
+      .update({
+        assistant_id: assistantId,
+        system_instructions: systemInstructions || 'You are a helpful assistant.',
+      })
       .eq('id', projectId);
 
     if (updateError) throw updateError;

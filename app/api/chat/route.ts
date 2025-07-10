@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
@@ -7,7 +8,20 @@ const openai = new OpenAI({
 
 export async function POST(req: Request) {
   try {
-    const { message, assistantId } = await req.json();
+    const { message, projectId } = await req.json();
+
+    // 🧠 Get the assistant ID from Supabase
+    const { data: projectData, error } = await supabaseAdmin
+      .from('user_projects')
+      .select('assistant_id')
+      .eq('id', projectId)
+      .single();
+
+    if (error || !projectData?.assistant_id) {
+      throw new Error('Missing or invalid assistant ID');
+    }
+
+    const assistantId = projectData.assistant_id;
 
     // 1. Create a new thread
     const thread = await openai.beta.threads.create();
@@ -18,7 +32,7 @@ export async function POST(req: Request) {
       content: message,
     });
 
-    // 3. Run the assistant on that thread
+    // 3. Run the assistant
     const run = await openai.beta.threads.runs.create(thread.id, {
       assistant_id: assistantId,
     });
@@ -32,7 +46,7 @@ export async function POST(req: Request) {
       await new Promise((res) => setTimeout(res, 1000));
     } while (runStatus.status !== 'completed');
 
-    // 5. Retrieve the messages from the thread
+    // 5. Retrieve the messages
     const messages = await openai.beta.threads.messages.list(thread.id);
     const assistantReply = messages.data.find((msg) => msg.role === 'assistant');
 
