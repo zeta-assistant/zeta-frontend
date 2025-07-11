@@ -20,8 +20,8 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} bg-blue-950 text-white`}>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} font-sans`}>
+      <body className="bg-background text-foreground">
         <SupabaseProvider>
           <LayoutWrapper>{children}</LayoutWrapper>
         </SupabaseProvider>
