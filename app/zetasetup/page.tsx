@@ -18,6 +18,7 @@ export default function ZetaSetup() {
   const [projectName, setProjectName] = useState('');
   const [assistantType, setAssistantType] = useState<string | null>(null);
   const [systemInstructions, setSystemInstructions] = useState('');
+  const [privacyLevel, setPrivacyLevel] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
@@ -102,7 +103,7 @@ export default function ZetaSetup() {
               What's the name of your project?
             </label>
             <Input
-              placeholder="e.g. Yagi’s Picks"
+              placeholder="e.g. Crypto Portfolio"
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
               className="w-full"
@@ -136,7 +137,7 @@ export default function ZetaSetup() {
               How would you like Zeta to best assist you?
             </label>
             <Textarea
-              placeholder="Optional system instructions..."
+              placeholder="Teach me best how to help you! What long term goals and/or tasks do you want to set for me and for yourself!"
               value={systemInstructions}
               onChange={(e) => setSystemInstructions(e.target.value)}
               className="w-full"
@@ -145,9 +146,28 @@ export default function ZetaSetup() {
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-black">
-              Upload any relevant documents for Zeta
+              How much do you trust Zeta with private or sensitive information about this project?
             </label>
-            <Input type="file" multiple className="w-full" />
+            <div className="flex flex-col gap-2">
+              <Button
+                variant={privacyLevel === 'full' ? 'default' : 'outline'}
+                onClick={() => setPrivacyLevel(privacyLevel === 'full' ? null : 'full')}
+              >
+                I trust Zeta fully — nothing’s off-limits
+              </Button>
+              <Button
+                variant={privacyLevel === 'partial' ? 'default' : 'outline'}
+                onClick={() => setPrivacyLevel(privacyLevel === 'partial' ? null : 'partial')}
+              >
+                I’m okay sharing some sensitive data
+              </Button>
+              <Button
+                variant={privacyLevel === 'private' ? 'default' : 'outline'}
+                onClick={() => setPrivacyLevel(privacyLevel === 'private' ? null : 'private')}
+              >
+                I prefer not to share any sensitive data 
+              </Button>
+            </div>
           </div>
 
           <Button

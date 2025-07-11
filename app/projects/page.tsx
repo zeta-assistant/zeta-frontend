@@ -42,7 +42,7 @@ export default function ProjectsPage() {
     };
 
     fetchProjects();
-  }, []);
+  }, [router]);
 
   const goToProject = (project: Project) => {
     router.push(`/dashboard/${project.id}`);
@@ -55,6 +55,29 @@ export default function ProjectsPage() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.replace('/login');
+  };
+
+  const handleDelete = async (projectId: string) => {
+    const confirmed = confirm('Are you sure you want to delete this project? This action cannot be undone.');
+    if (!confirmed) return;
+
+    setLoading(true);
+
+    const { error } = await supabase
+      .from('user_projects')
+      .delete()
+      .eq('id', projectId);
+
+    if (error) {
+      alert('Failed to delete project. See console for details.');
+      console.error('Delete error:', error);
+      setLoading(false);
+      return;
+    }
+
+    // Remove deleted project from state to update UI
+    setProjects((prev) => prev.filter((proj) => proj.id !== projectId));
+    setLoading(false);
   };
 
   return (
@@ -86,7 +109,7 @@ export default function ProjectsPage() {
             {projects.map((project) => (
               <div
                 key={project.id}
-                className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition cursor-pointer"
+                className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition"
               >
                 <h2 className="text-xl font-bold mb-1">{project.name}</h2>
                 <p className="text-sm text-gray-600 mb-1">🧠 Type: {project.type}</p>
@@ -111,12 +134,20 @@ export default function ProjectsPage() {
                   <p className="text-xs text-yellow-600 font-semibold mb-2">⚠️ Onboarding Pending</p>
                 )}
 
-                <button
-                  onClick={() => goToProject(project)}
-                  className="text-sm px-4 py-2 bg-black text-white rounded-full hover:bg-gray-800 transition"
-                >
-                  Launch Project
-                </button>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => goToProject(project)}
+                    className="flex-1 text-sm px-4 py-2 bg-black text-white rounded-full hover:bg-gray-800 transition"
+                  >
+                    Launch Project
+                  </button>
+                  <button
+                    onClick={() => handleDelete(project.id)}
+                    className="flex-1 text-sm px-4 py-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition"
+                  >
+                    Delete Project
+                  </button>
+                </div>
               </div>
             ))}
           </div>

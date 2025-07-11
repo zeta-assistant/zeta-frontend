@@ -50,7 +50,7 @@ export default function PantheonSelection() {
           <div
             key={assistant.id}
             onClick={() => !assistant.comingSoon && setSelectedAssistant(assistant.id)}
-            className={`bg-white rounded-2xl p-6 shadow-md flex flex-col items-center text-center transition cursor-pointer border-2 ${
+            className={`bg-white rounded-2xl p-6 shadow-md flex flex-col items-center text-center h-[340px] transition cursor-pointer border-2 ${
               assistant.comingSoon
                 ? 'opacity-40 border-gray-300 cursor-not-allowed'
                 : selectedAssistant === assistant.id
@@ -58,20 +58,31 @@ export default function PantheonSelection() {
                 : 'border-gray-200 hover:border-black'
             }`}
           >
-            <Image
-              src={assistant.image}
-              alt={assistant.name}
-              width={110}
-              height={110}
-              className="object-contain"
-            />
-            <p className="mt-4 text-xl font-bold">{assistant.name}</p>
-            <p className="text-sm text-gray-600 mt-1">{assistant.description}</p>
-            {assistant.comingSoon && (
-              <p className="text-xs mt-2 text-gray-500 flex items-center gap-1">
-                <span>🔒</span> Coming Soon
-              </p>
-            )}
+            {/* ✅ Aligned logo container */}
+            <div className="h-[120px] flex items-end justify-center">
+              <Image
+                src={assistant.image}
+                alt={assistant.name}
+                width={110}
+                height={110}
+                className="object-contain"
+              />
+            </div>
+
+            <div className="flex flex-col justify-between items-center text-center flex-grow mt-4 w-full">
+              <div>
+                <p className="text-xl font-bold">{assistant.name}</p>
+                <p className="text-sm text-gray-600 mt-1">{assistant.description}</p>
+              </div>
+
+              <div className="h-5 mt-4">
+                {assistant.comingSoon && (
+                  <p className="text-xs text-gray-500 flex items-center gap-1 justify-center">
+                    <span>🔒</span> Coming Soon
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         ))}
       </div>

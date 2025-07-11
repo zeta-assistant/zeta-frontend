@@ -12,6 +12,7 @@ export async function POST(req: Request) {
       assistantType,
       systemInstructions,
       projectId,
+      privacyLevel,
     } = body;
 
     if (!projectName || !assistantType || !projectId) {
