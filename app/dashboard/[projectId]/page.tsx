@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import CurrentMemoryPanel from '@/components/CurrentMemoryPanel';
+import Clock from '@/components/Clock';
 
 export default function DashboardPage() {
   const [messages, setMessages] = useState<any[]>([]);
@@ -17,43 +18,72 @@ export default function DashboardPage() {
   const router = useRouter();
   const params = useParams();
   const projectId = params.projectId as string;
+  const hasStartedRef = useRef(false); // ✅ Prevent duplicate effect
 
   useEffect(() => {
-    const checkSessionAndProject = async () => {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session?.user?.email) return router.push('/login');
+    if (!projectId || hasStartedRef.current) return;
+    hasStartedRef.current = true;
 
-      setUserEmail(session.user.email);
-
-      const { data: project, error: projectError } = await supabase
-        .from('user_projects')
-        .select('name, user_id, assistant_id')
-        .eq('id', projectId)
-        .single();
-
-      if (projectError || !project || project.user_id !== session.user.id) {
-        router.push('/projects');
-        return;
-      }
-
-      setProjectName(project.name);
-      setAssistantId(project.assistant_id);
-
-      const { data: history } = await supabase
-        .from('zeta_conversation_log')
-        .select('role, message, timestamp')
-        .eq('project_id', projectId)
-        .order('timestamp', { ascending: true });
-
-      if (history) {
-        setMessages(history.map((m) => ({ role: m.role, content: m.message })));
-      }
-
-      setSessionLoading(false);
-    };
-
+    console.log("✅ useEffect fired for projectId:", projectId);
     checkSessionAndProject();
   }, [projectId]);
+
+  const checkSessionAndProject = async () => {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session?.user?.email) return router.push('/login');
+
+    setUserEmail(session.user.email);
+
+    const { data: project, error: projectError } = await supabase
+      .from('user_projects')
+      .select('name, user_id, assistant_id')
+      .eq('id', projectId)
+      .single();
+
+    if (projectError || !project || project.user_id !== session.user.id) {
+      router.push('/projects');
+      return;
+    }
+
+    setProjectName(project.name);
+    setAssistantId(project.assistant_id);
+
+    const { data: history } = await supabase
+      .from('zeta_conversation_log')
+      .select('role, message, timestamp')
+      .eq('project_id', projectId)
+      .order('timestamp', { ascending: true });
+
+    const formatted = history?.map((m) => ({ role: m.role, content: m.message })) || [];
+
+    setMessages(formatted);
+    setSessionLoading(false);
+
+    if (formatted.length === 0) {
+      console.log("🎯 Fetching /api/startConversation...");
+      await fetch('/api/startConversation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      });
+
+      setTimeout(async () => {
+        const { data: updated } = await supabase
+          .from('zeta_conversation_log')
+          .select('role, message, timestamp')
+          .eq('project_id', projectId)
+          .order('timestamp', { ascending: true });
+
+        if (updated && updated.length > 0) {
+          setMessages(updated.map((m) => ({ role: m.role, content: m.message })));
+        } else {
+          setMessages([
+            { role: 'assistant', content: '⚠️ Zeta failed to respond. Try typing something to get started.' },
+          ]);
+        }
+      }, 3000);
+    }
+  };
 
   const sendMessage = async () => {
     if (!input.trim() || !projectId) return;
@@ -66,7 +96,6 @@ export default function DashboardPage() {
     try {
       const { data: { session }, error } = await supabase.auth.getSession();
       if (error || !session?.access_token || !session?.user?.id) {
-        console.error("❌ No valid session or access token", error);
         setMessages((prev) => [...prev, { role: 'assistant', content: '❌ Not logged in properly.' }]);
         return;
       }
@@ -80,7 +109,6 @@ export default function DashboardPage() {
         user_id,
       });
 
-      // 🔁 Refresh the assistantId before sending
       const { data: refreshedProject } = await supabase
         .from('user_projects')
         .select('assistant_id')
@@ -88,7 +116,7 @@ export default function DashboardPage() {
         .single();
 
       const finalAssistantId = refreshedProject?.assistant_id || assistantId;
-      setAssistantId(finalAssistantId); // update state too
+      setAssistantId(finalAssistantId);
 
       const res = await fetch('https://inprydzukperccgtxgvx.functions.supabase.co/functions/v1/chatwithzeta', {
         method: 'POST',
@@ -145,9 +173,12 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-blue-950 text-white px-6 py-8 flex flex-col items-center">
       <div className="flex w-full max-w-7xl gap-6">
-        {/* Chat Section */}
         <div className="flex flex-col flex-[3] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg h-[70vh]">
           <div className="flex justify-between items-center px-6 py-4 border-b border-blue-700">
+            <div className="flex items-center justify-between px-4 py-2 border-b">
+              <h1 className="text-xl font-semibold">Zeta Dashboard</h1>
+              <Clock />
+            </div>
             <h1 className="text-2xl font-bold flex items-center gap-3">
               🧠 {projectName}
               <div className="flex gap-2 ml-4">
@@ -174,24 +205,35 @@ export default function DashboardPage() {
             </div>
           )}
 
+          {/* 💬 Message Area */}
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
             {messages.map((msg, i) => (
               <div
                 key={i}
-                className={`max-w-[85%] px-4 py-2 rounded-xl text-sm whitespace-pre-line ${
-                  msg.role === 'user' ? 'bg-purple-300 text-black ml-auto' : 'bg-blue-800 text-white'
+                className={`max-w-[85%] px-4 py-3 rounded-xl text-sm whitespace-pre-line ${
+                  msg.role === 'user'
+                    ? 'bg-purple-200 text-purple-900 ml-auto font-medium border border-purple-400 shadow'
+                    : 'bg-gradient-to-br from-indigo-700 to-purple-700 text-white font-mono shadow-md'
                 }`}
               >
                 {msg.content}
               </div>
             ))}
+
+            {loading && (
+              <div className="max-w-[85%] px-4 py-3 rounded-xl text-sm bg-blue-800 text-white animate-pulse font-mono">
+                Zeta is thinking...
+              </div>
+            )}
+
             <div ref={scrollRef} />
           </div>
 
+          {/* ✍️ Input Box */}
           <div className="border-t border-blue-700 bg-blue-900 px-4 py-3 flex">
             <input
               type="text"
-              className="bg-white text-black border border-gray-300 rounded-l-md px-4 py-2 focus:outline-none text-sm w-full max-w-xl"
+              className="bg-purple-50 text-purple-900 border-2 border-purple-300 rounded-l-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 font-semibold text-sm w-full max-w-xl shadow-sm"
               placeholder="Ask Zeta something..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -200,14 +242,13 @@ export default function DashboardPage() {
             <button
               onClick={sendMessage}
               disabled={loading}
-              className="bg-purple-500 hover:bg-purple-600 text-white px-4 rounded-r-md text-sm"
+              className="bg-purple-600 hover:bg-purple-700 text-white px-4 rounded-r-xl text-sm font-semibold shadow"
             >
               {loading ? '...' : 'Send'}
             </button>
           </div>
         </div>
 
-        {/* Memory Panel */}
         <aside className="flex-[1] bg-white text-black rounded-2xl p-6 shadow h-[70vh] overflow-y-auto">
           <CurrentMemoryPanel />
         </aside>

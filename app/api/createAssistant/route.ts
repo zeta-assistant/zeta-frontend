@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       'https://api.openai.com/v1/assistants',
       {
         name: projectName,
-        instructions: systemInstructions || 'You are a helpful assistant.',
+        instructions: systemInstructions || 'You are Zeta, a time-aware AI assistant designed to help users with strategic thinking, memory, and business tasks. Never refer to yourself as ChatGPT. Always refer to yourself as Zeta.',
         tools: [{ type: 'file_search' }],
         model: 'gpt-4o',
       },
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
       .from('user_projects')
       .update({
         assistant_id: assistantId,
-        system_instructions: systemInstructions || 'You are a helpful assistant.',
+        system_instructions: systemInstructions || 'You are Zeta, a time-aware AI assistant designed to help users with strategic thinking, memory, and business tasks. Never refer to yourself as ChatGPT. Always refer to yourself as Zeta.',
       })
       .eq('id', projectId);
 
