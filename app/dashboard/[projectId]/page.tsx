@@ -18,12 +18,11 @@ export default function DashboardPage() {
   const router = useRouter();
   const params = useParams();
   const projectId = params.projectId as string;
-  const hasStartedRef = useRef(false); // ✅ Prevent duplicate effect
+  const hasStartedRef = useRef(false);
 
   useEffect(() => {
     if (!projectId || hasStartedRef.current) return;
     hasStartedRef.current = true;
-
     console.log("✅ useEffect fired for projectId:", projectId);
     checkSessionAndProject();
   }, [projectId]);
@@ -172,10 +171,55 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-blue-950 text-white px-6 py-8 flex flex-col items-center">
-      <div className="flex w-full max-w-7xl gap-6">
-        <div className="flex flex-col flex-[3] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg h-[70vh]">
+      <div className="flex w-full max-w-[1440px] gap-4 justify-start px-2">
+        {/* 🤖 Zeta Avatar Sidebar */}
+        <div className="relative flex flex-col items-center justify-start w-[350px] h-[600px] bg-transparent shrink-0">
+  {/* Show thinking Zeta while loading, else show default avatar */}
+  {loading ? (
+    <img
+      src="/zeta-thinking.svg"
+      alt="Zeta Thinking"
+      className="w-full h-full object-contain animate-pulse transition-all duration-500"
+    />
+  ) : (
+    <img
+      src="/zeta-avatar.svg"
+      alt="Zeta Mascot"
+      className="w-full h-full object-contain drop-shadow-xl transition-all duration-500"
+    />
+  )}
+
+  {/* Thought bubble appears only when loading */}
+  {loading && (
+  <div className="absolute top-4 right-6 flex flex-col items-center gap-1">
+    {/* Thought bubble */}
+    <div className="w-10 h-10 rounded-full bg-white border border-gray-400 shadow flex items-center justify-center gap-1 px-1">
+      <div className="w-1.5 h-1.5 rounded-full bg-black animate-bounce [animation-delay:0s]" />
+      <div className="w-1.5 h-1.5 rounded-full bg-black animate-bounce [animation-delay:0.2s]" />
+      <div className="w-1.5 h-1.5 rounded-full bg-black animate-bounce [animation-delay:0.4s]" />
+    </div>
+    {/* Trail dots */}
+    <div className="w-3 h-3 rounded-full bg-white border border-gray-400 shadow" />
+    <div className="w-2 h-2 rounded-full bg-white border border-gray-400 shadow" />
+  </div>
+)}
+
+  {/* Upload button */}
+  <button
+    onClick={() => router.push(`/dashboard/${projectId}/documentupload`)}
+    className="mt-6 bg-purple-600 hover:bg-purple-700 text-white text-6xl font-bold rounded-full w-28 h-28 flex items-center justify-center shadow-2xl transition-all duration-300"
+    title="Upload Document"
+  >
+    +
+  </button>
+  <p className="mt-3 text-white text-base font-semibold">Document Upload</p>
+</div>
+
+        {/* 💬 Main Chat Area */}
+        <div className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg h-[70vh]">
           <div className="flex justify-between items-center px-6 py-4 border-b border-blue-700">
-            <div className="flex items-center justify-between px-4 py-2 border-b">
+            <div className="flex items-center gap-4">
+              <img src="/zeta-logo.png" alt="Zeta Logo" className="w-8 h-8 rounded-xl shadow-md" />
               <h1 className="text-xl font-semibold">Zeta Dashboard</h1>
               <Clock />
             </div>
@@ -205,7 +249,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* 💬 Message Area */}
+          {/* 💬 Messages */}
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
             {messages.map((msg, i) => (
               <div
@@ -225,7 +269,6 @@ export default function DashboardPage() {
                 Zeta is thinking...
               </div>
             )}
-
             <div ref={scrollRef} />
           </div>
 
@@ -249,7 +292,8 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <aside className="flex-[1] bg-white text-black rounded-2xl p-6 shadow h-[70vh] overflow-y-auto">
+        {/* 🧠 Memory Panel */}
+        <aside className="flex-[2] bg-white text-black rounded-2xl p-6 shadow h-[70vh] overflow-y-auto">
           <CurrentMemoryPanel />
         </aside>
       </div>
