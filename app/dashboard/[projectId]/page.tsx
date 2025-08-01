@@ -1,27 +1,65 @@
   'use client';
+import { useEffect, useState, useRef } from 'react';
+import { useRouter, useParams } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
+import CurrentMemoryPanel from '@/components/CurrentMemoryPanel';
+import Clock from '@/components/Clock';
+import DailyGoalsPanel from '@/components/DailyTasksPanel';
+import { AVAILABLE_MODELS } from '@/lib/models';
+import ReactMarkdown from 'react-markdown';
+import DashboardDailyTasks from '@/components/ui/DashboardDailyTasks';
 
-  import { useEffect, useState, useRef } from 'react';
-  import { useRouter, useParams } from 'next/navigation';
-  import { supabase } from '@/lib/supabaseClient';
-  import CurrentMemoryPanel from '@/components/CurrentMemoryPanel';
-  import Clock from '@/components/Clock';
-  import DailyGoalsPanel from '@/components/DailyGoalsPanel';
+import ChatboardTab from '../dashboard_tabs/ChatboardTab';
+import WorkspaceTabs from '../dashboard_tabs/WorkspaceTabs';
+import PlannerTabs from '../dashboard_tabs/PlannerTabs';
+import IntelligenceTabs from '../dashboard_tabs/IntelligenceTabs';
+import FunctionsTabs from '../dashboard_tabs/FunctionsTabs';
+import ChatTab from '../dynamic_tab_content/ChatTab';
 
+import ZetaLeftSidePanel from '../zeta-left-side-panel/left-side-panel';
+import ZetaRightSidePanel from '../zeta-right-side-panel/right-side-panel';
+import DashboardHeader from '../dashboard-header/dashboard-header';
 
-  export default function DashboardPage() {
-    const [messages, setMessages] = useState<any[]>([]);
-    const [input, setInput] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [userEmail, setUserEmail] = useState<string | null>(null);
-    const [projectName, setProjectName] = useState('Loading...');
-    const [assistantId, setAssistantId] = useState<string | null>(null);
-    const [sessionLoading, setSessionLoading] = useState(true);
-    const [recentDocs, setRecentDocs] = useState<{ file_name: string; file_url: string }[]>([]);
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const hasStartedRef = useRef(false);
-    const router = useRouter();
-    const params = useParams();
-    const projectId = params.projectId as string;
+import DiscussionsPanel from '../dashboard_tabs/dashboard_panels/Discussions/DiscussionsPanel';
+import LogsPanel from '../dashboard_tabs/dashboard_panels/Logs/LogsPanel';
+import FilesPanel from '../dashboard_tabs/dashboard_panels/Files/FilesPanel';
+import ApisPanel from '../dashboard_tabs/dashboard_panels/APIs/ApisPanel';
+import CalendarPanel from '../dashboard_tabs/dashboard_panels/Calendar/CalendarPanel';
+import GoalsPanel from '../dashboard_tabs/dashboard_panels/Goals/GoalsPanel';
+import NotificationsPanel from '../dashboard_tabs/dashboard_panels/Notifications/NotificationsPanel';
+import TasksPanel from '../dashboard_tabs/dashboard_panels/Tasks/TasksPanel';
+import ThoughtsPanel from '../dashboard_tabs/dashboard_panels/Thoughts/ThoughtsPanel';
+import FunctionsPanel from '../dashboard_tabs/dashboard_panels/Functions/FunctionsPanel';
+import NewFunctionPanel from '../dashboard_tabs/dashboard_panels/NewFunction/NewFunctionPanel';
+import WorkshopPanel from '../dashboard_tabs/dashboard_panels/Workshop/WorkshopPanel';
+
+export default function DashboardPage() {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [clearedMessages, setClearedMessages] = useState<any[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState('Loading...');
+  const [assistantId, setAssistantId] = useState<string | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [recentDocs, setRecentDocs] = useState<{ file_name: string; file_url: string }[]>([]);
+  const [chatView, setChatView] = useState<'all' | 'today' | 'pinned'>('all');
+  const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const [threadId, setThreadId] = useState<string | null>(null);
+const [activeMainTab, setActiveMainTab] = useState<
+  'chat' | 'discussions' | 'logs' | 'files' | 'calendar' | 'functions' | 'goals' | 'thoughts' | 'tasks' | 'notifications' | 'newfunction' | 'workshop' | 'apis'
+>('chat');
+  const [selectedModelId, setSelectedModelId] = useState('gpt-4o'); // default
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [chatHidden, setChatHidden] = useState(false);
+  const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('sm');
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const hasStartedRef = useRef(false);
+
+  const router = useRouter();
+  const params = useParams();
+  const projectId = params.projectId as string;
 
     useEffect(() => {
       if (!projectId || hasStartedRef.current) return;
@@ -37,7 +75,7 @@
 
       const { data: project, error: projectError } = await supabase
         .from('user_projects')
-        .select('name, user_id, assistant_id')
+        .select('name, user_id, assistant_id, thread_id')
         .eq('id', projectId)
         .single();
 
@@ -48,6 +86,7 @@
 
       setProjectName(project.name);
       setAssistantId(project.assistant_id);
+      setThreadId(project.thread_id ?? null);
 
       const { data: history } = await supabase
         .from('zeta_conversation_log')
@@ -55,7 +94,11 @@
         .eq('project_id', projectId)
         .order('timestamp', { ascending: true });
 
-      const formatted = history?.map((m) => ({ role: m.role, content: m.message })) || [];
+      const formatted = history?.map((m) => ({
+  role: m.role,
+  content: m.message,
+  timestamp: new Date(m.timestamp).getTime(), // ← use DB timestamp
+})) || [];
       setMessages(formatted);
       setSessionLoading(false);
 
@@ -96,70 +139,83 @@
     };
 
     const sendMessage = async () => {
-      if (!input.trim() || !projectId) return;
-      const userMessage = { role: 'user', content: input };
-      setMessages((prev) => [...prev, userMessage]);
-      setInput('');
-      setLoading(true);
+  if (!input.trim() || !projectId) return;
 
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error || !session?.access_token || !session?.user?.id) {
-          setMessages((prev) => [...prev, { role: 'assistant', content: '❌ Not logged in properly.' }]);
-          return;
-        }
+  const userMessage = {
+    role: 'user',
+    content: input,
+    timestamp: Date.now(),
+  };
 
-        const user_id = session.user.id;
+  setMessages((prev) => [...prev, userMessage]);
+  setInput('');
+  setLoading(true);
 
-        await supabase.from('zeta_conversation_log').insert({
-          project_id: projectId,
-          role: 'user',
-          message: input,
-          user_id,
-        });
+  try {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
 
-        const { data: refreshedProject } = await supabase
-          .from('user_projects')
-          .select('assistant_id')
-          .eq('id', projectId)
-          .single();
+    if (error || !session?.access_token || !session?.user?.id) {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '❌ Not logged in properly.' },
+      ]);
+      return;
+    }
 
-        const finalAssistantId = refreshedProject?.assistant_id || assistantId;
-        setAssistantId(finalAssistantId);
+    const user_id = session.user.id;
 
-        const res = await fetch('https://inprydzukperccgtxgvx.functions.supabase.co/functions/v1/chatwithzeta', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            message: input,
-            projectId,
-            projectName,
-            userEmail,
-            assistantId: finalAssistantId,
-          }),
-        });
+    // 📝 Save user's message to Supabase
+    await supabase.from('zeta_conversation_log').insert({
+      user_id,
+      project_id: projectId,
+      role: 'user',
+      message: input,
+      timestamp: new Date().toISOString(),
+    });
 
-        const data = await res.json();
-        const replyText = data.reply || '⚠️ No reply received.';
-        const assistantMessage = { role: 'assistant', content: replyText };
-        setMessages((prev) => [...prev, assistantMessage]);
+    // 🟢 Send message to your new backend /api/chat route
+    const res = await fetch('/api/chat', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    projectId,
+    message: input,
+    modelId: selectedModelId, 
+  }),
+});
 
-        await supabase.from('zeta_conversation_log').insert({
-          project_id: projectId,
-          role: 'assistant',
-          message: replyText,
-          user_id,
-        });
-      } catch (err) {
-        console.error('❌ sendMessage() failed:', err);
-        setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ Failed to reach Zeta.' }]);
-      } finally {
-        setLoading(false);
-      }
-    };
+    const data = await res.json();
+
+    const assistantReply = data.reply;
+
+    // 📝 Save assistant's reply to Supabase
+    await supabase.from('zeta_conversation_log').insert({
+      user_id,
+      project_id: projectId,
+      role: 'assistant',
+      message: assistantReply,
+      timestamp: new Date().toISOString(),
+    });
+
+    setMessages((prev) => [
+      ...prev,
+      { role: 'assistant', content: assistantReply },
+    ]);
+  } catch (err) {
+    console.error('❌ Message error:', err);
+    setMessages((prev) => [
+      ...prev,
+      { role: 'assistant', content: '⚠️ Failed to send message.' },
+    ]);
+  } finally {
+    setLoading(false);
+  }
+};
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') sendMessage();
@@ -169,14 +225,6 @@
       await supabase.auth.signOut();
       router.replace('/');
     };
-
-    if (sessionLoading) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-blue-950 text-white">
-          <p className="text-sm">Loading project dashboard...</p>
-        </div>
-      );
-    }
 
    return (
   <div className="min-h-screen bg-blue-950 text-white px-6 py-8 flex flex-col items-center">
@@ -188,160 +236,150 @@
           src={loading ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
           alt={loading ? 'Zeta Thinking' : 'Zeta Mascot'}
           className="w-[250px] absolute top-0 left-1/2 -translate-x-1/2"
+          
         />
+        <div className="absolute top-4 left-[300px] z-30 flex flex-col gap-2 items-center">
+  {/* ⚙️ Settings Button */}
+  <button
+    onClick={() => setShowSettingsModal(true)}
+    className="text-indigo-900 bg-white hover:bg-yellow-100 border border-yellow-300 rounded-full p-2 shadow-lg text-xl transition"
+  title="Settings"
+  >
+    ⚙️
+  </button>
 
-        {/* Add top padding to make space for mascot */}
-        <div className="flex flex-col items-center pt-[230px]">
-          {/* 🧠 Zeta’s Thoughts Panel */}
-          <div className="w-[250px] bg-indigo-100 text-indigo-900 px-4 py-3 rounded-xl shadow border border-indigo-300 text-sm mb-3">
-            <p className="font-bold mb-1">🧠 Zeta’s Thoughts</p>
-            <p>
-              Remember to review last week’s performance and prep early for next week’s tasks.
-              Don’t forget: small wins stack up.
-            </p>
-          </div>
+  {/* 💡 Generate Thought Button */}
+  <button
+  onClick={() => console.log('💡 Generate Thought clicked')}
+  className="text-yellow-600 bg-white hover:bg-yellow-100 border border-yellow-300 rounded-full w-11 h-11 text-xl flex items-center justify-center shadow-lg transition"
+  title="Generate Thought"
+>
+  💡
+</button>
+</div>
+{/* ✅ Zeta left-side-panel */}
+<ZetaLeftSidePanel projectId={projectId} recentDocs={recentDocs} />
 
-          {/* 📝 Daily Goals Panel */}
-          <div className="mb-4">
-            <DailyGoalsPanel
-              zetaTasks={['Process doc tags', 'Post outreach 4PM']}
-              userTasks={['Upload notes', 'Add memory summary']}
-            />
-          </div>
+</div>
+{/* 🧠 Chatboard + Logs + Files Tabs Panel */}
+<div className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg min-h-[850px] max-h-[calc(100vh-160px)] h-full">
 
-          {/* 📂 Recent Docs */}
-          <div className="flex gap-2 mb-4">
-            {recentDocs.map((doc, i) => {
-              const ext = doc.file_name.split('.').pop()?.toLowerCase();
-              const iconMap: Record<string, string> = {
-                pdf: '📕', doc: '📝', docx: '📝', xls: '📊', xlsx: '📊',
-                csv: '📈', txt: '📄', png: '🖼️', jpg: '🖼️', jpeg: '🖼️',
-                svg: '🎨', json: '🧩', zip: '🗜️', md: '📘', ppt: '📽️', pptx: '📽️',
-              };
-              const icon = iconMap[ext ?? ''] || '📁';
-              const fileUrl = `https://inprydzukperccgtxgvx.supabase.co/storage/v1/object/public/project-docs/${doc.file_url}`;
-              return (
-                <a
-                  key={i}
-                  href={fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={doc.file_name}
-                  className="w-9 h-9 bg-white text-purple-700 rounded shadow flex items-center justify-center text-xl font-bold hover:scale-110 transition-transform duration-200"
-                >
-                  {icon}
-                </a>
-              );
-            })}
-          </div>
+  {/* Modularized Header */}
+  <DashboardHeader
+    projectName={projectName}
+    userEmail={userEmail}
+    projectId={projectId}
+    threadId={threadId}
+    showAgentMenu={showAgentMenu}
+    setShowAgentMenu={setShowAgentMenu}
+    handleLogout={handleLogout}
+  />
 
-          {/* ➕ Upload Button */}
-          <div className="flex flex-col items-center">
-            <button
-              onClick={() => router.push(`/dashboard/${projectId}/documentupload`)}
-              className="bg-purple-600 hover:bg-purple-700 text-white text-5xl font-bold rounded-full w-24 h-24 flex items-center justify-center shadow-2xl transition-all duration-300"
-              title="Upload Document"
-            >
-              +
-            </button>
-            <p className="text-white text-sm font-semibold mt-1">Document Upload</p>
-          </div>
-        </div>
-      </div>
-          {/* 💬 Chat and Header */}
-<div className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg h-[70vh] min-h-[650px]">
-  {/* Header */}
-  <div className="flex justify-between items-center px-6 py-4 border-b border-blue-700">
-    <div className="flex items-center gap-4">
-      <img src="/zeta-logo.png" alt="Zeta Logo" className="w-8 h-8 rounded-xl shadow-md" />
-      <h1 className="text-xl font-semibold">Zeta Dashboard</h1>
-      <Clock />
-    </div>
-    <h1 className="text-2xl font-bold flex items-center gap-3">
-      🧠 {projectName}
-      <div className="flex gap-2 ml-4">
-        <button
-          onClick={() => router.push('/projects')}
-          className="text-xs bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-md"
-        >
-          Projects
-        </button>
-        <button
-          onClick={handleLogout}
-          className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md"
-        >
-          Log Out
-        </button>
-      </div>
-    </h1>
-  </div>
+  {/* 📁 Grouped Main Tabs */}
+<div className="w-full px-6 mt-4 border-b border-blue-700">
+  <div className="flex gap-4 flex-wrap">
 
-  {/* User Info */}
-  {userEmail && (
-    <div className="px-6 pt-2 text-sm text-gray-300">
-      <p>
-        Signed in as <span className="font-medium">{userEmail}</span>
-      </p>
-      <p>
-        Project ID: <span className="font-mono">{projectId}</span>
-      </p>
-    </div>
-  )}
+   
+{/* Chatboard (standalone) */}
+<ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
 
-  {/* Chat Scroll Area */}
-  <div className="flex-1 overflow-y-auto px-6 pt-2 pb-4 space-y-3 mt-2">
-    {messages.map((msg, i) => (
-      <div
-        key={i}
-        className={`max-w-[85%] px-4 py-3 rounded-xl text-sm whitespace-pre-line ${
-          msg.role === 'user'
-            ? 'bg-purple-200 text-purple-900 ml-auto font-medium border border-purple-400 shadow'
-            : 'bg-gradient-to-br from-indigo-700 to-purple-700 text-white font-mono shadow-md'
-        }`}
-      >
-        {msg.content}
-      </div>
-    ))}
 
-    {loading && (
-      <div className="max-w-[85%] px-4 py-3 rounded-xl text-sm bg-blue-800 text-white animate-pulse font-mono">
-        Zeta is thinking...
-      </div>
-    )}
-    <div ref={scrollRef} />
-  </div>
+    {/* Workspace Group */}
+<WorkspaceTabs
+  activeMainTab={activeMainTab}
+  setActiveMainTab={setActiveMainTab}
+/>
+    {/* Planner Group */}
+    <PlannerTabs
+  activeMainTab={activeMainTab}
+  setActiveMainTab={setActiveMainTab}
+/>
+  {/* Intelligence Group */}
+    <IntelligenceTabs
+  activeMainTab={activeMainTab}
+  setActiveMainTab={setActiveMainTab}
+/>
 
-  {/* Chat Input */}
-  <div className="border-t border-blue-700 bg-blue-900 px-4 pt-3 pb-5 rounded-b-2xl">
-    <div className="flex">
-      <input
-        type="text"
-        className="bg-purple-50 text-purple-900 border-2 border-purple-300 rounded-l-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 font-semibold text-sm w-full max-w-xl shadow-sm"
-        placeholder="Ask Zeta something..."
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKeyDown}
-      />
-      <button
-        onClick={sendMessage}
-        disabled={loading}
-        className="bg-purple-600 hover:bg-purple-700 text-white px-4 rounded-r-xl text-sm font-semibold shadow"
-      >
-        {loading ? '...' : 'Send'}
-      </button>
-    </div>
+    {/* Functions Group */}
+    <FunctionsTabs
+  activeMainTab={activeMainTab}
+  setActiveMainTab={setActiveMainTab}
+/>
+
   </div>
 </div>
 
-          {/* 📊 Memory Panel */}
-          <aside className="flex-[2] bg-white text-black rounded-2xl p-6 shadow h-[70vh] overflow-y-auto">
-            <CurrentMemoryPanel />
-          </aside>
-        </div>
+{/* 🔄 Dynamic Tab Content */}
+{activeMainTab === 'chat' && (
+  <ChatTab
+    activeMainTab={activeMainTab}
+    chatView={chatView}
+    setChatView={setChatView}
+    chatHidden={chatHidden}
+    setChatHidden={setChatHidden}
+    messages={messages}
+    loading={loading}
+    input={input}
+    setInput={setInput}
+    handleKeyDown={handleKeyDown}
+    sendMessage={sendMessage}
+    scrollRef={scrollRef}
+    fontSize={fontSize}
+    setFontSize={setFontSize} // ✅ only here
+  />
+)}
 
-        <div className="w-full max-w-7xl mt-10 text-center text-gray-300 text-sm italic">
-          [ Space reserved for insights / charts / widgets ]
-        </div>
+{activeMainTab === 'discussions' && <DiscussionsPanel fontSize={fontSize} />}
+{activeMainTab === 'logs' && <LogsPanel fontSize={fontSize} />}
+{activeMainTab === 'files' && <FilesPanel recentDocs={recentDocs} fontSize={fontSize} />}
+{activeMainTab === 'apis' && <ApisPanel fontSize={fontSize} />}
+{activeMainTab === 'calendar' && <CalendarPanel fontSize={fontSize} />}
+{activeMainTab === 'goals' && <GoalsPanel fontSize={fontSize} />}
+{activeMainTab === 'notifications' && <NotificationsPanel fontSize={fontSize} />}
+{activeMainTab === 'tasks' && <TasksPanel fontSize={fontSize} />}
+{activeMainTab === 'thoughts' && <ThoughtsPanel fontSize={fontSize} />}
+{activeMainTab === 'functions' && <FunctionsPanel projectId={projectId} fontSize={fontSize} />}
+{activeMainTab === 'newfunction' && <NewFunctionPanel projectId={projectId} fontSize={fontSize} />}
+{activeMainTab === 'workshop' && <WorkshopPanel fontSize={fontSize} />}
+
+
+</div>
+
+
+
+{/* 📊 Right-Side Panel (Memory, Function Builder, APIs) */}
+<ZetaRightSidePanel userEmail={userEmail} projectId={projectId} />
+</div> {/* closes main horizontal container */}
+
+
+{/* ⚙️ Settings Modal */}
+{showSettingsModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="bg-white rounded-xl shadow-xl p-6 w-[400px] max-w-[90%] text-indigo-900 relative">
+      <button
+        onClick={() => setShowSettingsModal(false)}
+        className="absolute top-2 right-2 text-gray-500 hover:text-red-500 text-lg"
+        title="Close"
+      >
+        ✖️
+      </button>
+      <h2 className="text-lg font-bold mb-3">⚙️ Zeta Settings</h2>
+      <div className="mt-4">
+        <label className="block text-sm font-semibold mb-1">
+          🧠 Choose Intelligence Engine
+        </label>
+        <select
+          value={selectedModelId}
+          onChange={(e) => setSelectedModelId(e.target.value)}
+          className="w-full border border-indigo-300 rounded-md p-2 text-sm bg-indigo-50 text-indigo-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        >
+          <option value="gpt-4o">OpenAI</option>
+          <option value="deepseek-chat">DeepSeek</option>
+          <option value="mistral-7b">SLM</option>
+        </select>
       </div>
-    );
-  }
+    </div>
+  </div>
+)}
+</div>
+)}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { AVAILABLE_MODELS } from '@/lib/models';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
@@ -8,46 +9,76 @@ const openai = new OpenAI({
 
 export async function POST(req: Request) {
   try {
-    const { message, projectId } = await req.json();
+    const { message, projectId, modelId = 'gpt-4o' } = await req.json();
+    const now = new Date();
 
-    // 🧠 Get the assistant ID from Supabase
-    const { data: projectData, error } = await supabaseAdmin
+    const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
+    if (!model) {
+      console.error(`❌ Invalid modelId received: ${modelId}`);
+      return NextResponse.json({ reply: '⚠️ Invalid model selected.' }, { status: 400 });
+    }
+
+    // 🧠 Fixed identity
+    const zetaName = 'Zeta';
+    const date = new Date().toISOString().split('T')[0];
+    const time = new Date().toISOString();
+
+    // ✅ Get assistant_id
+    const { data: projectData } = await supabaseAdmin
       .from('user_projects')
       .select('assistant_id')
       .eq('id', projectId)
       .single();
 
-    if (error || !projectData?.assistant_id) {
-      throw new Error('Missing or invalid assistant ID');
-    }
+    const assistantId = projectData?.assistant_id;
+    if (!assistantId) throw new Error('Missing assistant ID');
 
-    const assistantId = projectData.assistant_id;
+    // ✅ Create thread
+    const newThread = await openai.beta.threads.create();
+    const threadId = newThread.id;
 
-    // 1. Create a new thread
-    const thread = await openai.beta.threads.create();
+    await supabaseAdmin.from('threads').insert({
+      project_id: projectId,
+      thread_id: threadId,
+      created_at: now.toISOString(),
+      last_active: now.toISOString(),
+      expired: false,
+    });
 
-    // 2. Add user message to the thread
-    await openai.beta.threads.messages.create(thread.id, {
+    await supabaseAdmin
+      .from('user_projects')
+      .update({ thread_id: threadId })
+      .eq('id', projectId);
+
+    // ✅ Inject awareness context
+    const context = `Today is ${date}, and the time is ${time}. You are ${zetaName} — the AI assistant for this project. Do not refer to yourself as ChatGPT or Assistant.`;
+    await openai.beta.threads.messages.create(threadId, {
+      role: 'user',
+      content: `[CONTEXT]\n${context}`,
+    });
+
+    // ✅ Add user message
+    await openai.beta.threads.messages.create(threadId, {
       role: 'user',
       content: message,
     });
 
-    // 3. Run the assistant
-    const run = await openai.beta.threads.runs.create(thread.id, {
+    // ✅ Run assistant
+    const run = await openai.beta.threads.runs.create(threadId, {
       assistant_id: assistantId,
     });
 
-    // 4. Poll until the run completes
+    // ⏳ Poll until complete
     let runStatus;
     do {
       runStatus = await openai.beta.threads.runs.retrieve(run.id, {
-        thread_id: thread.id,
+        thread_id: threadId,
       });
       await new Promise((res) => setTimeout(res, 1000));
     } while (runStatus.status !== 'completed');
 
-    // 5. Retrieve the messages
-    const messages = await openai.beta.threads.messages.list(thread.id);
+    // ✅ Get reply
+    const messages = await openai.beta.threads.messages.list(threadId);
     const assistantReply = messages.data.find((msg) => msg.role === 'assistant');
 
     let textContent = '⚠️ No reply.';
@@ -59,7 +90,26 @@ export async function POST(req: Request) {
       textContent = assistantReply.content[0].text.value;
     }
 
-    return NextResponse.json({ reply: textContent });
+    // ✅ Get session (for user_id)
+    const {
+      data: { session },
+    } = await supabaseAdmin.auth.getSession();
+
+    // ✅ Call update-mainframe with fixed name
+    await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/update-mainframe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
+        user_id: session?.user?.id ?? null,
+        project_id: projectId,
+        zeta_name: zetaName,
+      }),
+    });
+
+    return NextResponse.json({ reply: textContent, threadId });
   } catch (err) {
     console.error('❌ Zeta GPT error:', err);
     return NextResponse.json({ reply: '⚠️ Zeta had a GPT issue.' }, { status: 500 });

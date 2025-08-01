@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { checkOrCreateUserProject } from '@/lib/CheckOrCreateUserProject';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,42 +12,69 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
-    console.log("🧪 handleLogin triggered");
-    setAuthError(null);
-    setLoading(true);
+  console.log("🧪 handleLogin triggered");
+  setAuthError(null);
+  setLoading(true);
 
-    const { data: authData, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+  const { data: authData, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    console.error("❌ Login error:", error.message);
+    setAuthError(error.message);
+    setLoading(false);
+    return;
+  }
+
+  const session = authData.session;
+  if (!session) {
+    setAuthError("Login succeeded but no session found.");
+    setLoading(false);
+    return;
+  }
+
+  try {
+    const userId = session.user.id;
+
+    const res = await fetch('/api/check-or-create-project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
     });
 
-    if (error) {
-      console.error("❌ Login error:", error.message);
-      setAuthError(error.message);
-      setLoading(false);
+    // 🛡️ Check if response is JSON before parsing
+    const contentType = res.headers.get("content-type");
+    let data = null;
+
+    if (contentType && contentType.includes("application/json")) {
+      data = await res.json();
+    } else {
+      console.error('❌ Response is not JSON');
+      setAuthError("Server did not return valid data.");
       return;
     }
 
-    const session = authData.session;
-    if (!session) {
-      setAuthError("Login succeeded but no session found.");
-      setLoading(false);
+    if (!res.ok) {
+      console.error('❌ Project creation failed:', data?.error);
+      setAuthError(data?.error || 'Failed to create or fetch project.');
       return;
     }
 
-    try {
-      const userId = session.user.id;
-      const project = await checkOrCreateUserProject(userId, 'zeta');
-      const hasOnboarded = project.onboarding_complete === true;
+    const project = data.project;
+    const hasOnboarded = project.onboarding_complete === true;
 
-      router.push('/projects');
-    } catch (err: any) {
-      console.error('❌ Project setup failed:', err.message || err);
-      setAuthError('Something went wrong setting up your Zeta project.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    // ✅ Route user
+    router.push('/projects'); // or `/dashboard/${project.id}`
+
+  } catch (err: any) {
+    console.error('❌ Project setup failed:', err.message || err);
+    setAuthError('Something went wrong setting up your Zeta project.');
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-white text-black">

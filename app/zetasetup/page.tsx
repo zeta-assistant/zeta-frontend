@@ -16,14 +16,23 @@ export default function ZetaSetup() {
   const user = useUser();
 
   const [projectName, setProjectName] = useState('');
+  const [vision, setVision] = useState('');
   const [assistantType, setAssistantType] = useState<string | null>(null);
   const [systemInstructions, setSystemInstructions] = useState('');
   const [privacyLevel, setPrivacyLevel] = useState<string | null>(null);
+  const [modelId, setModelId] = useState('gpt-4o');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!projectName || !assistantType || !user) {
-      alert('Missing required fields');
+    if (
+      !projectName ||
+      !assistantType ||
+      !user ||
+      !modelId ||
+      vision.length < 5 ||
+      vision.length > 50
+    ) {
+      alert('Missing or invalid required fields');
       return;
     }
 
@@ -36,9 +45,10 @@ export default function ZetaSetup() {
           {
             user_id: user.id,
             name: projectName,
-            description: '',
-            type: assistantType,
-            onboarding_complete: false,
+            vision: vision,
+            use_type: assistantType,
+            pantheon_agent: 'zeta',
+            onboarding_complete: true,
             system_instructions: systemInstructions,
           },
         ])
@@ -58,16 +68,14 @@ export default function ZetaSetup() {
           systemInstructions,
           projectId,
           fileUrls: [],
+          privacyLevel,
+          modelId,
+          message: 'Hello Zeta, let’s begin.',
         }),
       });
 
       const assistantRes = await res.json();
       if (!res.ok) throw new Error(assistantRes.error || 'Failed to create assistant');
-
-      await supabase
-        .from('user_projects')
-        .update({ onboarding_complete: true })
-        .eq('id', projectId);
 
       router.push(`/dashboard/${projectId}`);
     } catch (err: any) {
@@ -79,10 +87,22 @@ export default function ZetaSetup() {
   };
 
   return (
-    <div className="min-h-screen bg-white text-black flex flex-col items-center justify-center px-4 py-10">
+    <div className="min-h-screen bg-white text-black flex flex-row justify-center items-center px-4 py-10">
+      {/* Left Zeta Mascot */}
+      <div className="hidden md:flex w-1/5 justify-center">
+        <Image
+          src="/zeta-avatar.svg"
+          alt="Zeta Left"
+          width={300}
+          height={300}
+          className="object-contain"
+        />
+      </div>
+
+      {/* Center Form */}
       <div className="w-full max-w-lg space-y-6 text-center">
         <Image
-          src="/zeta-logo.png"
+          src="/zeta-letterlogo.png"
           alt="Zeta Logo"
           width={180}
           height={180}
@@ -134,13 +154,45 @@ export default function ZetaSetup() {
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-black">
-              How would you like Zeta to best assist you?
+              Choose your model
+            </label>
+            <select
+              value={modelId}
+              onChange={(e) => setModelId(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+            >
+              <option value="gpt-4o">GPT-4o (OpenAI)</option>
+              <option value="mistral-7b">Mistral 7B (Local)</option>
+              <option value="phi-2">Phi-2 (Local)</option>
+              <option value="deepseek-chat">DeepSeek Chat (Local)</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-black">
+              Describe the vision of your project
+            </label>
+            <Input
+              placeholder="e.g. Automate weekly performance analysis"
+              minLength={5}
+              maxLength={50}
+              value={vision}
+              onChange={(e) => setVision(e.target.value)}
+              className="w-full"
+              required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-black">
+              How would you like Zeta to best assist you complete this project?
             </label>
             <Textarea
-              placeholder="Teach me best how to help you! What long term goals and/or tasks do you want to set for me and for yourself!"
+              placeholder="What kind of help do you want from Zeta? What tasks or goals matter most to you?"
+              className="w-full"
+              rows={3}
               value={systemInstructions}
               onChange={(e) => setSystemInstructions(e.target.value)}
-              className="w-full"
             />
           </div>
 
@@ -165,7 +217,7 @@ export default function ZetaSetup() {
                 variant={privacyLevel === 'private' ? 'default' : 'outline'}
                 onClick={() => setPrivacyLevel(privacyLevel === 'private' ? null : 'private')}
               >
-                I prefer not to share any sensitive data 
+                I prefer not to share any sensitive data
               </Button>
             </div>
           </div>
@@ -178,6 +230,17 @@ export default function ZetaSetup() {
             {loading ? 'Setting Up...' : 'Finish Setup'}
           </Button>
         </Card>
+      </div>
+
+      {/* Right Zeta Mascot */}
+      <div className="hidden md:flex w-1/5 justify-center">
+        <Image
+          src="/zeta-thinking.svg"
+          alt="Zeta Right"
+          width={300}
+          height={300}
+          className="object-contain"
+        />
       </div>
     </div>
   );

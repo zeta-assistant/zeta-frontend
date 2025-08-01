@@ -43,19 +43,21 @@ module.exports = {
         input: 'rgb(var(--input) / <alpha-value>)',
         ring: 'rgb(var(--ring) / <alpha-value>)',
       },
+      fontFamily: {
+        plex: ['"IBM Plex Sans"', 'sans-serif'],
+      },
       borderRadius: {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
+      },
+      animation: {
+        bounce: 'bounce 1.5s infinite',
+        'pulse-slow': 'pulse 3s ease-in-out infinite',
       },
     },
   },
   plugins: [
     require("tailwindcss-animate"),
   ],
-  extend: {
-  animation: {
-    'ping-slow': 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
-  },
-}
 };

@@ -19,6 +19,7 @@ export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -29,12 +30,14 @@ export default function ProjectsPage() {
         return;
       }
 
+      const uid = session.user.id;
       setUserEmail(session.user.email ?? null);
+      setUserId(uid);
 
       const { data, error } = await supabase
         .from('user_projects')
         .select('*')
-        .eq('user_id', session.user.id)
+        .eq('user_id', uid)
         .order('created_at', { ascending: false });
 
       if (!error && data) setProjects(data);
@@ -59,24 +62,25 @@ export default function ProjectsPage() {
 
   const handleDelete = async (projectId: string) => {
     const confirmed = confirm('Are you sure you want to delete this project? This action cannot be undone.');
-    if (!confirmed) return;
+    if (!confirmed || !userId) return;
 
     setLoading(true);
+    console.log('Attempting to delete project:', projectId);
 
     const { error } = await supabase
       .from('user_projects')
       .delete()
-      .eq('id', projectId);
+      .eq('id', projectId)
+      .eq('user_id', userId); // ✅ ensures user matches, plays nice with RLS
 
     if (error) {
-      alert('Failed to delete project. See console for details.');
-      console.error('Delete error:', error);
-      setLoading(false);
-      return;
+      console.error('❌ Failed to delete project:', error.message);
+      alert('Failed to delete project. Check console for error.');
+    } else {
+      console.log('✅ Project deleted successfully');
+      setProjects((prev) => prev.filter((proj) => proj.id !== projectId));
     }
 
-    // Remove deleted project from state to update UI
-    setProjects((prev) => prev.filter((proj) => proj.id !== projectId));
     setLoading(false);
   };
 
@@ -107,50 +111,55 @@ export default function ProjectsPage() {
         <div className="flex flex-col items-center gap-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl">
             {projects.map((project) => (
-              <div
-                key={project.id}
-                className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition"
-              >
-                <h2 className="text-xl font-bold mb-1">{project.name}</h2>
-                <p className="text-sm text-gray-600 mb-1">🧠 Type: {project.type}</p>
+  <div
+    key={project.id}
+    className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition"
+  >
+    <h2 className="text-xl font-bold mb-1">{project.name}</h2>
+    <p className="text-sm text-gray-600 mb-1">⚡ Type: {project.type}</p>
 
-                {project.description && (
-                  <p className="text-sm text-gray-500 italic mb-1">{project.description}</p>
-                )}
+    {project.description && (
+      <p className="text-sm text-gray-500 italic mb-1">{project.description}</p>
+    )}
 
-                {project.system_instructions && (
-                  <p className="text-xs text-gray-400 mb-2">
-                    🛠 {project.system_instructions}
-                  </p>
-                )}
+    {project.system_instructions && (
+      <p className="text-xs text-gray-400 mb-1">
+        🛠 {project.system_instructions}
+      </p>
+    )}
 
-                <p className="text-sm text-gray-400 mb-2">
-                  Created: {new Date(project.created_at).toLocaleDateString()}
-                </p>
+    {/* ✅ Add Project ID here */}
+    <p className="text-xs text-blue-500 font-mono mb-1">
+      🆔: {project.id}
+    </p>
 
-                {project.onboarding_complete ? (
-                  <p className="text-xs text-green-600 font-semibold mb-2">✅ Onboarding Complete</p>
-                ) : (
-                  <p className="text-xs text-yellow-600 font-semibold mb-2">⚠️ Onboarding Pending</p>
-                )}
+    <p className="text-sm text-gray-400 mb-2">
+      Created: {new Date(project.created_at).toLocaleDateString()}
+    </p>
 
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => goToProject(project)}
-                    className="flex-1 text-sm px-4 py-2 bg-black text-white rounded-full hover:bg-gray-800 transition"
-                  >
-                    Launch Project
-                  </button>
-                  <button
-                    onClick={() => handleDelete(project.id)}
-                    className="flex-1 text-sm px-4 py-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition"
-                  >
-                    Delete Project
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+    {project.onboarding_complete ? (
+      <p className="text-xs text-green-600 font-semibold mb-2">✅ Onboarding Complete</p>
+    ) : (
+      <p className="text-xs text-yellow-600 font-semibold mb-2">⚠️ Onboarding Pending</p>
+    )}
+
+    <div className="flex gap-4">
+      <button
+        onClick={() => goToProject(project)}
+        className="flex-1 text-sm px-4 py-2 bg-black text-white rounded-full hover:bg-gray-800 transition"
+      >
+        Launch Project
+      </button>
+      <button
+        onClick={() => handleDelete(project.id)}
+        className="flex-1 text-sm px-4 py-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition"
+      >
+        Delete Project
+      </button>
+    </div>
+  </div>
+))}
+</div>
 
           <button
             onClick={createNewProject}

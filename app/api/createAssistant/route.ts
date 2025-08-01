@@ -1,78 +1,136 @@
 import { NextResponse } from 'next/server';
+import OpenAI from 'openai';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import axios from 'axios';
+import { AVAILABLE_MODELS } from '@/lib/models';
 
-export const runtime = 'nodejs';
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_KEY!,
+});
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
     const {
+      message = 'Hello Zeta, let’s begin.',
+      projectId,
+      modelId,
       projectName,
       assistantType,
       systemInstructions,
-      projectId,
-      privacyLevel,
-    } = body;
+    } = await req.json();
 
-    if (!projectName || !assistantType || !projectId) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-    }
+    const now = new Date();
 
-    const OPENAI_API_KEY = process.env.OPENAI_KEY;
-    if (!OPENAI_API_KEY) {
-      return NextResponse.json({ error: 'Missing OpenAI API Key' }, { status: 500 });
-    }
+    const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
+    if (!model) throw new Error('Invalid modelId');
 
-    // ✅ Step 1: Create Assistant using OpenAI API
-    console.log("📋 Final systemInstructions being sent:", systemInstructions);
-    const createRes = await axios.post(
-      'https://api.openai.com/v1/assistants',
-      {
-        name: projectName,
-        instructions: systemInstructions || 'You are Zeta, a time-aware AI assistant designed to help users with strategic thinking, memory, and business tasks. Never refer to yourself as ChatGPT. Always refer to yourself as Zeta.',
-        tools: [{ type: 'file_search' }],
-        model: 'gpt-4o',
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-          'OpenAI-Beta': 'assistants=v2',
-        },
+    // ✅ OPENAI FLOW
+    if (model.provider === 'openai') {
+      // 1️⃣ Create Assistant
+      const assistant = await openai.beta.assistants.create({
+        name: `${projectName} (${assistantType})`,
+        instructions:
+          systemInstructions ||
+          `You are Zeta, an intelligent, adaptable AI assistant designed to help with any project the user is working on — from betting to business to development. You refer to yourself as Zeta by default. If the user gives you a different name, adopt that name instead. Be clear, helpful, and adjust your tone and advice to match the user's current project and communication style.`,
+        model: modelId === 'gpt-4o' ? 'gpt-4o' : 'gpt-4',
+      });
+
+      const assistantId = assistant.id;
+
+      // 2️⃣ Save assistant_id to project
+      const { data: projectData, error: projectError } = await supabaseAdmin
+        .from('user_projects')
+        .update({ assistant_id: assistantId })
+        .eq('id', projectId)
+        .select('assistant_id')
+        .single();
+
+      if (projectError || !projectData?.assistant_id) {
+        console.error('❌ Failed to save assistant_id:', projectError);
+        throw new Error('Missing or invalid assistant ID');
       }
-    );
 
-    const assistantId = createRes.data.id;
-    console.log('🧠 Assistant created:', assistantId);
+      // 3️⃣ Create Thread
+      const newThread = await openai.beta.threads.create();
+      const threadId = newThread.id;
 
-    // 🔍 Step 1.5: Confirm assistant instructions actually embedded
-    const verifyRes = await axios.get(
-      `https://api.openai.com/v1/assistants/${assistantId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          'OpenAI-Beta': 'assistants=v2',
-        },
+      // 4️⃣ Insert into threads table
+      await supabaseAdmin.from('threads').insert({
+        project_id: projectId,
+        thread_id: threadId,
+        created_at: now.toISOString(),
+        last_active: now.toISOString(),
+        expired: false,
+      });
+
+      // 5️⃣ Update project with thread ID
+      await supabaseAdmin
+        .from('user_projects')
+        .update({ thread_id: threadId })
+        .eq('id', projectId);
+
+      // 6️⃣ Add initial user message
+      if (!message || message.trim() === '') {
+        throw new Error('Missing initial message. Cannot start thread without content.');
       }
-    );
 
-    console.log('📝 Instructions stored in OpenAI:', verifyRes.data.instructions);
+      await openai.beta.threads.messages.create(threadId, {
+        role: 'user',
+        content: message,
+      });
 
-    // ✅ Step 2: Save Assistant ID and system instructions to Supabase
-    const { error: updateError } = await supabaseAdmin
-      .from('user_projects')
-      .update({
+      // 6.5️⃣ Add Zeta's intro message with rename option
+      await openai.beta.threads.messages.create(threadId, {
+        role: 'assistant',
+        content: `Hey there! I'm Zeta — your AI assistant for this project 🤖  
+If you'd prefer to call me something else, just let me know and I’ll go by that name from now on.  
+So… what are we working on today?`,
+      });
+
+      // 7️⃣ Run assistant
+      const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: assistantId,
-        system_instructions: systemInstructions || 'You are Zeta, a time-aware AI assistant designed to help users with strategic thinking, memory, and business tasks. Never refer to yourself as ChatGPT. Always refer to yourself as Zeta.',
-      })
-      .eq('id', projectId);
+      });
 
-    if (updateError) throw updateError;
+      // 8️⃣ Wait for completion
+      let runStatus;
+      do {
+        runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+          thread_id: threadId,
+        });
+        await new Promise((res) => setTimeout(res, 1000));
+      } while (runStatus.status !== 'completed');
 
-    return NextResponse.json({ assistantId }, { status: 200 });
-  } catch (err: any) {
-    console.error('❌ Assistant creation error:', err);
-    return NextResponse.json({ error: err.message || 'Server error' }, { status: 500 });
+      // 9️⃣ Get assistant reply
+      const messages = await openai.beta.threads.messages.list(threadId);
+      const assistantReply = messages.data.find((msg) => msg.role === 'assistant');
+
+      let textContent = '⚠️ No reply.';
+      if (
+        assistantReply &&
+        Array.isArray(assistantReply.content) &&
+        assistantReply.content[0]?.type === 'text'
+      ) {
+        textContent = assistantReply.content[0].text.value;
+      }
+
+      return NextResponse.json({ reply: textContent, threadId });
+    }
+
+    // 🔧 LOCAL or OTHER MODEL PLACEHOLDER
+    if (['local', 'huggingface', 'anthropic'].includes(model.provider)) {
+      console.log(`⚠️ Placeholder: skipping assistant setup for ${model.provider}`);
+      return NextResponse.json({
+        reply: `🧪 Placeholder: ${model.label} support coming soon.`,
+        threadId: null,
+      });
+    }
+
+    throw new Error('Unsupported model provider');
+  } catch (err) {
+    console.error('❌ Final catch block:', err);
+    return NextResponse.json(
+      { reply: '⚠️ Zeta had a setup issue. Try again later.' },
+      { status: 500 }
+    );
   }
 }
