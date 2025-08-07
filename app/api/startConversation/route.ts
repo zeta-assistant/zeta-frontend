@@ -12,6 +12,7 @@ export async function POST(req: Request) {
       .single();
 
     if (error || !project) throw error;
+    console.log("📥 /api/startConversation called for project:", projectId);
 
     // ✅ Check if Zeta already replied
     const { data: existingMessages } = await supabaseAdmin
@@ -31,22 +32,27 @@ export async function POST(req: Request) {
     const systemInstructions = project.system_instructions || '';
     const introPrompt = `Hi! I'm Zeta, your assistant for "${project.name}". Here's what I’m here to help with:\n\n${systemInstructions}\n\nWhat would you like to do first?`;
 
-    const { error: insertError } = await supabaseAdmin.from('zeta_conversation_log').insert({
-      project_id: projectId,
-      role: 'assistant',
-      message: introPrompt,
-      user_id: project.user_id,
-    });
+   const { error: insertError } = await supabaseAdmin.from('zeta_conversation_log').insert({
+  project_id: projectId,
+  role: 'assistant',
+  message: introPrompt,
+  user_id: project.user_id,
+});
 
-    if (insertError) {
-      console.error('❌ Failed to insert assistant message:', insertError);
-      throw insertError;
-    }
+if (insertError) {
+  console.error('❌ Failed to insert assistant message:', insertError);
+  throw insertError;
+}
 
-    const { error: updateError } = await supabaseAdmin
-      .from('user_projects')
-      .update({ first_message_sent: true })
-      .eq('id', projectId);
+await supabaseAdmin
+  .from('user_projects')
+  .update({ last_interaction_at: new Date().toISOString() })
+  .eq('id', projectId);
+
+const { error: updateError } = await supabaseAdmin
+  .from('user_projects')
+  .update({ first_message_sent: true })
+  .eq('id', projectId);
 
     if (updateError) {
       console.warn('⚠️ Could not update first_message_sent, but message was still inserted.');

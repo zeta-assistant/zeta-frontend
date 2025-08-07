@@ -26,6 +26,7 @@ export function NewDiscussionForm({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    if (!projectId) return;
     (async () => {
       const { data } = await supabase
         .from('documents')
@@ -36,27 +37,36 @@ export function NewDiscussionForm({
   }, [projectId]);
 
   const handleCreate = async () => {
-    if (!title) return;
+    if (submitting || !title || !projectId) return;
     setSubmitting(true);
 
-    const { data, error } = await supabase
-      .from('discussions')
-      .insert({
-        project_id: projectId,
+    try {
+      const res = await fetch('/api/discussion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          projectId,
+          fileId: selectedFileId,
+        }),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        console.error('❌ API error creating discussion:', result.error);
+        return;
+      }
+
+      onCreate({
+        thread_id: result.threadId,
         title,
-        file_ids: selectedFileId ? [selectedFileId] : null,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('❌ Error creating discussion:', error.message);
+      });
+    } catch (err) {
+      console.error('❌ Unexpected error:', err);
+    } finally {
       setSubmitting(false);
-      return;
     }
-
-    setSubmitting(false);
-    onCreate(data);
   };
 
   return (

@@ -30,7 +30,8 @@ export async function POST(req: Request) {
         name: `${projectName} (${assistantType})`,
         instructions:
           systemInstructions ||
-          `You are Zeta, an intelligent, adaptable AI assistant designed to help with any project the user is working on — from betting to business to development. You refer to yourself as Zeta by default. If the user gives you a different name, adopt that name instead. Be clear, helpful, and adjust your tone and advice to match the user's current project and communication style.`,
+          `You are Zeta, an intelligent, adaptable AI assistant designed to help with any project the user is working on — usually something competitive, finance, trading, selling, building, business, etc.You refer to yourself as Zeta by default. 
+           format all calculations using markdown and Latex`,
         model: modelId === 'gpt-4o' ? 'gpt-4o' : 'gpt-4',
       });
 

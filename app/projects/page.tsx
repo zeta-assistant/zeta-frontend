@@ -61,28 +61,77 @@ export default function ProjectsPage() {
   };
 
   const handleDelete = async (projectId: string) => {
-    const confirmed = confirm('Are you sure you want to delete this project? This action cannot be undone.');
-    if (!confirmed || !userId) return;
+  const confirmed = confirm('Are you sure you want to delete this project? This action cannot be undone.');
+  if (!confirmed || !userId) return;
 
-    setLoading(true);
-    console.log('Attempting to delete project:', projectId);
+  setLoading(true);
+  console.log('🗑 Attempting to delete project:', projectId);
 
-    const { error } = await supabase
+  try {
+    // 1️⃣ Get assistant_id first
+    const { data: project, error: fetchError } = await supabase
+      .from('user_projects')
+      .select('assistant_id')
+      .eq('id', projectId)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError) {
+      console.error('❌ Failed to fetch assistant_id:', fetchError.message);
+      alert('Failed to fetch project info.');
+      setLoading(false);
+      return;
+    }
+
+    const assistantId = project?.assistant_id;
+
+    // 🧪 Log the values we're about to send
+    console.log('🔁 Sending to proxy with:', {
+      assistantId,
+      projectId,
+    });
+
+    // 2️⃣ Call internal API route to delete assistant
+    if (assistantId) {
+      const res = await fetch('/api/delete-assistant', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    projectId,
+    ...(assistantId ? { assistantId } : {}),
+  }),
+});
+
+      if (!res.ok) {
+  const errorText = await res.text();
+  console.warn('⚠️ Assistant may not have been deleted:', errorText);
+  // Don't return — continue to delete project regardless
+} else {
+  console.log('✅ Assistant deleted successfully');
+}
+    }
+
+    // 3️⃣ Delete project from Supabase
+    const { error: deleteError } = await supabase
       .from('user_projects')
       .delete()
       .eq('id', projectId)
-      .eq('user_id', userId); // ✅ ensures user matches, plays nice with RLS
+      .eq('user_id', userId);
 
-    if (error) {
-      console.error('❌ Failed to delete project:', error.message);
-      alert('Failed to delete project. Check console for error.');
+    if (deleteError) {
+      console.error('❌ Failed to delete project:', deleteError.message);
+      alert('Failed to delete project.');
     } else {
-      console.log('✅ Project deleted successfully');
+      console.log('✅ Project deleted from Supabase');
       setProjects((prev) => prev.filter((proj) => proj.id !== projectId));
     }
+  } catch (err) {
+    console.error('❌ Unexpected deletion error:', err);
+    alert('Unexpected error during deletion.');
+  }
 
-    setLoading(false);
-  };
+  setLoading(false);
+};
 
   return (
     <div className="min-h-screen bg-[#f9f9f9] px-6 py-10">

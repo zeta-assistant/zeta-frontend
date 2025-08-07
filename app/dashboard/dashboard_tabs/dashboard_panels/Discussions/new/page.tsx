@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { NewDiscussionForm } from '@/components/NewDiscussionForm';
+import { NewDiscussionForm } from '@/components/tab_components/NewDiscussionForm';
 
 export default function NewDiscussionPage() {
   return (

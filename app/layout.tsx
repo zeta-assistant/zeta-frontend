@@ -1,30 +1,34 @@
+// zeta-frontend/app/layout.tsx
+
 import './globals.css';
-import { Geist, Geist_Mono } from 'next/font/google';
-import LayoutWrapper from '@/components/LayoutWrapper';
-import SupabaseProvider from '@/components/SupabaseProvider'; // ✅ new wrapper
+import type { Metadata } from 'next';
+import 'katex/dist/katex.min.css';
+import { SupabaseProvider } from '../components/SupabaseProvider';
 
-const geistSans = Geist({
-  subsets: ['latin'],
-  variable: '--font-geist-sans',
-});
 
-const geistMono = Geist_Mono({
-  subsets: ['latin'],
-  variable: '--font-geist-mono',
-});
-
-export const metadata = {
-  title: 'Pantheon',
-  description: 'Home of Zeta AI',
+export const metadata: Metadata = {
+  title: 'Zeta',
+  description: 'Your adaptive AI assistant',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} font-sans`}>
-      <body className="bg-background text-foreground">
-        <SupabaseProvider>
-          <LayoutWrapper>{children}</LayoutWrapper>
-        </SupabaseProvider>
+    <html lang="en">
+      <head>
+        {/* ✅ MathJax script for LaTeX rendering */}
+        <script
+          id="mathjax-script"
+          async
+          src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"
+        />
+      </head>
+      <body>
+        {/* ✅ Wrap everything in SupabaseProvider */}
+        <SupabaseProvider>{children}</SupabaseProvider>
       </body>
     </html>
   );

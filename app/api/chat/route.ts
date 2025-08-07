@@ -33,22 +33,46 @@ export async function POST(req: Request) {
     const assistantId = projectData?.assistant_id;
     if (!assistantId) throw new Error('Missing assistant ID');
 
-    // ✅ Create thread
-    const newThread = await openai.beta.threads.create();
-    const threadId = newThread.id;
+    const { data: threadData } = await supabaseAdmin
+  .from('threads')
+  .select('*')
+  .eq('project_id', projectId)
+  .order('last_active', { ascending: false })
+  .limit(1)
+  .single();
 
-    await supabaseAdmin.from('threads').insert({
-      project_id: projectId,
-      thread_id: threadId,
-      created_at: now.toISOString(),
-      last_active: now.toISOString(),
-      expired: false,
-    });
+let threadId = threadData?.thread_id;
 
-    await supabaseAdmin
-      .from('user_projects')
-      .update({ thread_id: threadId })
-      .eq('id', projectId);
+// Check if thread expired (e.g., 1hr inactivity or marked expired)
+const expired =
+  threadData?.expired ||
+  (threadData?.last_active &&
+    new Date().getTime() - new Date(threadData.last_active).getTime() > 1000 * 60 * 60);
+
+if (!threadId || expired) {
+  // Create new thread
+  const newThread = await openai.beta.threads.create();
+  threadId = newThread.id;
+
+  await supabaseAdmin.from('threads').insert({
+    project_id: projectId,
+    thread_id: threadId,
+    created_at: now.toISOString(),
+    last_active: now.toISOString(),
+    expired: false,
+  });
+
+  await supabaseAdmin
+    .from('user_projects')
+    .update({ thread_id: threadId })
+    .eq('id', projectId);
+} else {
+  // Update last_active timestamp
+  await supabaseAdmin
+    .from('threads')
+    .update({ last_active: now.toISOString() })
+    .eq('thread_id', threadId);
+}
 
     // ✅ Inject awareness context
     const context = `Today is ${date}, and the time is ${time}. You are ${zetaName} — the AI assistant for this project. Do not refer to yourself as ChatGPT or Assistant.`;

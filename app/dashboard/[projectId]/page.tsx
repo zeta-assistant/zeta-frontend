@@ -262,7 +262,7 @@ const [activeMainTab, setActiveMainTab] = useState<
 
 </div>
 {/* 🧠 Chatboard + Logs + Files Tabs Panel */}
-<div className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg min-h-[850px] max-h-[calc(100vh-160px)] h-full">
+<div className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg h-[calc(100vh-140px)] min-h-[850px]">
 
   {/* Modularized Header */}
   <DashboardHeader
@@ -340,7 +340,7 @@ const [activeMainTab, setActiveMainTab] = useState<
 {activeMainTab === 'thoughts' && <ThoughtsPanel fontSize={fontSize} />}
 {activeMainTab === 'functions' && <FunctionsPanel projectId={projectId} fontSize={fontSize} />}
 {activeMainTab === 'newfunction' && <NewFunctionPanel projectId={projectId} fontSize={fontSize} />}
-{activeMainTab === 'workshop' && <WorkshopPanel fontSize={fontSize} />}
+{activeMainTab === 'workshop' && <WorkshopPanel projectId={projectId} fontSize="base" />}
 
 
 </div>
@@ -381,5 +381,5 @@ const [activeMainTab, setActiveMainTab] = useState<
     </div>
   </div>
 )}
-</div>
+</div>  
 )}

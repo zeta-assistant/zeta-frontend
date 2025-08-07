@@ -1,18 +1,14 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { NewDiscussionForm } from '@/components/NewDiscussionForm';
+import { NewDiscussionForm } from '@/components/tab_components/NewDiscussionForm';
+import { ThreadChatTab } from '@/components/tab_components/ThreadChatTab';
 
 type Discussion = {
   thread_id: string;
   title: string;
-};
-
-type Message = {
-  role: 'user' | 'assistant';
-  content: string;
 };
 
 export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base' | 'lg' }) {
@@ -20,11 +16,6 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
   const [discussions, setDiscussions] = useState<Discussion[]>([]);
   const [selectedThread, setSelectedThread] = useState<Discussion | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
-
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -37,30 +28,19 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
     })();
   }, [projectId]);
 
-  useEffect(() => {
-    if (!selectedThread) return;
-    setMessages([
-      { role: 'assistant', content: 'Welcome to this thread!' },
-      { role: 'user', content: 'Okay, let’s discuss Week 5.' },
-    ]);
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [selectedThread]);
+  const deleteDiscussion = async (threadId: string) => {
+    const { error } = await supabase
+      .from('discussions')
+      .delete()
+      .eq('thread_id', threadId);
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-    const userMsg = { role: 'user' as const, content: input };
-    setMessages((prev) => [...prev, userMsg]);
-    setInput('');
-    setLoading(true);
+    if (error) {
+      console.error('❌ Error deleting discussion:', error.message);
+      return;
+    }
 
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: 'Got it. I’ll analyze Week 5 performance now.' },
-      ]);
-      setLoading(false);
-      scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 1000);
+    setDiscussions((prev) => prev.filter((d) => d.thread_id !== threadId));
+    setSelectedThread(null);
   };
 
   if (showNewForm) {
@@ -68,10 +48,42 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
       <div className={`p-6 text-${fontSize} text-indigo-200 bg-blue-950`}>
         <h2 className="text-lg text-white font-semibold mb-4">➕ Start a New Discussion</h2>
         <NewDiscussionForm
-          onCreate={(newDiscussion: Discussion) => {
+          onCreate={async (newDiscussion: Discussion) => {
             setShowNewForm(false);
+
+            // ⏳ Wait until thread is confirmed in DB before rendering chat
+            let retries = 0;
+            let exists = false;
+
+            while (!exists && retries < 10) {
+              const { data } = await supabase
+                .from('threads')
+                .select('thread_id')
+                .eq('thread_id', newDiscussion.thread_id)
+                .single();
+
+              if (data) {
+                exists = true;
+                break;
+              }
+
+              await new Promise((r) => setTimeout(r, 500));
+              retries++;
+            }
+
+            if (!exists) {
+              console.error('❌ Thread was never inserted!');
+              return;
+            }
+
             setSelectedThread(newDiscussion);
-            setDiscussions((prev) => [newDiscussion, ...prev]);
+
+            const { data } = await supabase
+              .from('discussions')
+              .select('thread_id, title')
+              .eq('project_id', projectId)
+              .order('last_updated', { ascending: false });
+            setDiscussions(data || []);
           }}
         />
         <button
@@ -114,48 +126,34 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
   }
 
   return (
-    <div className={`p-6 overflow-y-auto text-${fontSize} text-indigo-200 space-y-6 bg-blue-950 flex flex-col`}>
+    <div className={`p-6 text-${fontSize} text-indigo-200 space-y-6 bg-blue-950 flex flex-col h-full`}>
       <div className="flex justify-between items-center">
         <h2 className="text-lg text-white font-semibold">
           🧵 Discussion: {selectedThread.title || selectedThread.thread_id}
         </h2>
-        <button
-          onClick={() => setSelectedThread(null)}
-          className="text-sm text-pink-400 hover:text-pink-200"
-        >
-          ← Back
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto space-y-4">
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`max-w-[80%] p-3 rounded-xl shadow ${
-              msg.role === 'user' ? 'ml-auto bg-purple-700 text-white' : 'mr-auto bg-blue-800 text-white'
-            }`}
+        <div className="flex gap-3">
+          <button
+            onClick={() => setSelectedThread(null)}
+            className="text-sm text-pink-400 hover:text-pink-200"
           >
-            {msg.content}
-          </div>
-        ))}
-        <div ref={scrollRef} />
+            ← Back
+          </button>
+          <button
+            onClick={() => {
+              if (confirm('Are you sure you want to delete this discussion?')) {
+                deleteDiscussion(selectedThread.thread_id);
+              }
+            }}
+            className="text-sm text-red-400 hover:text-red-200"
+          >
+            🗑 Delete
+          </button>
+        </div>
       </div>
 
-      <div className="mt-4 flex gap-2">
-        <input
-          className="flex-1 p-3 rounded-xl bg-blue-900 border border-purple-400 text-white"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Type a message..."
-          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-        />
-        <button
-          onClick={sendMessage}
-          disabled={loading}
-          className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl"
-        >
-          Send
-        </button>
+      {/* 💬 Modular Chat UI for this discussion */}
+      <div className="flex-1 overflow-y-auto">
+        <ThreadChatTab threadId={selectedThread.thread_id} fontSize={fontSize} />
       </div>
     </div>
   );
