@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AVAILABLE_MODELS } from '@/lib/models';
+import { randomUUID } from 'crypto';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_KEY!,
@@ -20,98 +21,79 @@ export async function POST(req: Request) {
     const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
     if (!model) throw new Error('Invalid modelId');
 
-    let threadId: string;
-    let messageContent = '';
+    // ✅ 1. Create OpenAI thread
+    const openaiThread = await openai.beta.threads.create();
+    const openaiThreadId = openaiThread.id;
 
-    if (model.provider === 'openai') {
-      // 1️⃣ Create thread
-      const newThread = await openai.beta.threads.create();
-      threadId = newThread.id;
+    // ✅ 2. Add user message
+    await openai.beta.threads.messages.create(openaiThreadId, {
+      role: 'user',
+      content: `New discussion started: "${title}"`,
+    });
 
-      // 2️⃣ Add user message
-      await openai.beta.threads.messages.create(threadId, {
-        role: 'user',
-        content: `New discussion started: "${title}"`,
+    // ✅ 3. Get assistant
+    const { data: projectData } = await supabaseAdmin
+      .from('user_projects')
+      .select('assistant_id')
+      .eq('id', projectId)
+      .single();
+
+    if (!projectData?.assistant_id) throw new Error('No assistant linked to project');
+
+    // ✅ 4. Run assistant
+    const run = await openai.beta.threads.runs.create(openaiThreadId, {
+      assistant_id: projectData.assistant_id,
+    });
+
+    let runStatus;
+    do {
+      runStatus = await openai.beta.threads.runs.retrieve(run.id, {
+        thread_id: openaiThreadId,
       });
+      await new Promise((r) => setTimeout(r, 1000));
+    } while (runStatus.status !== 'completed');
 
-      // 3️⃣ Run assistant
-      const { data: projectData } = await supabaseAdmin
-      
-        .from('user_projects')
-        .select('assistant_id')
-        .eq('id', projectId)
-        .single();
+    // ✅ 5. Get assistant reply
+    const messages = await openai.beta.threads.messages.list(openaiThreadId);
+    const lastMessage = messages.data.find((msg) => msg.role === 'assistant');
 
-        console.log('📡 Fetched projectData:', projectData);
-      if (!projectData?.assistant_id) throw new Error('No assistant linked to project');
-
-      const run = await openai.beta.threads.runs.create(threadId, {
-        assistant_id: projectData.assistant_id,
-      });
-
-      // 4️⃣ Wait for run to complete
-      let runStatus;
-      do {
-        runStatus = await openai.beta.threads.runs.retrieve(run.id, {
-          thread_id: threadId,
-        });
-        await new Promise((r) => setTimeout(r, 1000));
-      } while (runStatus.status !== 'completed');
-      console.log('🏃 Assistant run started:', run.id);
-
-      // 5️⃣ Get reply
-      const messages = await openai.beta.threads.messages.list(threadId);
-      const lastMessage = messages.data.find((msg) => msg.role === 'assistant');
-
-      if (
-        lastMessage &&
-        Array.isArray(lastMessage.content) &&
-        lastMessage.content[0]?.type === 'text'
-      ) {
-        messageContent = lastMessage.content[0].text.value;
-      }
-    } else {
-      // Local/huggingface fallback
-      threadId = `thread_${crypto.randomUUID()}`;
-      messageContent = '🧪 Local models not yet supported for Discussions.';
+    let messageContent = '⚠️ No assistant reply.';
+    if (
+      lastMessage &&
+      Array.isArray(lastMessage.content) &&
+      lastMessage.content[0]?.type === 'text'
+    ) {
+      messageContent = lastMessage.content[0].text.value;
     }
-    if (messageContent) {
-  await supabaseAdmin.from('discussion_messages').insert({
-    thread_id: threadId,
-    role: 'assistant',
-    content: messageContent,
-  });
-}
 
-   // 6️⃣ Insert into threads (with error logging)
-   console.log('⏳ About to insert thread...');
-const { error: threadInsertError } = await supabaseAdmin.from('threads').insert({
-  project_id: projectId,
-  thread_id: threadId,
-  model_id: modelId,
-  created_at: now.toISOString(),
-  last_active: now.toISOString(),
-  expired: false,
-});
+    // ✅ 6. Insert into Supabase `threads`
+    const threadUUID = randomUUID();
+    const { error: threadInsertError } = await supabaseAdmin.from('threads').insert({
+      id: threadUUID,
+      project_id: projectId,
+      type: 'discussion',
+      last_active: now.toISOString(),
+      openai_thread_id: openaiThreadId,
+    });
 
-if (threadInsertError) {
-  console.error('❌ THREAD INSERT FAILED:', threadInsertError.message);
-  console.error('🧠 With values:', {
-    project_id: projectId,
-    thread_id: threadId,
-    model_id: modelId,
-  });
-  throw new Error('Failed to insert thread into DB');
-}
+    if (threadInsertError) {
+      console.error('❌ THREAD INSERT FAILED:', threadInsertError.message);
+      throw new Error('Failed to insert thread');
+    }
 
-console.log('✅ Thread inserted successfully:', threadId);
+    // ✅ 7. Save assistant message
+    await supabaseAdmin.from('discussion_messages').insert({
+      thread_id: openaiThreadId,
+      role: 'assistant',
+      content: messageContent,
+    });
 
-    // 7️⃣ Insert discussion
+    // ✅ 8. Insert into `discussions`
     const { data: discussion, error: discussionError } = await supabaseAdmin
       .from('discussions')
       .insert({
         project_id: projectId,
-        thread_id: threadId,
+        thread_id: openaiThreadId,
         title,
         file_ids: fileId ? [fileId] : null,
       })
@@ -120,13 +102,14 @@ console.log('✅ Thread inserted successfully:', threadId);
 
     if (discussionError) throw new Error(discussionError.message);
 
+    // ✅ 9. Return OpenAI threadId for frontend usage
     return NextResponse.json({
-      threadId,
+      threadId: openaiThreadId,
       discussion,
       messageContent,
     });
   } catch (err: any) {
-    console.error('❌ /api/discussion error:', err);
+    console.error('❌ /api/discussion error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

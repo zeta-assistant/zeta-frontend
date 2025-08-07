@@ -1,5 +1,7 @@
 export function formatMathMarkdown(text: string): string {
   if (!text) return '';
+  text = text.replace(/\$(\d)/g, '\\$' + '$1');
+  text = text.replace(/(\s)\$(\s*)(?=[\\-])/g, (_, beforeSpace, afterSpace) => beforeSpace + afterSpace);
 
   // ✅ Remove Markdown-style headers like ### Derivation
   text = text
@@ -38,6 +40,20 @@ export function formatMathMarkdown(text: string): string {
     .replace(/\\\(/g, '$')
     .replace(/\\\)/g, '$')
     .replace(/\n{3,}/g, '\n\n');
+
+  // ✅ NEW: Fix stray single $ inside $$...$$ blocks by escaping them
+  formatted = formatted.replace(/\$\$([\s\S]*?)\$\$/g, (match: string, inner: string) => {
+    const fixedInner = inner.replace(/(^|[^$])\$(?![1-9])([^$]|$)/g, (m: string, p1: string, p2: string) => {
+      return p1 + '\\$' + p2;
+    });
+    return `$$${fixedInner}$$`;
+  });
+
+  // ✅ NEW: Remove trailing single $ inside $$...$$ blocks if last char before closing $$
+  formatted = formatted.replace(/\$\$([\s\S]*?)\$\$/g, (match, inner) => {
+    const cleanedInner = inner.endsWith('$') ? inner.slice(0, -1) : inner;
+    return `$$${cleanedInner}$$`;
+  });
 
   // ✅ Fix heading collisions
   formatted = formatted.replace(/(\$\$[^\$]*?\$\$)([ \t]*#+)/g, (_, math, heading) => `${math.trim()}\n\n${heading}`);

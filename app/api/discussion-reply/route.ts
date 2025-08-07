@@ -8,45 +8,50 @@ const openai = new OpenAI({
 
 export async function POST(req: Request) {
   try {
-    const { message, threadId } = await req.json();
+    const { message, threadId } = await req.json(); // threadId = OpenAI string
 
-    // 🧠 Get assistant_id
-    const { data: threadData } = await supabaseAdmin
+    // 🔁 Look up project and confirm thread exists
+    const { data: threadData, error: threadError } = await supabaseAdmin
       .from('threads')
       .select('project_id')
-      .eq('thread_id', threadId)
+      .eq('openai_thread_id', threadId)
       .single();
 
-    if (!threadData?.project_id) throw new Error('Thread not linked to project');
+    if (threadError || !threadData?.project_id) {
+      throw new Error('Thread lookup failed');
+    }
 
-    const { data: projectData } = await supabaseAdmin
+    // 🧠 Get assistant_id from user_projects
+    const { data: projectData, error: projectError } = await supabaseAdmin
       .from('user_projects')
       .select('assistant_id')
       .eq('id', threadData.project_id)
       .single();
 
     const assistantId = projectData?.assistant_id;
-    if (!assistantId) throw new Error('Missing assistant ID');
+    if (projectError || !assistantId) {
+      throw new Error('Missing assistant ID');
+    }
 
-    // ✉️ Send message to thread
+    // ✉️ Send user message to OpenAI
     await openai.beta.threads.messages.create(threadId, {
       role: 'user',
       content: message,
     });
 
-    // 💾 Save user message to discussion_messages
+    // 💾 Save user message to Supabase
     await supabaseAdmin.from('discussion_messages').insert({
-      thread_id: threadId,
+      thread_id: threadId, // ✅ OpenAI thread ID as TEXT
       role: 'user',
       content: message,
     });
 
-    // 🏃 Run assistant
+    // 🏃 Start assistant run
     const run = await openai.beta.threads.runs.create(threadId, {
       assistant_id: assistantId,
     });
 
-    // ⏳ Poll until done
+    // ⏳ Poll until complete
     let runStatus;
     do {
       runStatus = await openai.beta.threads.runs.retrieve(run.id, {
@@ -55,7 +60,7 @@ export async function POST(req: Request) {
       await new Promise((r) => setTimeout(r, 1000));
     } while (runStatus.status !== 'completed');
 
-    // 📬 Fetch reply
+    // 📬 Get assistant reply
     const messages = await openai.beta.threads.messages.list(threadId);
     const replyMsg = messages.data.find((msg) => msg.role === 'assistant');
 
@@ -68,7 +73,7 @@ export async function POST(req: Request) {
       textContent = replyMsg.content[0].text.value;
     }
 
-    // 💾 Save assistant reply to discussion_messages
+    // 💾 Save assistant reply to Supabase
     await supabaseAdmin.from('discussion_messages').insert({
       thread_id: threadId,
       role: 'assistant',

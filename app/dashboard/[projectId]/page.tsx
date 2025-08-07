@@ -35,6 +35,9 @@ import WorkshopPanel from '../dashboard_tabs/dashboard_panels/Workshop/WorkshopP
 
 export default function DashboardPage() {
   const [messages, setMessages] = useState<any[]>([]);
+
+const [sendingMessage, setSendingMessage] = useState(false);
+const [refreshing, setRefreshing] = useState(false);
   const [clearedMessages, setClearedMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -138,18 +141,28 @@ const [activeMainTab, setActiveMainTab] = useState<
       if (data) setRecentDocs(data);
     };
 
-    const sendMessage = async () => {
+   const sendMessage = async () => {
   if (!input.trim() || !projectId) return;
+
+  setSendingMessage(true);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+    setSendingMessage(false);
+    setMessages((prev) => [
+      ...prev,
+      { role: 'assistant', content: '⚠️ Request timed out. Please try again.' },
+    ]);
+  }, 15000);
 
   const userMessage = {
     role: 'user',
     content: input,
     timestamp: Date.now(),
   };
-
   setMessages((prev) => [...prev, userMessage]);
   setInput('');
-  setLoading(true);
 
   try {
     const {
@@ -158,16 +171,17 @@ const [activeMainTab, setActiveMainTab] = useState<
     } = await supabase.auth.getSession();
 
     if (error || !session?.access_token || !session?.user?.id) {
+      clearTimeout(timeoutId);
       setMessages((prev) => [
         ...prev,
         { role: 'assistant', content: '❌ Not logged in properly.' },
       ]);
+      setSendingMessage(false);
       return;
     }
 
     const user_id = session.user.id;
 
-    // 📝 Save user's message to Supabase
     await supabase.from('zeta_conversation_log').insert({
       user_id,
       project_id: projectId,
@@ -176,24 +190,27 @@ const [activeMainTab, setActiveMainTab] = useState<
       timestamp: new Date().toISOString(),
     });
 
-    // 🟢 Send message to your new backend /api/chat route
     const res = await fetch('/api/chat', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    projectId,
-    message: input,
-    modelId: selectedModelId, 
-  }),
-});
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId,
+        message: input,
+        modelId: selectedModelId,
+      }),
+      signal: controller.signal, // <-- attach the abort signal here
+    });
+
+    if (!res.ok) {
+      throw new Error(`API error: ${res.statusText}`);
+    }
 
     const data = await res.json();
 
+    clearTimeout(timeoutId);
+
     const assistantReply = data.reply;
 
-    // 📝 Save assistant's reply to Supabase
     await supabase.from('zeta_conversation_log').insert({
       user_id,
       project_id: projectId,
@@ -206,14 +223,22 @@ const [activeMainTab, setActiveMainTab] = useState<
       ...prev,
       { role: 'assistant', content: assistantReply },
     ]);
-  } catch (err) {
+  } catch (err: any) {
+    clearTimeout(timeoutId);
     console.error('❌ Message error:', err);
-    setMessages((prev) => [
-      ...prev,
-      { role: 'assistant', content: '⚠️ Failed to send message.' },
-    ]);
+    if (err.name === 'AbortError') {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '⚠️ Request was aborted due to timeout.' },
+      ]);
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '⚠️ Failed to send message.' },
+      ]);
+    }
   } finally {
-    setLoading(false);
+    setSendingMessage(false);
   }
 };
 
@@ -226,6 +251,39 @@ const [activeMainTab, setActiveMainTab] = useState<
       router.replace('/');
     };
 
+
+
+    
+
+   const handleRefresh = async () => {
+  if (!projectId) return;
+  setRefreshing(true);
+  try {
+    const { data: history, error } = await supabase
+      .from('zeta_conversation_log')
+      .select('role, message, timestamp')
+      .eq('project_id', projectId)
+      .order('timestamp', { ascending: true });
+
+    if (error) {
+      console.error('Error refreshing messages:', error);
+      setRefreshing(false);
+      return;
+    }
+
+    const formatted = history?.map((m) => ({
+      role: m.role,
+      content: m.message,
+      timestamp: new Date(m.timestamp).getTime(),
+    })) || [];
+
+    setMessages(formatted);
+  } catch (err) {
+    console.error('Refresh failed:', err);
+  } finally {
+    setRefreshing(false);
+  }
+};
    return (
   <div className="min-h-screen bg-blue-950 text-white px-6 py-8 flex flex-col items-center">
     <div className="flex w-full max-w-[1440px] gap-4 justify-start px-2">
@@ -233,10 +291,10 @@ const [activeMainTab, setActiveMainTab] = useState<
       <div className="relative w-[350px] shrink-0 px-3 py-2">
         {/* 🧠 Zeta Mascot */}
         <img
-          src={loading ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
-          alt={loading ? 'Zeta Thinking' : 'Zeta Mascot'}
-          className="w-[250px] absolute top-0 left-1/2 -translate-x-1/2"
-          
+
+  src={sendingMessage || refreshing ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
+  alt={sendingMessage || refreshing ? 'Zeta Thinking' : 'Zeta Mascot'}
+  className="w-[250px] absolute top-0 left-1/2 -translate-x-1/2"
         />
         <div className="absolute top-4 left-[300px] z-30 flex flex-col gap-2 items-center">
   {/* ⚙️ Settings Button */}
@@ -255,6 +313,16 @@ const [activeMainTab, setActiveMainTab] = useState<
   title="Generate Thought"
 >
   💡
+</button>
+{/* 🔄 Refresh Button */}
+<button
+  onClick={handleRefresh}
+  disabled={refreshing}
+  className={`mt-2 w-11 h-11 text-xl flex items-center justify-center rounded-full border px-0 py-0 shadow-lg transition
+    ${refreshing ? 'bg-gray-300 text-gray-600 cursor-not-allowed border-gray-300' : 'text-blue-600 bg-white hover:bg-blue-100 border-blue-300'}`}
+  title={refreshing ? "Refreshing..." : "Refresh"}
+>
+  🔄
 </button>
 </div>
 {/* ✅ Zeta left-side-panel */}
