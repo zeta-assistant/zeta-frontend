@@ -13,6 +13,10 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
 
+  // 🔔 latest_notification from mainframe_info
+  const [latestNotification, setLatestNotification] = useState<string | null>(null);
+  const DEFAULT_NOTIFICATION = 'Hey there! Got any new data for me to process?';
+
   // Build the current week: Sunday to Saturday
   const today = new Date();
   const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
@@ -43,7 +47,10 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
         return;
       }
 
-      let query;
+      let query:
+        | ReturnType<typeof supabase.from<'zeta_daily_memory'>>
+        | ReturnType<typeof supabase.from<'zeta_weekly_memory'>>
+        | ReturnType<typeof supabase.from<'zeta_current_memory'>>;
 
       if (tab === 'daily') {
         const formattedDate = selectedDate.toISOString().split('T')[0];
@@ -80,7 +87,9 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
           .maybeSingle();
       }
 
-      const { data, error } = await query;
+      const { data, error } = (await query) as
+        | { data: { memory?: string } | null; error: any }
+        | { data: { summary?: string } | null; error: any };
 
       if (error) {
         console.error('❌ Supabase fetch error:', JSON.stringify(error, null, 2));
@@ -88,8 +97,8 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       } else {
         const raw =
           tab === 'daily' || tab === 'weekly'
-            ? (data as { memory: string })?.memory
-            : (data as { summary: string })?.summary;
+            ? (data as { memory?: string } | null)?.memory
+            : (data as { summary?: string } | null)?.summary;
 
         setMemory(raw ?? null);
       }
@@ -97,8 +106,32 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       setLoading(false);
     };
 
-    fetchMemory();
+    if (projectId) fetchMemory();
   }, [projectId, tab, selectedDate]);
+
+  // 🔔 Fetch latest_notification for this project
+  useEffect(() => {
+    async function fetchLatestNotification() {
+      if (!projectId) {
+        setLatestNotification(null);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('mainframe_info')
+        .select('latest_notification')
+        .eq('project_id', projectId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('❌ Error fetching latest_notification:', error);
+        setLatestNotification(null);
+      } else {
+        setLatestNotification((data as { latest_notification?: string } | null)?.latest_notification ?? null);
+      }
+    }
+
+    fetchLatestNotification();
+  }, [projectId]);
 
   const userInitials = userEmail?.slice(0, 2).toUpperCase() ?? '??';
 
@@ -107,13 +140,13 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       <h2 className="text-lg font-bold mb-2">🧠 Memory</h2>
 
       <div className="flex gap-2 mb-3">
-        {['daily', 'weekly', 'monthly'].map((t) => (
+        {(['daily', 'weekly', 'monthly'] as const).map((t) => (
           <button
             key={t}
             className={`px-3 py-1 rounded text-sm font-semibold capitalize ${
               tab === t ? 'bg-white shadow' : 'bg-indigo-200'
             }`}
-            onClick={() => setTab(t as typeof tab)}
+            onClick={() => setTab(t)}
           >
             {t}
           </button>
@@ -129,8 +162,7 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
           </div>
           <div className="grid grid-cols-7 gap-1 text-center">
             {weekDates.map((date, i) => {
-              const isSelected =
-                selectedDate.toDateString() === date.toDateString();
+              const isSelected = selectedDate.toDateString() === date.toDateString();
 
               return (
                 <button
@@ -159,9 +191,7 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       )}
 
       <div className="flex justify-between items-center mb-3 mt-2">
-        <h2 className="font-bold text-base flex items-center gap-2">
-          🔔 Notifications
-        </h2>
+        <h2 className="font-bold text-base flex items-center gap-2">🔔 Notifications</h2>
         <div className="flex items-center gap-2">
           <button className="text-xs hover:underline text-indigo-700">Settings</button>
           <span className="bg-red-500 text-white text-xs rounded-full px-2 py-0.5">(2)</span>
@@ -176,7 +206,9 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
         />
         <div className="bg-white text-indigo-900 rounded-xl px-4 py-2 shadow text-xs max-w-[80%]">
           <p className="font-medium mb-1">Zeta:</p>
-          <p className="leading-snug">Hey there! Got any new data for me to process?</p>
+          <p className="leading-snug">
+            {latestNotification ?? DEFAULT_NOTIFICATION}
+          </p>
         </div>
       </div>
 

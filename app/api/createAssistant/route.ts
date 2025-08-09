@@ -16,31 +16,50 @@ export async function POST(req: Request) {
       projectName,
       assistantType,
       systemInstructions,
+      preferredUserName,
+      vision,
     } = await req.json();
 
     const now = new Date();
 
+    // Get authenticated user email from Supabase session
+    const {
+      data: { user },
+      error: userError,
+    } = await supabaseAdmin.auth.getUser();
+
+    if (userError) {
+      console.error('❌ Failed to get user from session:', userError);
+    }
+
+    const userEmail = user?.email || null;
+
     const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
     if (!model) throw new Error('Invalid modelId');
 
-    // ✅ OPENAI FLOW
+    // Compute preferred user name fallback
+    const preferredNameToSave = (preferredUserName?.trim() || userEmail || null);
+
     if (model.provider === 'openai') {
       // 1️⃣ Create Assistant
       const assistant = await openai.beta.assistants.create({
         name: `${projectName} (${assistantType})`,
         instructions:
           systemInstructions ||
-          `You are Zeta, an intelligent, adaptable AI assistant designed to help with any project the user is working on — usually something competitive, finance, trading, selling, building, business, etc.You refer to yourself as Zeta by default. 
-           format all calculations using markdown and Latex`,
+          `You are Zeta, an intelligent, adaptable AI assistant designed to help with any project the user is working on — usually something competitive, finance, trading, selling, building, business, etc. You refer to yourself as Zeta by default.`,
         model: modelId === 'gpt-4o' ? 'gpt-4o' : 'gpt-4',
       });
 
       const assistantId = assistant.id;
 
-      // 2️⃣ Save assistant_id to project
+      // 2️⃣ Save assistant_id and preferred user name to user_projects
       const { data: projectData, error: projectError } = await supabaseAdmin
         .from('user_projects')
-        .update({ assistant_id: assistantId })
+        .update({
+          assistant_id: assistantId,
+          preferred_user_name: preferredNameToSave,
+          vision: vision || null,
+        })
         .eq('id', projectId)
         .select('assistant_id')
         .single();
@@ -49,6 +68,30 @@ export async function POST(req: Request) {
         console.error('❌ Failed to save assistant_id:', projectError);
         throw new Error('Missing or invalid assistant ID');
       }
+
+      // 2.5️⃣ Upsert preferred user name into mainframe_info
+      const { error: mainframeError } = await supabaseAdmin
+        .from('mainframe_info')
+        .upsert(
+          {
+            project_id: projectId,
+            preferred_user_name: preferredNameToSave,
+          },
+          { onConflict: 'project_id' }
+        );
+
+      if (mainframeError) {
+        console.error('❌ Failed to upsert preferred_user_name into mainframe_info:', mainframeError);
+      }
+
+      // Insert initial short-term and long-term goals
+      const initialShortTermGoal = 'Define immediate tasks and priorities for Zeta.';
+      const initialLongTermGoal = 'Outline long-term objectives to maximize Zeta’s impact.';
+
+      await supabaseAdmin.from('goals').insert([
+        { project_id: projectId, goal_type: 'short_term', description: initialShortTermGoal },
+        { project_id: projectId, goal_type: 'long_term', description: initialLongTermGoal },
+      ]);
 
       // 3️⃣ Create Thread
       const newThread = await openai.beta.threads.create();
@@ -79,10 +122,12 @@ export async function POST(req: Request) {
         content: message,
       });
 
-      // 6.5️⃣ Add Zeta's intro message with rename option
+      // 6.5️⃣ Add personalized Zeta intro message
+      const userName = preferredNameToSave || 'there';
+
       await openai.beta.threads.messages.create(threadId, {
         role: 'assistant',
-        content: `Hey there! I'm Zeta — your AI assistant for this project 🤖  
+        content: `Hey ${userName}! I'm Zeta — your AI assistant for this project 🤖  
 If you'd prefer to call me something else, just let me know and I’ll go by that name from now on.  
 So… what are we working on today?`,
       });

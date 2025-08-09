@@ -56,6 +56,8 @@ const [activeMainTab, setActiveMainTab] = useState<
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [chatHidden, setChatHidden] = useState(false);
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('sm');
+  const [preferredName, setPreferredName] = useState('');
+  const [savingPrefName, setSavingPrefName] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasStartedRef = useRef(false);
@@ -63,6 +65,111 @@ const [activeMainTab, setActiveMainTab] = useState<
   const router = useRouter();
   const params = useParams();
   const projectId = params.projectId as string;
+
+  useEffect(() => {
+  if (!showSettingsModal || !projectId) return;
+  (async () => {
+    const { data, error } = await supabase
+      .from('user_projects')
+      .select('preferred_user_name')
+      .eq('id', projectId)    
+      .single();
+
+    if (error) {
+      console.error('Load preferred_user_name failed:', error);
+      return;
+    }
+    setPreferredName(data?.preferred_user_name ?? '');
+  })();
+}, [showSettingsModal, projectId]);
+
+async function savePreferredName() {
+  if (!projectId) return;
+  setSavingPrefName(true);
+
+  try {
+    // get session user (often required by RLS)
+    const { data: sess, error: sessErr } = await supabase.auth.getSession();
+    if (sessErr || !sess?.session?.user?.id) {
+      alert('Not logged in');
+      return;
+    }
+    const userId = sess.session.user.id;
+
+    // 1) Update user_projects and RETURN the row (maybeSingle = no throw on 0 rows)
+    const { data: updRow, error: upErr, status } = await supabase
+      .from('user_projects')
+      .update({ preferred_user_name: preferredName || null })
+      .eq('id', projectId)
+      .eq('user_id', userId) // keep if your RLS checks ownership; remove if not needed
+      .select('id, user_id, preferred_user_name')
+      .maybeSingle();
+
+    if (upErr) {
+      // print the full error object
+      console.error('user_projects update error (detail):', upErr);
+      alert(`Couldn't save name to user_projects:\n${JSON.stringify(upErr, null, 2)}`);
+      return;
+    }
+    if (!updRow) {
+      // no row returned → either RLS blocked or id didn't match user
+      alert(
+        `Update returned no row (HTTP ${status}). This is usually RLS or an id mismatch.\n` +
+        `projectId=${projectId}\nuserId=${userId}`
+      );
+      return;
+    }
+
+    // 2) Mirror into mainframe_info WITHOUT onConflict (works even if no unique index)
+const MF_COL = 'preferred_user_name'; // <-- change to 'preferred_username' if that's your actual column
+
+// Does a row already exist for this project?
+const { data: existingRow, error: checkErr } = await supabase
+  .from('mainframe_info')
+  .select('project_id')
+  .eq('project_id', projectId)
+  .maybeSingle();
+
+if (checkErr) {
+  console.error('mainframe_info select error:', checkErr);
+  alert(`Failed checking mainframe_info:\n${JSON.stringify(checkErr, null, 2)}`);
+  return;
+}
+
+if (existingRow) {
+  // UPDATE
+  const { error: updErr } = await supabase
+    .from('mainframe_info')
+    .update({ [MF_COL]: preferredName || null })
+    .eq('project_id', projectId);
+
+  if (updErr) {
+    console.error('mainframe_info update error:', updErr);
+    alert(`Failed to update mainframe_info:\n${JSON.stringify(updErr, null, 2)}`);
+    return;
+  }
+} else {
+  // INSERT
+  const { error: insErr } = await supabase
+    .from('mainframe_info')
+    .insert({ project_id: projectId, [MF_COL]: preferredName || null });
+
+  if (insErr) {
+    console.error('mainframe_info insert error:', insErr);
+    alert(`Failed to insert mainframe_info:\n${JSON.stringify(insErr, null, 2)}`);
+    return;
+  }
+}
+
+    setShowSettingsModal(false);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : JSON.stringify(e);
+    console.error('Save preferred_user_name failed:', e);
+    alert(`Save failed:\n${msg}`);
+  } finally {
+    setSavingPrefName(false);
+  }
+}
 
     useEffect(() => {
       if (!projectId || hasStartedRef.current) return;
@@ -402,12 +509,22 @@ const [activeMainTab, setActiveMainTab] = useState<
 {activeMainTab === 'files' && <FilesPanel recentDocs={recentDocs} fontSize={fontSize} />}
 {activeMainTab === 'apis' && <ApisPanel fontSize={fontSize} />}
 {activeMainTab === 'calendar' && <CalendarPanel fontSize={fontSize} />}
-{activeMainTab === 'goals' && <GoalsPanel fontSize={fontSize} />}
-{activeMainTab === 'notifications' && <NotificationsPanel fontSize={fontSize} />}
-{activeMainTab === 'tasks' && <TasksPanel fontSize={fontSize} />}
-{activeMainTab === 'thoughts' && <ThoughtsPanel fontSize={fontSize} />}
-{activeMainTab === 'functions' && <FunctionsPanel projectId={projectId} fontSize={fontSize} />}
-{activeMainTab === 'newfunction' && <NewFunctionPanel projectId={projectId} fontSize={fontSize} />}
+{activeMainTab === 'goals' && <GoalsPanel fontSize="base" projectId={projectId} />}
+{activeMainTab === 'notifications' && (
+  <NotificationsPanel fontSize={fontSize} projectId={projectId} />
+)}
+{activeMainTab === 'tasks' && (
+  <TasksPanel fontSize={fontSize} />
+)}
+{activeMainTab === 'thoughts' && (
+  <ThoughtsPanel projectId={projectId} fontSize={fontSize} />
+)}
+{activeMainTab === 'functions' && (
+  <FunctionsPanel projectId={projectId} fontSize={fontSize} />
+)}
+{activeMainTab === 'newfunction' && (
+  <NewFunctionPanel projectId={projectId} fontSize={fontSize} />
+)}
 {activeMainTab === 'workshop' && <WorkshopPanel projectId={projectId} fontSize="base" />}
 
 
@@ -432,6 +549,8 @@ const [activeMainTab, setActiveMainTab] = useState<
         ✖️
       </button>
       <h2 className="text-lg font-bold mb-3">⚙️ Zeta Settings</h2>
+
+      {/* Engine selector (unchanged) */}
       <div className="mt-4">
         <label className="block text-sm font-semibold mb-1">
           🧠 Choose Intelligence Engine
@@ -445,6 +564,37 @@ const [activeMainTab, setActiveMainTab] = useState<
           <option value="deepseek-chat">DeepSeek</option>
           <option value="mistral-7b">SLM</option>
         </select>
+      </div>
+
+      {/* NEW: Preferred user name */}
+      <div className="mt-5">
+        <label className="block text-sm font-semibold mb-1">
+          🏷️ What should Zeta call you?
+        </label>
+        <input
+          type="text"
+          placeholder="e.g. Yogi"
+          value={preferredName}
+          onChange={(e) => setPreferredName(e.target.value)}
+          className="w-full border border-indigo-300 rounded-md p-2 text-sm bg-indigo-50 text-indigo-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        />
+      </div>
+
+      {/* Actions */}
+      <div className="mt-6 flex justify-end gap-2">
+        <button
+          onClick={() => setShowSettingsModal(false)}
+          className="px-3 py-2 rounded-md border border-indigo-200 text-indigo-800 hover:bg-indigo-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={savePreferredName}
+          disabled={savingPrefName}
+          className="px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+        >
+          {savingPrefName ? 'Saving…' : 'Save'}
+        </button>
       </div>
     </div>
   </div>
