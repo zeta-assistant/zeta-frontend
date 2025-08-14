@@ -35,7 +35,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
     const { error } = await supabase
       .from('discussions')
       .delete()
-      .eq('thread_id', threadId); // ✅ match OpenAI thread ID
+      .eq('thread_id', threadId);
 
     if (error) {
       console.error('❌ Error deleting discussion:', error.message);
@@ -48,7 +48,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
 
   if (showNewForm) {
     return (
-      <div className={`p-6 text-${fontSize} text-indigo-200 bg-blue-950`}>
+      <div className={`p-6 text-${fontSize} text-blue-200 bg-blue-950`}>
         <h2 className="text-lg text-white font-semibold mb-4">➕ Start a New Discussion</h2>
 
         <NewDiscussionForm
@@ -63,7 +63,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
               const { data } = await supabase
                 .from('threads')
                 .select('openai_thread_id')
-                .eq('openai_thread_id', newDiscussion.thread_id) // ✅ match against correct field
+                .eq('openai_thread_id', newDiscussion.thread_id)
                 .single();
 
               if (data) {
@@ -94,7 +94,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
 
         <button
           onClick={() => setShowNewForm(false)}
-          className="mt-4 text-sm text-pink-400 hover:text-pink-200"
+          className="mt-4 text-sm text-blue-300 hover:text-blue-100"
         >
           ← Cancel
         </button>
@@ -104,25 +104,25 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
 
   if (!selectedThread) {
     return (
-      <div className={`p-6 overflow-y-auto text-${fontSize} text-indigo-200 space-y-6 bg-blue-950`}>
+      <div className={`p-6 overflow-y-auto text-${fontSize} text-blue-200 space-y-6 bg-blue-950`}>
         <div className="flex justify-between items-center">
           <h2 className="text-lg text-white font-semibold">💬 Choose a Discussion</h2>
           <button
             onClick={() => setShowNewForm(true)}
-            className="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1 rounded shadow text-sm"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded shadow text-sm"
           >
             ➕ New Discussion
           </button>
         </div>
 
         {discussions.length === 0 ? (
-          <p className="text-gray-400">No discussions yet.</p>
+          <p className="text-blue-300/70">No discussions yet.</p>
         ) : (
           discussions.map((d) => (
             <div
               key={d.thread_id}
               onClick={() => setSelectedThread(d)}
-              className="cursor-pointer bg-purple-700 hover:bg-purple-800 px-4 py-3 rounded-xl shadow text-white transition"
+              className="cursor-pointer bg-gradient-to-br from-blue-700 to-blue-800 hover:from-blue-600 hover:to-blue-700 px-4 py-3 rounded-xl shadow border border-blue-600 text-white transition"
             >
               {d.title}
             </div>
@@ -133,7 +133,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
   }
 
   return (
-    <div className={`p-6 text-${fontSize} text-indigo-200 space-y-6 bg-blue-950 flex flex-col h-full`}>
+    <div className={`p-6 text-${fontSize} text-blue-200 space-y-6 bg-blue-950 flex flex-col h-full`}>
       <div className="flex justify-between items-center">
         <h2 className="text-lg text-white font-semibold">
           🧵 Discussion: {selectedThread.title || selectedThread.thread_id}
@@ -141,7 +141,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
         <div className="flex gap-3">
           <button
             onClick={() => setSelectedThread(null)}
-            className="text-sm text-pink-400 hover:text-pink-200"
+            className="text-sm text-blue-300 hover:text-blue-100"
           >
             ← Back
           </button>

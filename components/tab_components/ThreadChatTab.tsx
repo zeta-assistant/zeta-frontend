@@ -5,8 +5,7 @@ import 'katex/dist/katex.min.css';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Virtuoso } from 'react-virtuoso';
-import { VirtuosoHandle } from 'react-virtuoso';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { supabase } from '@/lib/supabaseClient';
 import { formatMathMarkdown } from '@/lib/formatMathMarkdown';
 import { detectLatexFormats } from '@/lib/latexDetector';
@@ -107,30 +106,30 @@ export function ThreadChatTab({ threadId, fontSize }: ThreadChatTabProps) {
               console.log('📐 LaTeX diagnostics for message:', diagnostics.counts);
             }
 
+            const bubbleCommon =
+              'relative max-w-[85%] whitespace-pre-line overflow-hidden rounded-2xl border shadow-md p-4 pb-6';
+
+            const bubbleByRole =
+              msg.role === 'user'
+                ? 'ml-auto bg-gradient-to-br from-blue-200 to-blue-100 border-blue-300 text-blue-900'
+                : 'mr-auto bg-gradient-to-br from-yellow-300 to-yellow-100 border-yellow-400 text-slate-900';
+
             return (
-              <div key={msg.id ?? index}>
-                <div
-                  className={`relative max-w-[85%] whitespace-pre-line overflow-hidden text-${fontSize} ${
-                    msg.role === 'user'
-                      ? 'ml-auto bg-purple-200 text-purple-900 font-plex border border-purple-400 shadow-sm p-4 rounded-xl'
-                      : 'mr-auto bg-blue-800 text-white font-plex shadow-lg border border-blue-600 px-4 py-4 rounded-xl'
-                  }`}
-                >
-                  <div className="prose prose-invert max-w-none text-white">
+              <div key={msg.id ?? index} className="mb-5 md:mb-6">
+                <div className={`${bubbleCommon} ${bubbleByRole}`}>
+                  <div className={`prose ${msg.role === 'assistant' ? 'text-slate-900' : 'text-blue-900'} max-w-none`}>
                     <ReactMarkdown
                       children={formatMathMarkdown(msg.content)}
                       remarkPlugins={[remarkMath]}
                       rehypePlugins={[rehypeKatex]}
                       components={{
-                        p: ({ children }) => (
-                          <p className="whitespace-pre-wrap">{children}</p>
-                        ),
+                        p: ({ children }) => <p className="whitespace-pre-wrap">{children}</p>,
                       }}
                     />
                   </div>
 
                   {msg.created_at && (
-                    <div className="absolute bottom-1 right-3 text-[10px] text-gray-500">
+                    <div className="absolute bottom-2 right-2 text-[10px] text-gray-500">
                       {new Date(msg.created_at).toLocaleTimeString([], {
                         hour: '2-digit',
                         minute: '2-digit',
@@ -149,7 +148,7 @@ export function ThreadChatTab({ threadId, fontSize }: ThreadChatTabProps) {
         <div className="flex gap-2">
           <input
             type="text"
-            className="bg-purple-50 text-purple-900 border-2 border-purple-300 rounded-l-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 font-semibold text-sm flex-1 max-w-xl shadow-sm"
+            className="bg-blue-50 text-blue-900 border-2 border-blue-300 rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-sm flex-1 max-w-xl shadow-sm"
             placeholder="Type a message..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -158,7 +157,7 @@ export function ThreadChatTab({ threadId, fontSize }: ThreadChatTabProps) {
           />
           <button
             onClick={sendMessage}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg shadow hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="bg-blue-600 text-white px-4 py-2 rounded-xl shadow hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
             disabled={loading}
           >
             Send

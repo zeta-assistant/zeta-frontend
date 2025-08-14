@@ -15,13 +15,13 @@ type Thought = {
 
 type Props = { projectId: string; fontSize?: 'sm' | 'base' | 'lg' };
 
-const CACHE_TTL_MS = 60_000; // 1 minute
+const CACHE_TTL_MS = 60_000;
 
 export default function ThoughtsPanel({ projectId, fontSize = 'base' }: Props) {
   const [thoughts, setThoughts] = useState<Thought[]>([]);
-  const [loading, setLoading] = useState(true); // first visit only
-  const [hasSession, setHasSession] = useState<boolean>(false);
+  const [loading, setLoading] = useState(true);
   const [genBusy, setGenBusy] = useState(false);
+  const [hasSession, setHasSession] = useState<boolean>(false);
   const hydratedFromCache = useRef(false);
 
   const sizeClass =
@@ -60,9 +60,7 @@ export default function ThoughtsPanel({ projectId, fontSize = 'base' }: Props) {
 
   const cacheKey = (pid: string) => `thoughts:${pid}`;
   const cachePut = (pid: string, data: Thought[]) => {
-    try {
-      sessionStorage.setItem(cacheKey(pid), JSON.stringify({ t: Date.now(), data }));
-    } catch {}
+    try { sessionStorage.setItem(cacheKey(pid), JSON.stringify({ t: Date.now(), data })); } catch {}
   };
   const cacheGet = (pid: string): { t: number; data: Thought[] } | null => {
     try {
@@ -71,7 +69,7 @@ export default function ThoughtsPanel({ projectId, fontSize = 'base' }: Props) {
     } catch { return null; }
   };
 
-  async function getAuthHeaders(): Promise<HeadersInit> {
+  async function getOptionalAuthHeaders(): Promise<HeadersInit> {
     const { data: { session } } = await supabase.auth.getSession();
     setHasSession(!!session);
     const h: Record<string, string> = {};
@@ -79,22 +77,18 @@ export default function ThoughtsPanel({ projectId, fontSize = 'base' }: Props) {
     return h;
   }
 
-  // background refresh (no flicker if we have cache)
   async function refreshNow() {
-    const headers = await getAuthHeaders();
-    if (!hasSession) return;
+    const headers = await getOptionalAuthHeaders();
     const res = await fetch(`/api/thoughts/list?projectId=${projectId}`, { headers });
-    const json = await res.json();
-    const next = json.thoughts || [];
+    const json = await res.json().catch(() => ({ thoughts: [] }));
+    const next: Thought[] = json.thoughts || [];
     setThoughts(next);
     cachePut(projectId, next);
   }
 
-  // initial mount: hydrate from cache instantly, then refresh if stale
   useEffect(() => {
     let mounted = true;
 
-    // 1) hydrate
     const cached = cacheGet(projectId);
     if (cached?.data) {
       setThoughts(cached.data);
@@ -102,31 +96,25 @@ export default function ThoughtsPanel({ projectId, fontSize = 'base' }: Props) {
       setLoading(false);
     }
 
-    // 2) auth + decide to refresh
     (async () => {
-      const headers = await getAuthHeaders();
-      const hasAuth = Object.keys(headers).length > 0;
-
-      if (!hasAuth) { setLoading(false); return; }
-
+      const headers = await getOptionalAuthHeaders();
       const isStale = !cached || Date.now() - cached.t > CACHE_TTL_MS;
 
       if (!hydratedFromCache.current) {
-        // no cache -> do a regular load with skeleton
         const res = await fetch(`/api/thoughts/list?projectId=${projectId}`, { headers });
-        const json = await res.json();
+        const json = await res.json().catch(() => ({ thoughts: [] }));
         if (!mounted) return;
-        const data = json.thoughts || [];
+        const data: Thought[] = json.thoughts || [];
         setThoughts(data);
         cachePut(projectId, data);
         setLoading(false);
       } else if (isStale) {
-        // we have cache -> refresh quietly
         refreshNow();
+      } else {
+        setLoading(false);
       }
     })();
 
-    // 3) refresh when user logs in/out
     const { data: sub } = supabase.auth.onAuthStateChange(async () => {
       if (!mounted) return;
       await refreshNow();
@@ -134,186 +122,175 @@ export default function ThoughtsPanel({ projectId, fontSize = 'base' }: Props) {
     });
 
     return () => { mounted = false; sub.subscription.unsubscribe(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   async function update(id: string, payload: Partial<Thought>) {
-    const headers = { 'Content-Type': 'application/json', ...(await getAuthHeaders()) };
-    if (!hasSession) return;
+    const headers = { 'Content-Type': 'application/json', ...(await getOptionalAuthHeaders()) };
     await fetch('/api/thoughts/update', { method: 'POST', headers, body: JSON.stringify({ id, ...payload }) });
-    await refreshNow(); // keep cache & UI in sync
+    await refreshNow();
   }
 
   async function remove(id: string) {
-    const headers = { 'Content-Type': 'application/json', ...(await getAuthHeaders()) };
-    if (!hasSession) return;
+    const headers = { 'Content-Type': 'application/json', ...(await getOptionalAuthHeaders()) };
     await fetch('/api/thoughts/delete', { method: 'POST', headers, body: JSON.stringify({ id }) });
     await refreshNow();
   }
 
-  // 🔗 call Next proxy -> which calls your Deno edge function
   async function generateNow() {
-  setGenBusy(true);
-
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 25_000);
-
-  try {
-    const res = await fetch('/api/thoughts/generate', {
-      method: 'POST',
-      signal: ctl.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId, trigger: 'manual' }),
-    });
-
-    const ct = res.headers.get('content-type') || '';
-    const body = ct.includes('application/json')
-      ? await res.json().catch(() => ({}))
-      : await res.text().catch(() => '');
-
-    if (!res.ok) {
-      const msg =
-        typeof body === 'object' ? (body as any)?.error ?? JSON.stringify(body) :
-        typeof body === 'string' && body ? body :
-        `HTTP ${res.status}`;
-      console.error('Generate failed:', { status: res.status, body });
-      alert(`Generate failed: ${msg}`);
-      return;
+    setGenBusy(true);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 25_000);
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(await getOptionalAuthHeaders()) };
+      const res = await fetch('/api/thoughts/generate', {
+        method: 'POST',
+        signal: ctl.signal,
+        headers,
+        body: JSON.stringify({ project_id: projectId, trigger: 'manual' }),
+      });
+      const ct = res.headers.get('content-type') || '';
+      const body = ct.includes('application/json') ? await res.json().catch(() => ({})) : await res.text().catch(() => '');
+      if (!res.ok) {
+        const msg = typeof body === 'object' ? (body as any)?.error ?? JSON.stringify(body) : typeof body === 'string' && body ? body : `HTTP ${res.status}`;
+        alert(`Generate failed: ${msg}`);
+        return;
+      }
+      await refreshNow();
+    } catch (e: any) {
+      alert(`Generate error: ${e?.name === 'AbortError' ? 'Request timed out' : (e?.message || String(e))}`);
+    } finally {
+      clearTimeout(timer);
+      setGenBusy(false);
     }
-
-    await refreshNow();
-  } catch (e: any) {
-    const msg = e?.name === 'AbortError' ? 'Request timed out' : (e?.message || String(e));
-    console.error('generateNow exception:', msg);
-    alert(`Generate error: ${msg}`);
-  } finally {
-    clearTimeout(timer);
-    setGenBusy(false);
   }
-}
 
   const headerRight = useMemo(() => (
     <div className="flex items-center gap-2">
       <button
         onClick={refreshNow}
-        className="px-3 py-1 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs transition"
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/10 
+                 bg-white/5 hover:bg-white/10 text-xs transition"
         title="Refresh"
       >
-        Refresh
+        ⟳ <span className="hidden sm:inline">Refresh</span>
       </button>
       <button
         onClick={generateNow}
         disabled={genBusy}
-        className="px-3 py-1 rounded-xl text-xs border border-violet-400/30 
-                   bg-violet-500/20 hover:bg-violet-500/30 transition disabled:opacity-60"
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border border-violet-400/30 
+                 bg-violet-500/20 hover:bg-violet-500/30 transition disabled:opacity-60"
         title="Generate a new thought now"
       >
-        {genBusy ? 'Generating…' : 'Generate now'}
+        ⚡ {genBusy ? 'Generating…' : 'Generate now'}
       </button>
     </div>
   ), [genBusy]);
 
-  // --- UI ---
   return (
-    <div className={`rounded-2xl border border-white/10 bg-white/5 p-3 overflow-hidden ${sizeClass}`}>
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg sm:text-xl font-semibold text-white/90">Thoughts</h2>
+    <div className={`rounded-2xl border border-white/10 bg-white/5 ${sizeClass} flex flex-col max-h-[70vh]`}>
+      {/* Sticky header inside the panel */}
+      <div className="flex items-center justify-between px-3 py-3 sticky top-0 z-[5] bg-white/5 backdrop-blur rounded-t-2xl border-b border-white/10">
+        <h2 className="text-lg sm:text-xl font-semibold text-white">Thoughts</h2>
         {headerRight}
       </div>
 
-      {!hasSession ? (
-        <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-6 text-sm text-white/80">
-          Sign in to view thoughts.
-        </div>
-      ) : loading ? (
-        <div className="mt-4 grid gap-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-4">
-              <div className="h-3 w-24 rounded bg-white/15 animate-pulse" />
-              <div className="mt-3 h-4 w-3/4 rounded bg-white/15 animate-pulse" />
-              <div className="mt-2 h-4 w-1/2 rounded bg-white/10 animate-pulse" />
+      {/* Scrollable list area */}
+      <div className="px-3 pb-3 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+        {loading ? (
+          <div className="mt-2 grid gap-3">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="h-3 w-24 rounded bg-white/15 animate-pulse" />
+                <div className="mt-3 h-4 w-3/4 rounded bg-white/15 animate-pulse" />
+                <div className="mt-2 h-4 w-1/2 rounded bg-white/10 animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : thoughts.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-white/10 bg-gradient-to-br from-white/5 to-white/10 p-6">
+            <div className="text-base text-white/90">No thoughts yet.</div>
+            <div className="mt-1 text-sm text-white/70">
+              They’ll show up daily and after key events. You can also generate one now.
             </div>
-          ))}
-        </div>
-      ) : thoughts.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-white/10 bg-gradient-to-br from-white/5 to-white/10 p-6">
-          <div className="text-base text-white/90">No thoughts yet.</div>
-          <div className="mt-1 text-sm text-white/70">
-            They’ll show up daily and after key events. You can also generate one now.
+            <div className="mt-4">
+              <button
+                onClick={generateNow}
+                disabled={genBusy}
+                className="px-4 py-2 rounded-xl bg-violet-500/20 border border-violet-400/30 hover:bg-violet-500/30 transition text-sm"
+              >
+                {genBusy ? 'Generating…' : 'Generate first thought'}
+              </button>
+            </div>
           </div>
-          <div className="mt-4">
-            <button
-              onClick={generateNow}
-              disabled={genBusy}
-              className="px-4 py-2 rounded-xl bg-violet-500/20 border border-violet-400/30 hover:bg-violet-500/30 transition text-sm"
-            >
-              {genBusy ? 'Generating…' : 'Generate first thought'}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-3 grid gap-3">
-          {thoughts.map((t) => (
-            <div
-              key={t.id}
-              className={`relative rounded-xl border border-white/10 bg-white/5 p-4
-                          before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:rounded-l-xl
-                          ${cardStripe(t.category)}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs text-white/70 flex items-center gap-2">
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ring-1 ${badgeStyle(t.category)}`}>
-                      <span>{iconFor(t.category)}</span>
-                      <span className="hidden sm:inline">{t.category}</span>
-                    </span>
-                    <span>•</span>
-                    <span title={new Date(t.created_at).toLocaleString()}>
-                      {timeAgo(t.created_at)}
-                    </span>
-                    {t.source_trigger && (
-                      <>
-                        <span>•</span>
-                        <span className="uppercase tracking-wide">{t.source_trigger}</span>
-                      </>
-                    )}
-                    {t.pinned && <span>• pinned</span>}
-                    {t.actioned && <span>• actioned</span>}
+        ) : (
+          <div className="mt-3 grid gap-3">
+            {thoughts.map((t) => (
+              <div
+                key={t.id}
+                className={`relative rounded-xl border border-white/10 bg-white/5 p-4
+                            before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:rounded-l-xl
+                            ${cardStripe(t.category)}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] text-white/70 flex items-center gap-2">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ring-1 ${badgeStyle(t.category)}`}>
+                        <span>{iconFor(t.category)}</span>
+                        <span className="hidden sm:inline">{t.category}</span>
+                      </span>
+                      <span>•</span>
+                      <span title={new Date(t.created_at).toLocaleString()}>
+                        {timeAgo(t.created_at)}
+                      </span>
+                      {t.source_trigger && (
+                        <>
+                          <span>•</span>
+                          <span className="uppercase tracking-wide">{t.source_trigger}</span>
+                        </>
+                      )}
+                      {t.pinned && <span>• pinned</span>}
+                      {t.actioned && <span>• actioned</span>}
+                    </div>
+
+                    <div className="mt-2 text-white leading-relaxed break-words">
+                      {t.content}
+                    </div>
                   </div>
 
-                  <div className="mt-2 text-white/90 leading-relaxed break-words">
-                    {t.content}
+                  <div className="flex flex-col gap-2 shrink-0">
+                    <button
+                      onClick={() => update(t.id, { pinned: !t.pinned })}
+                      className="px-2 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs"
+                      title={t.pinned ? 'Unpin' : 'Pin'}
+                    >
+                      {t.pinned ? 'Unpin' : 'Pin'}
+                    </button>
+                    <button
+                      onClick={() => update(t.id, { actioned: !t.actioned })}
+                      className="px-2 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs"
+                      title={t.actioned ? 'Mark un-actioned' : 'Mark actioned'}
+                    >
+                      {t.actioned ? 'Un-action' : 'Actioned'}
+                    </button>
+                    <button
+                      onClick={() => remove(t.id)}
+                      className="px-2 py-1 rounded-lg border border-rose-300/30 bg-rose-500/10 hover:bg-rose-500/20 text-xs text-rose-200"
+                      title="Delete"
+                    >
+                      Delete
+                    </button>
                   </div>
-                </div>
-
-                <div className="flex flex-col gap-2 shrink-0">
-                  <button
-                    onClick={() => update(t.id, { pinned: !t.pinned })}
-                    className="px-2 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs"
-                    title={t.pinned ? 'Unpin' : 'Pin'}
-                  >
-                    {t.pinned ? 'Unpin' : 'Pin'}
-                  </button>
-                  <button
-                    onClick={() => update(t.id, { actioned: !t.actioned })}
-                    className="px-2 py-1 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs"
-                    title={t.actioned ? 'Mark un-actioned' : 'Mark actioned'}
-                  >
-                    {t.actioned ? 'Un-action' : 'Actioned'}
-                  </button>
-                  <button
-                    onClick={() => remove(t.id)}
-                    className="px-2 py-1 rounded-lg border border-rose-300/30 bg-rose-500/10 hover:bg-rose-500/20 text-xs text-rose-200"
-                    title="Delete"
-                  >
-                    Delete
-                  </button>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+        {!hasSession && (
+          <div className="mt-3 text-[11px] text-white/60">
+            Viewing as guest — sign in for pin/action controls to persist across devices.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
