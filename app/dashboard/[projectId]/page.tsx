@@ -27,14 +27,13 @@ import ThoughtsPanel from '../dashboard_tabs/dashboard_panels/Thoughts/ThoughtsP
 import FunctionsPanel from '../dashboard_tabs/dashboard_panels/Functions/FunctionsPanel';
 import NewFunctionPanel from '../dashboard_tabs/dashboard_panels/NewFunction/NewFunctionPanel';
 import WorkshopPanel from '../dashboard_tabs/dashboard_panels/Workshop/WorkshopPanel';
+import TimelinePanel from '../dashboard_tabs/dashboard_panels/Timeline/TimelinePanel';
 
 import ThoughtButton from '../dashboard_buttons/thought_button/thought_button';
 import MessageButton from '../dashboard_buttons/message_button/message_button';
 import SettingsButton from '../dashboard_buttons/settings_button/settings_button';
 import RefreshButton from '../dashboard_buttons/refresh_button/refresh_button';
 import UploadButton from '../dashboard_buttons/upload_button/upload_button';
-
-
 
 type Uploaded = { file_name: string; file_url: string };
 
@@ -52,8 +51,24 @@ export default function DashboardPage() {
   const [chatView, setChatView] = useState<'all' | 'today' | 'pinned'>('today');
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+
+  const [userName, setUserName] = useState<string>('you');
+
   const [activeMainTab, setActiveMainTab] = useState<
-    'chat' | 'discussions' | 'logs' | 'files' | 'calendar' | 'functions' | 'goals' | 'thoughts' | 'tasks' | 'notifications' | 'newfunction' | 'workshop' | 'apis'
+    | 'chat'
+    | 'discussions'
+    | 'logs'
+    | 'files'
+    | 'calendar'
+    | 'functions'
+    | 'goals'
+    | 'thoughts'
+    | 'tasks'
+    | 'timeline'
+    | 'notifications'
+    | 'newfunction'
+    | 'workshop'
+    | 'apis'
   >('chat');
   const [selectedModelId, setSelectedModelId] = useState('gpt-4o');
   const [chatHidden, setChatHidden] = useState(false);
@@ -69,20 +84,19 @@ export default function DashboardPage() {
   const projectId = params.projectId as string;
   const isImage = (name: string) => /\.(png|jpe?g|webp|gif)$/i.test(name);
 
-const buildFilesMarkdown = (atts: Uploaded[]) => {
-  const lines: string[] = ['📎 Files attached:'];
-  for (const a of atts) {
-    if (isImage(a.file_name)) {
-      // inline preview
-      lines.push(`![${a.file_name}](${a.file_url})`);
-    } else {
-      // clickable link
-      lines.push(`- [${a.file_name}](${a.file_url})`);
+  const buildFilesMarkdown = (atts: Uploaded[]) => {
+    const lines: string[] = ['📎 Files attached:'];
+    for (const a of atts) {
+      if (isImage(a.file_name)) {
+        // inline preview
+        lines.push(`![${a.file_name}](${a.file_url})`);
+      } else {
+        // clickable link
+        lines.push(`- [${a.file_name}](${a.file_url})`);
+      }
     }
-  }
-  return lines.join('\n');
-};
-
+    return lines.join('\n');
+  };
 
   useEffect(() => {
     if (!projectId || hasStartedRef.current) return;
@@ -169,116 +183,116 @@ const buildFilesMarkdown = (atts: Uploaded[]) => {
 
   // NOTE: now accepts optional attachments and forwards them to /api/chat
   const sendMessage = async (opts?: { attachments?: Uploaded[] }) => {
-  if (!projectId) return;
+    if (!projectId) return;
 
-  const attachments = opts?.attachments ?? [];
-  const hasText = !!input.trim();
-  const hasFiles = attachments.length > 0;
-  if (!hasText && !hasFiles) return;
+    const attachments = opts?.attachments ?? [];
+    const hasText = !!input.trim();
+    const hasFiles = attachments.length > 0;
+    if (!hasText && !hasFiles) return;
 
-  setSendingMessage(true);
+    setSendingMessage(true);
 
-  const controller = new AbortController();
-  let didTimeout = false;
-  const timeoutId = setTimeout(() => {
-    didTimeout = true;
-    controller.abort();
-    setSendingMessage(false);
-    setMessages((prev) => [
-      ...prev,
-      { role: 'assistant', content: '⚠️ Request timed out. Please try again.' },
-    ]);
-  }, 90_000);
-
-  // local bubbles for immediate UX
-  const sentText = input;
-  if (hasText) {
-    setMessages((prev) => [...prev, { role: 'user', content: sentText, timestamp: Date.now() }]);
-  }
-  if (hasFiles) {
-  const filesMsg = buildFilesMarkdown(attachments);
-  setMessages((prev) => [
-    ...prev,
-    { role: 'user', content: filesMsg, timestamp: Date.now() },
-  ]);
-}
-  setInput('');
-
-  try {
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession();
-    if (error || !session?.access_token || !session?.user?.id) {
-      clearTimeout(timeoutId);
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeoutId = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
       setSendingMessage(false);
-      setMessages((prev) => [...prev, { role: 'assistant', content: '❌ Not logged in properly.' }]);
-      return;
-    }
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '⚠️ Request timed out. Please try again.' },
+      ]);
+    }, 90_000);
 
-    const user_id = session.user.id;
-
-    // Persist user text (if any)
+    // local bubbles for immediate UX
+    const sentText = input;
     if (hasText) {
+      setMessages((prev) => [...prev, { role: 'user', content: sentText, timestamp: Date.now() }]);
+    }
+    if (hasFiles) {
+      const filesMsg = buildFilesMarkdown(attachments);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: filesMsg, timestamp: Date.now() },
+      ]);
+    }
+    setInput('');
+
+    try {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+      if (error || !session?.access_token || !session?.user?.id) {
+        clearTimeout(timeoutId);
+        setSendingMessage(false);
+        setMessages((prev) => [...prev, { role: 'assistant', content: '❌ Not logged in properly.' }]);
+        return;
+      }
+
+      const user_id = session.user.id;
+
+      // Persist user text (if any)
+      if (hasText) {
+        await supabase.from('zeta_conversation_log').insert({
+          user_id,
+          project_id: projectId,
+          role: 'user',
+          message: sentText,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // NEW: persist file note so it shows after refresh
+      if (hasFiles) {
+        const filesMsg = buildFilesMarkdown(attachments);
+        await supabase.from('zeta_conversation_log').insert({
+          user_id,
+          project_id: projectId,
+          role: 'user',
+          message: filesMsg, // markdown with ![img](url) so it renders inline later
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // Call your API (still forwards attachments so Zeta can analyze them)
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          message: hasText ? sentText : '',
+          modelId: selectedModelId,
+          attachments, // <-- URLs for the API
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) throw new Error(`API error: ${res.statusText}`);
+
+      const data = await res.json();
+      clearTimeout(timeoutId);
+
+      const assistantReply = data.reply;
+
       await supabase.from('zeta_conversation_log').insert({
         user_id,
         project_id: projectId,
-        role: 'user',
-        message: sentText,
+        role: 'assistant',
+        message: assistantReply,
         timestamp: new Date().toISOString(),
       });
+
+      setMessages((prev) => [...prev, { role: 'assistant', content: assistantReply }]);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (didTimeout && err.name === 'AbortError') return;
+      console.error('❌ Message error:', err);
+      setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ Failed to send message.' }]);
+    } finally {
+      setSendingMessage(false);
     }
-
-    // NEW: persist file note so it shows after refresh
-    if (hasFiles) {
-  const filesMsg = buildFilesMarkdown(attachments);
-  await supabase.from('zeta_conversation_log').insert({
-    user_id,
-    project_id: projectId,
-    role: 'user',
-    message: filesMsg, // markdown with ![img](url) so it renders inline later
-    timestamp: new Date().toISOString(),
-  });
-}
-
-    // Call your API (still forwards attachments so Zeta can analyze them)
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        projectId,
-        message: hasText ? sentText : '',
-        modelId: selectedModelId,
-        attachments, // <-- URLs for the API
-      }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) throw new Error(`API error: ${res.statusText}`);
-
-    const data = await res.json();
-    clearTimeout(timeoutId);
-
-    const assistantReply = data.reply;
-
-    await supabase.from('zeta_conversation_log').insert({
-      user_id,
-      project_id: projectId,
-      role: 'assistant',
-      message: assistantReply,
-      timestamp: new Date().toISOString(),
-    });
-
-    setMessages((prev) => [...prev, { role: 'assistant', content: assistantReply }]);
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    if (didTimeout && err.name === 'AbortError') return;
-    console.error('❌ Message error:', err);
-    setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ Failed to send message.' }]);
-  } finally {
-    setSendingMessage(false);
-  }
-};
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') sendMessage();
@@ -343,19 +357,18 @@ const buildFilesMarkdown = (atts: Uploaded[]) => {
             <ThoughtButton projectId={projectId} />
             <MessageButton projectId={projectId} />
             {/* ✅ Upload button (no onOpen prop) */}
-  <UploadButton
-  projectId={projectId}
-  onUploaded={async () => {
-    await fetchRecentDocs();
-    setRefreshNonce((n) => n + 1);
-  }}
-/>
+            <UploadButton
+              projectId={projectId}
+              onUploaded={async () => {
+                await fetchRecentDocs();
+                setRefreshNonce((n) => n + 1);
+              }}
+            />
           </div>
 
           <ZetaLeftSidePanel
             key={`left-${refreshNonce}`}
             projectId={projectId}
-            
           />
         </div>
 
@@ -369,6 +382,8 @@ const buildFilesMarkdown = (atts: Uploaded[]) => {
             showAgentMenu={showAgentMenu}
             setShowAgentMenu={setShowAgentMenu}
             handleLogout={handleLogout}
+            onRefresh={refreshAll}       // ✅ use your real refresh fn
+            refreshing={refreshing}      // ✅ optional loading flag
           />
 
           <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
@@ -381,42 +396,48 @@ const buildFilesMarkdown = (atts: Uploaded[]) => {
             </div>
           </div>
 
-         {activeMainTab === 'chat' && (
-  <ChatTab
-    key={`chat-${refreshNonce}`}
-    activeMainTab={activeMainTab}
-    chatView={chatView}
-    setChatView={setChatView}
-    chatHidden={chatHidden}
-    setChatHidden={setChatHidden}
-    messages={messages}
-    loading={loading}
-    input={input}
-    setInput={setInput}
-    handleKeyDown={handleKeyDown}
-    sendMessage={sendMessage}
-    scrollRef={scrollRef}
-    fontSize={fontSize}
-    setFontSize={setFontSize}
-    projectId={projectId}
-    onRefresh={refreshAll}       // ✅ use your real refresh fn
-    refreshing={refreshing}      // ✅ optional loading flag
-  />
-)}
+          {activeMainTab === 'chat' && (
+            <ChatTab
+              key={`chat-${refreshNonce}`}
+              activeMainTab={activeMainTab}
+              chatView={chatView}
+              setChatView={setChatView}
+              chatHidden={chatHidden}
+              setChatHidden={setChatHidden}
+              messages={messages}
+              loading={loading}
+              input={input}
+              setInput={setInput}
+              handleKeyDown={handleKeyDown}
+              sendMessage={sendMessage}
+              scrollRef={scrollRef}
+              fontSize={fontSize}
+              setFontSize={setFontSize}
+              projectId={projectId}
+              onRefresh={refreshAll}
+              refreshing={refreshing}
+            />
+          )}
 
           {activeMainTab === 'discussions' && (
             <DiscussionsPanel key={`discussions-${refreshNonce}`} fontSize={fontSize} />
           )}
-          {activeMainTab === 'logs' && <LogsPanel key={`logs-${refreshNonce}`} fontSize={fontSize} />}
+          {activeMainTab === 'logs' && <LogsPanel key="Logs" fontSize={fontSize} projectId={projectId} />}
           {activeMainTab === 'files' && (
-  <FilesPanel
-    key={`files-${refreshNonce}`}
-    recentDocs={recentDocs}
-    fontSize={fontSize}
-  />
-)}
-          
-          {activeMainTab === 'apis' && <ApisPanel key={`apis-${refreshNonce}`} fontSize={fontSize} />}
+            <FilesPanel
+              key={`files-${refreshNonce}`}
+              recentDocs={recentDocs}
+              fontSize={fontSize}
+            />
+          )}
+
+          {activeMainTab === 'apis' && (
+            <ApisPanel
+              key={`apis-${refreshNonce}`}
+              fontSize={fontSize}
+              projectId={projectId}
+            />
+          )}
           {activeMainTab === 'calendar' && (
             <CalendarPanel key={`calendar-${refreshNonce}`} fontSize={fontSize} />
           )}
@@ -426,16 +447,22 @@ const buildFilesMarkdown = (atts: Uploaded[]) => {
           {activeMainTab === 'notifications' && (
             <NotificationsPanel
               key={`notifications-${refreshNonce}`}
-              fontSize={fontSize}
               projectId={projectId}
             />
           )}
           {activeMainTab === 'tasks' && (
-            <TasksPanel key={`tasks-${refreshNonce}`} fontSize={fontSize} />
+            <TasksPanel
+              key={`tasks-${refreshNonce}`}
+              fontSize={fontSize}
+              userName={userName}
+            />
           )}
           {activeMainTab === 'thoughts' && (
             <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
           )}
+          {activeMainTab === 'timeline' && (
+  <TimelinePanel key={`timeline-${refreshNonce}`} projectId={projectId} />
+)}
           {activeMainTab === 'functions' && (
             <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
           )}
@@ -449,8 +476,6 @@ const buildFilesMarkdown = (atts: Uploaded[]) => {
 
         <ZetaRightSidePanel key={`right-${refreshNonce}`} userEmail={userEmail} projectId={projectId} />
       </div>
-       
     </div>
-    
   );
 }

@@ -20,28 +20,56 @@ export default function DocumentUploadPage() {
     const fileName = `${Date.now()}-${file.name}`;
     const filePath = `${projectId}/${fileName}`;
 
+    // 1) Upload to storage
     const { error: uploadError } = await supabase.storage
       .from('project-docs')
-      .upload(filePath, file);
+      .upload(filePath, file, { upsert: false });
 
     if (uploadError) {
-      console.error('❌ Upload failed:', uploadError.message);
+      console.error('❌ Upload failed:', uploadError);
       setUploading(false);
       return;
     }
 
+    // 2) Public (or signed) URL for LogsPanel "open" link
+    let linkUrl: string | undefined;
+    try {
+      const { data: pub } = supabase.storage.from('project-docs').getPublicUrl(filePath);
+      linkUrl = pub?.publicUrl;
+      if (!linkUrl) {
+        const { data: signed, error: signedErr } = await supabase.storage
+          .from('project-docs')
+          .createSignedUrl(filePath, 60 * 60);
+        if (signedErr) console.warn('⚠️ Signed URL error:', signedErr);
+        linkUrl = signed?.signedUrl ?? filePath;
+      }
+    } catch (e) {
+      console.warn('⚠️ Public/signed URL generation failed:', e);
+      linkUrl = filePath;
+    }
+
+    // 3) Insert document metadata
     const { error: insertError } = await supabase.from('documents').insert({
       project_id: projectId,
       file_name: file.name,
       file_url: filePath,
     });
-
     if (insertError) {
-      console.error('❌ Failed to insert document metadata:', insertError.message);
+      console.error('❌ Failed to insert document metadata:', insertError);
     }
 
-    await fetchRecentFiles(); // refresh after upload
+    // 4) ✅ Write log row so LogsPanel shows 📎 immediately
+    const { error: logErr } = await supabase.from('system_logs').insert({
+      project_id: projectId,
+      actor: 'user',
+      event: 'file.upload',
+      details: { file_name: file.name, link_url: linkUrl, path: filePath },
+    });
+    if (logErr) {
+      console.error('⚠️ system_logs insert failed:', logErr);
+    }
 
+    await fetchRecentFiles();
     setUploading(false);
     setFile(null);
   };
@@ -55,7 +83,7 @@ export default function DocumentUploadPage() {
       .limit(5);
 
     if (error) {
-      console.error('❌ Failed to load recent files:', error.message);
+      console.error('❌ Failed to load recent files:', error);
     } else {
       setRecentFiles(data || []);
     }
@@ -104,7 +132,9 @@ export default function DocumentUploadPage() {
                 {recentFiles[i] ? (
                   <>
                     <FaFileAlt className="text-2xl mb-2" />
-                    <span className="text-xs text-center truncate w-full">{recentFiles[i].file_name}</span>
+                    <span className="text-xs text-center truncate w-full">
+                      {recentFiles[i].file_name}
+                    </span>
                   </>
                 ) : (
                   <span className="text-gray-400">Empty</span>

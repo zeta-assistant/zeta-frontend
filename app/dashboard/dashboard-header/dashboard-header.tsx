@@ -3,6 +3,7 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import Clock from '@/components/Clock';
+import RefreshButton from '../dashboard_buttons/refresh_button/refresh_button';
 
 type Props = {
   projectName: string;
@@ -12,6 +13,8 @@ type Props = {
   setShowAgentMenu: React.Dispatch<React.SetStateAction<boolean>>;
   showAgentMenu: boolean;
   handleLogout: () => void;
+  onRefresh?: () => Promise<void>;   // added
+  refreshing?: boolean;              // added
 };
 
 export default function DashboardHeader({
@@ -22,6 +25,8 @@ export default function DashboardHeader({
   showAgentMenu,
   setShowAgentMenu,
   handleLogout,
+  onRefresh,
+  refreshing,
 }: Props) {
   const router = useRouter();
 
@@ -43,7 +48,9 @@ export default function DashboardHeader({
               Zeta Dashboard
             </h1>
           </div>
+
           <Clock />
+
           {showAgentMenu && (
             <div className="absolute top-[105%] left-0 w-52 bg-indigo-100 text-indigo-900 border border-indigo-300 rounded-xl shadow-lg text-sm z-50">
               <div className="px-4 py-2 border-b border-indigo-300 font-semibold bg-indigo-200 text-center rounded-t-xl">
@@ -88,7 +95,14 @@ export default function DashboardHeader({
             )}
           </div>
 
-          <div className="flex gap-2 mt-1">
+          <div className="flex gap-2 mt-1 items-center">
+            {/* ⟳ Refresh next to Projects */}
+            <RefreshButton
+              variant="inline"
+              onRefresh={onRefresh ?? (async () => {})}
+              refreshing={refreshing ?? false}
+              className="!text-xs"
+            />
             <button
               onClick={() => router.push('/projects')}
               className="text-xs bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-md"

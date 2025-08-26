@@ -89,20 +89,33 @@ export default function CalendarPanel({ fontSize }: { fontSize: 'sm' | 'base' | 
         );
       }
     } else {
-      const { data, error } = await supabase
-        .from('calendar_items')
-        .insert([
-          {
-            project_id: projectId,
-            type: item.type.toLowerCase(),
-            title: item.title,
-            date: item.date,
-          },
-        ])
-        .select();
+  const { data, error } = await supabase
+    .from('calendar_items')
+    .insert([
+      {
+        project_id: projectId,
+        type: item.type.toLowerCase(),
+        title: item.title,
+        date: item.date,
+      },
+    ])
+    .select();
 
-      if (!error && data) setCalendarItems((prev) => [...prev, ...data]);
-    }
+  if (!error && data) {
+    setCalendarItems((prev) => [...prev, ...data]);
+
+    // ✅ Log calendar item creation
+    await supabase.from('system_logs').insert({
+      project_id: projectId,
+      actor: 'user',
+      event: `calendar.${item.type.toLowerCase()}`, // e.g. 'calendar.event'
+      details: {
+        title: item.title,
+        when: item.date,
+      },
+    });
+  }
+}
 
     setModalOpen(false);
     setSelectedDate(null);

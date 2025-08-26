@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -30,7 +30,8 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   // Mini-chat (stateless across refresh)
   const [isComposing, setIsComposing] = useState(false);
   const [latestNotification, setLatestNotification] = useState<string | null>(null);
-  const DEFAULT_NOTIFICATION = 'Hey there! Got any new data for me to process?';
+  const DEFAULT_NOTIFICATION =
+    'Hey there! Connect to Telegram in Workspace/APIs, and then start receiving notifications! ';
 
   const [userReply, setUserReply] = useState('');
   const [sentUserMsg, setSentUserMsg] = useState<string | null>(null); // shows your bubble (clears on reload)
@@ -38,7 +39,7 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   const [sending, setSending] = useState(false);
   const [locked, setLocked] = useState(false); // hide composer after first send
   const [error, setError] = useState<string | null>(null);
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
 
   const userInitials = userEmail?.slice(0, 2).toUpperCase() ?? '??';
 
@@ -57,85 +58,85 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
         return;
       }
 
-      let query:
-        | ReturnType<typeof supabase.from<'zeta_daily_memory'>>
-        | ReturnType<typeof supabase.from<'zeta_weekly_memory'>>
-        | ReturnType<typeof supabase.from<'zeta_current_memory'>>;
+      try {
+        if (tab === 'daily') {
+          const formattedDate = selectedDate.toISOString().split('T')[0];
+          const { data, error } = await supabase
+            .from('zeta_daily_memory')
+            .select('memory')
+            .eq('user_id', user.id)
+            .eq('project_id', projectId)
+            .eq('date', formattedDate)
+            .maybeSingle();
 
-      if (tab === 'daily') {
-        const formattedDate = selectedDate.toISOString().split('T')[0];
-        query = supabase
-          .from('zeta_daily_memory')
-          .select('memory')
-          .eq('user_id', user.id)
-          .eq('project_id', projectId)
-          .eq('date', formattedDate)
-          .maybeSingle();
-      } else if (tab === 'weekly') {
-        query = supabase
-          .from('zeta_weekly_memory')
-          .select('memory')
-          .eq('user_id', user.id)
-          .eq('project_id', projectId)
-          .order('date', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-      } else {
-        const fromDate = new Date();
-        fromDate.setDate(fromDate.getDate() - 29);
-        const fromISO = fromDate.toISOString().split('T')[0];
-        query = supabase
-          .from('zeta_current_memory')
-          .select('summary')
-          .eq('user_id', user.id)
-          .eq('project_id', projectId)
-          .gte('created_at', fromISO)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-      }
+          if (error) throw error;
+          setMemory((data as { memory?: string } | null)?.memory ?? null);
+        } else if (tab === 'weekly') {
+          const { data, error } = await supabase
+            .from('zeta_weekly_memory')
+            .select('memory')
+            .eq('user_id', user.id)
+            .eq('project_id', projectId)
+            .order('date', { ascending: false })
+            .limit(1)
+            .maybeSingle();
 
-      const { data, error } = (await query) as
-        | { data: { memory?: string } | null; error: any }
-        | { data: { summary?: string } | null; error: any };
+          if (error) throw error;
+          setMemory((data as { memory?: string } | null)?.memory ?? null);
+        } else {
+          // "monthly" tab pulls the most recent rolling summary from last 30 days
+          const fromDate = new Date();
+          fromDate.setDate(fromDate.getDate() - 29);
+          const fromISO = fromDate.toISOString().split('T')[0];
 
-      if (error) {
-        console.error('❌ Supabase fetch error:', JSON.stringify(error, null, 2));
+          const { data, error } = await supabase
+            .from('zeta_current_memory')
+            .select('summary')
+            .eq('user_id', user.id)
+            .eq('project_id', projectId)
+            .gte('created_at', fromISO)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (error) throw error;
+          setMemory((data as { summary?: string } | null)?.summary ?? null);
+        }
+      } catch (err) {
+        console.error('❌ Supabase fetch error:', err);
         setMemory(null);
-      } else {
-        const raw =
-          tab === 'daily' || tab === 'weekly'
-            ? (data as { memory?: string } | null)?.memory
-            : (data as { summary?: string } | null)?.summary;
-        setMemory(raw ?? null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
 
-    if (projectId) fetchMemory();
+    if (projectId) void fetchMemory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, tab, selectedDate]);
 
-  // ---- Fetch latest_notification (client)
+  // ---- Fetch latest relevant discussion notification
   useEffect(() => {
     async function fetchLatestNotification() {
       if (!projectId) return setLatestNotification(null);
+
       const { data, error } = await supabase
-        .from('mainframe_info')
-        .select('latest_notification')
+        .from('custom_notifications')
+        .select('message')
         .eq('project_id', projectId)
+        .eq('type', 'relevant_discussion')
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (error) {
-        console.error('❌ Error fetching latest_notification:', error);
+        console.error('❌ Error fetching relevant discussion:', error);
         setLatestNotification(null);
       } else {
-        setLatestNotification(
-          (data as { latest_notification?: string } | null)?.latest_notification ?? null
-        );
+        setLatestNotification(data?.message ?? null);
       }
     }
-    fetchLatestNotification();
+
+    void fetchLatestNotification();
   }, [projectId]);
 
   // ---- Auto-scroll to bottom when new bubble appears
@@ -143,7 +144,7 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [sentUserMsg, assistantFollowup]);
 
-  function handleReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleReplyKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -151,8 +152,12 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
     }
   }
 
+  // ---------- FIX: allow sending even when there’s no DB notification ----------
   async function sendMiniReply() {
-    if (!latestNotification || !userReply.trim() || sending) return;
+    if (!userReply.trim() || sending) return;
+
+    const notification = latestNotification ?? DEFAULT_NOTIFICATION;
+
     setSending(true);
     setError(null);
 
@@ -164,23 +169,27 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
     setUserReply('');
 
     try {
-      // still persist to DB and get a follow-up, but we won't rehydrate
       const res = await fetch('/api/mini-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId,
           userEmail,
-          notificationBody: latestNotification,
+          notificationBody: notification, // use fallback if none in DB
           userReply: trimmed,
         }),
       });
+
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || `Mini chat failed: ${res.status}`);
 
       setAssistantFollowup(json.followup ?? null);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to send reply.');
+      // roll back local UI so user can retry
+      setLocked(false);
+      setSentUserMsg(null);
+      setUserReply(trimmed);
     } finally {
       setSending(false);
     }

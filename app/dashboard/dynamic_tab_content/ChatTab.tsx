@@ -9,7 +9,6 @@ import { formatMathMarkdown } from '@/lib/formatMathMarkdown';
 import { detectLatexFormats } from '@/lib/latexDetector';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { supabase } from '@/lib/supabaseClient';
-import RefreshButton from '../dashboard_buttons/refresh_button/refresh_button';
 
 type Uploaded = { file_name: string; file_url: string };
 
@@ -106,25 +105,27 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   };
 
   const handleSend = async () => {
-    let uploaded: Uploaded[] = [];
-    if (autoUploadOnSend && attachedFiles.length) {
-      try {
-        uploaded = await uploadAttachments();
-      } catch (e) {
-        console.error('📎 Upload failed:', e);
-        alert('Upload failed. Try again.');
-        return;
-      }
+  let uploaded: Uploaded[] = [];
+  if (autoUploadOnSend && attachedFiles.length) {
+    try {
+      uploaded = await uploadAttachments();
+    } catch (e) {
+      console.error('📎 Upload failed:', e);
+      alert('Upload failed. Try again.');
+      return;
     }
-    sendMessage(uploaded.length ? { attachments: uploaded } : undefined);
+  }
 
-    requestAnimationFrame(() => {
-      virtuosoRef.current?.scrollToIndex({
-        index: Math.max(0, displayedMessages.length),
-        behavior: 'smooth',
-      });
+  await sendMessage(uploaded.length ? { attachments: uploaded } : undefined);
+  await onRefresh(); // 👈 🔥 THIS LINE makes it real-time
+
+  requestAnimationFrame(() => {
+    virtuosoRef.current?.scrollToIndex({
+      index: Math.max(0, displayedMessages.length),
+      behavior: 'smooth',
     });
-  };
+  });
+};
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -187,13 +188,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
       </button>
     ))}
 
-    {/* 🔄 Right next to Pinned */}
-    <RefreshButton
-      variant="inline"
-      onRefresh={onRefresh}
-      refreshing={refreshing}
-      className="ml-2"
-    />
+    
   </div>
 
   <div className="text-xs text-white flex items-center">

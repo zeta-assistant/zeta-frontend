@@ -1,22 +1,37 @@
+// app/api/mini-chat/route.ts
 import { NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// Reuse your /api/chat pipeline so assistants/threads logic stays in one place
+// Prefer your configured base URL; fall back to Vercel URL or localhost
 function baseUrl() {
   if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return 'http://localhost:3000';
 }
 
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+// Server-side fallback so mini-chat still works even if the client sends nothing
+const DEFAULT_NOTIFICATION =
+  'Hey there! Connect to Telegram in Workspace/APIs, and then start receiving notifications! ';
 
 export async function POST(req: Request) {
   try {
-    const { projectId, userEmail, notificationBody, userReply } = await req.json();
-    if (!projectId || !notificationBody || !userReply) {
-      return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
-    }
+    const body = await req.json();
+    const projectId: string | undefined = body?.projectId;
+    const userEmail: string | null | undefined = body?.userEmail ?? null;
+    const userReplyRaw: string | undefined = body?.userReply;
+    const notificationBodyRaw: string | undefined = body?.notificationBody;
 
-    // 1) Upsert active session for this notification
+    if (!projectId) {
+      return NextResponse.json({ error: 'Missing projectId' }, { status: 400 });
+    }
+    const userReply = (userReplyRaw ?? '').trim();
+    if (!userReply) {
+      return NextResponse.json({ error: 'Missing userReply' }, { status: 400 });
+    }
+    // Accept empty/missing notification & use a sane default
+    const notificationBody = (notificationBodyRaw ?? '').trim() || DEFAULT_NOTIFICATION;
+
+    // 1) Get or create an active session for this notification
     const { data: active } = await supabaseAdmin
       .from('mini_chat_sessions')
       .select('*')
@@ -29,14 +44,19 @@ export async function POST(req: Request) {
     let sessionId = active?.id ?? null;
 
     if (!active || active.notification_body !== notificationBody) {
-      // close any existing active session
+      // Close any existing active session if the notification changed
       if (active) {
         await supabaseAdmin
           .from('mini_chat_sessions')
-          .update({ is_active: false, ended_at: new Date().toISOString(), closed_reason: 'notification_changed' })
+          .update({
+            is_active: false,
+            ended_at: new Date().toISOString(),
+            closed_reason: 'notification_changed',
+          })
           .eq('id', active.id);
       }
-      // create a new session
+
+      // Create a new session
       const { data: created, error: insErr } = await supabaseAdmin
         .from('mini_chat_sessions')
         .insert({ project_id: projectId, notification_body: notificationBody })
@@ -61,15 +81,28 @@ export async function POST(req: Request) {
       `User reply (${userEmail ?? 'user'}):\n${userReply}\n\n` +
       `Respond in 1-2 sentences that best would engage the user to create a new discussion.`;
 
-    const res = await fetch(`${baseUrl()}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: seedMessage, projectId, modelId: 'gpt-4o', attachments: [] }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || `chat route ${res.status}`);
+    let followup = 'Got it.';
+    try {
+      const res = await fetch(`${baseUrl()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: seedMessage,
+          projectId,
+          modelId: 'gpt-4o',
+          attachments: [],
+        }),
+      });
 
-    const followup: string = data.reply ?? 'Got it.';
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `chat route ${res.status}`);
+      followup = (data?.reply ?? followup).toString();
+    } catch (err) {
+      // Degrade gracefully: still persist a lightweight assistant reply
+      console.error('mini-chat: /api/chat failed — using fallback reply', err);
+      followup =
+        'Thanks for the update. Want me to spin this into a new discussion so we can go deeper?';
+    }
 
     // 4) Persist assistant message
     await supabaseAdmin.from('mini_chat_messages').insert({

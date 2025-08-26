@@ -1,3 +1,4 @@
+// app/api/mini-chat/history/route.ts
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
@@ -5,9 +6,12 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get('projectId');
-    if (!projectId) return NextResponse.json({ error: 'Missing projectId' }, { status: 400 });
+    if (!projectId) {
+      return NextResponse.json({ error: 'Missing projectId' }, { status: 400 });
+    }
 
-    const { data: session } = await supabaseAdmin
+    // Prefer the currently active session
+    let { data: session, error: activeErr } = await supabaseAdmin
       .from('mini_chat_sessions')
       .select('*')
       .eq('project_id', projectId)
@@ -16,7 +20,23 @@ export async function GET(req: Request) {
       .limit(1)
       .maybeSingle();
 
+    if (activeErr) throw activeErr;
+
+    // If none active, fall back to the most recent session (helps after a reload)
     if (!session) {
+      const { data: last, error: lastErr } = await supabaseAdmin
+        .from('mini_chat_sessions')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastErr) throw lastErr;
+      session = last ?? null;
+    }
+
+    if (!session) {
+      // No history yet
       return NextResponse.json({ notificationBody: null, messages: [] });
     }
 

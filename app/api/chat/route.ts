@@ -1,34 +1,80 @@
+// app/api/chat/route.ts
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AVAILABLE_MODELS } from '@/lib/models';
+import {
+  getCurrentStepPrompt,
+  shouldUseOnboarding,
+  getNextOnboardingStep,
+  deriveOnboardingStatus,
+  getSharedContext,
+  fetchProjectFiles,
+  type OnboardingKey,
+} from '@/lib/onboarding';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY });
 
-type Uploaded = { file_name: string; file_url: string };
+/* ------------------------- Onboarding helpers ------------------------- */
 
-const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
-const DOC_EXTS = new Set([
-  '.pdf', '.txt', '.md', '.csv', '.tsv', '.json',
-  '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
-]);
+const PROGRESSION: OnboardingKey[] = [
+  'vision',            // 1
+  'long_term_goals',   // 2
+  'short_term_goals',  // 3
+  'telegram',          // 4 (complete after)
+];
 
-function extOf(name: string) {
-  const i = name.lastIndexOf('.');
-  return i >= 0 ? name.slice(i).toLowerCase() : '';
+function labelForStep(k: OnboardingKey): string {
+  switch (k) {
+    case 'vision': return 'Project vision';
+    case 'long_term_goals': return 'Long-term goals';
+    case 'short_term_goals': return 'Short-term goals';
+    case 'telegram': return 'Connect Telegram';
+  }
 }
 
+function isOnboardingQuestion(input?: string): boolean {
+  if (!input) return false;
+  const s = input.toLowerCase();
+  return (
+    /\bonboarding\b/.test(s) &&
+    (/\bwhat\b.*\bstep\b/.test(s) ||
+      /\bwhich\b.*\bstep\b/.test(s) ||
+      /\bwhere\b.*\bam i\b/.test(s) ||
+      /\bstatus\b/.test(s) ||
+      /\bprogress\b/.test(s))
+  );
+}
+
+function stepReply(step: OnboardingKey, statusNum: number): string {
+  // statusNum is 0–4, steps are 4 total
+  const idx = Math.min(Math.max(statusNum + 1, 1), 4); // friendly 1–4 view for “current/next”
+  return `You're on onboarding step ${idx} of 4: **${labelForStep(step)}**.\n${getCurrentStepPrompt(step)}`;
+}
+
+/* --------------------------- Files intent ----------------------------- */
+/** Users can ask for files with:
+ *   /files
+ *   /files <search terms>
+ */
+function parseFilesIntent(message: string | undefined): { wantsFiles: boolean; query: string } {
+  if (!message) return { wantsFiles: false, query: '' };
+  const m = message.match(/^\/files(?:\s+(.*))?$/i);
+  if (m) return { wantsFiles: true, query: (m[1] || '').trim() };
+  return { wantsFiles: false, query: '' };
+}
+
+/* ------------------------------ Route -------------------------------- */
 export async function POST(req: Request) {
   try {
     const {
       message,
       projectId,
       modelId = 'gpt-4o',
-      attachments = [],
-    }: { message: string; projectId: string; modelId?: string; attachments?: Uploaded[] } = await req.json();
+    }: { message: string; projectId: string; modelId?: string } = await req.json();
 
     const now = new Date();
 
@@ -37,31 +83,32 @@ export async function POST(req: Request) {
       return NextResponse.json({ reply: '⚠️ Invalid model selected.' }, { status: 400 });
     }
 
-    // —— fetch assistant id ——
-    const { data: projectData, error: projectError } = await supabaseAdmin
+    // Project + assistant
+    const { data: projRow, error: projErr } = await supabaseAdmin
       .from('user_projects')
-      .select('assistant_id')
+      .select('assistant_id, preferred_user_name')
       .eq('id', projectId)
       .single();
-    if (projectError) throw projectError;
-    const assistantId = projectData?.assistant_id;
-    if (!assistantId) throw new Error('Missing assistant ID');
+    if (projErr) throw projErr;
+    if (!projRow?.assistant_id) throw new Error('Missing assistant ID');
 
-    // —— thread mgmt ——
-    const { data: threadData } = await supabaseAdmin
+    // Thread management (1h expiry)
+    const { data: existingThread } = await supabaseAdmin
       .from('threads')
       .select('*')
       .eq('project_id', projectId)
       .order('last_active', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    let threadId = threadData?.thread_id;
     const expired =
-      threadData?.expired ||
-      (threadData?.last_active && now.getTime() - new Date(threadData.last_active).getTime() > 1000 * 60 * 60);
+      existingThread?.expired ||
+      (existingThread?.last_active &&
+        now.getTime() - new Date(existingThread.last_active).getTime() > 1000 * 60 * 60);
 
-    if (!threadId || expired) {
+    let threadId = existingThread?.thread_id as string | undefined;
+
+    if (!existingThread || !existingThread.thread_id || expired) {
       const newThread = await openai.beta.threads.create();
       threadId = newThread.id;
 
@@ -73,118 +120,119 @@ export async function POST(req: Request) {
         expired: false,
       });
 
+      // optional: mirror on user_projects for convenience if you still use it in UI
       await supabaseAdmin.from('user_projects').update({ thread_id: threadId }).eq('id', projectId);
     } else {
-      await supabaseAdmin.from('threads').update({ last_active: now.toISOString() }).eq('thread_id', threadId);
+      await supabaseAdmin
+        .from('threads')
+        .update({ last_active: now.toISOString() })
+        .eq('thread_id', threadId!);
     }
 
-    // —— context ——
-    const { data: mainframeInfo } = await supabaseAdmin
-      .from('mainframe_info')
-      .select('latest_notification, latest_thought, vision, short_term_goals, long_term_goals, preferred_user_name')
-      .eq('project_id', projectId)
-      .single();
+    // Onboarding status (0–4) + decide if we should nudge onboarding
+    const statusNum = await deriveOnboardingStatus(projectId); // 0..4
+    const onboardingActive = await shouldUseOnboarding(projectId); // status < 4
+    const nextStep = onboardingActive ? await getNextOnboardingStep(projectId) : null;
 
-    const { data: latestOutreachMessages } = await supabaseAdmin
-      .from('zeta_conversation_log')
-      .select('message')
-      .eq('project_id', projectId)
-      .eq('role', 'assistant')
-      .order('timestamp', { ascending: false })
-      .limit(1);
-
-    const userName = mainframeInfo?.preferred_user_name || 'there';
-    const latestOutreachChat = latestOutreachMessages?.[0]?.message ?? 'No outreach chat available.';
-    const date = now.toISOString().split('T')[0];
-    const time = now.toISOString();
-
-    const context = `Today is ${date}, and the time is ${time}.
-You are Zeta — the AI assistant for this project.
-User’s preferred name: ${userName}
-Latest notification: ${mainframeInfo?.latest_notification ?? 'None'}
-Latest thought: ${mainframeInfo?.latest_thought ?? 'None'}
-Latest outreach chat: ${latestOutreachChat}
-Vision: ${mainframeInfo?.vision ?? 'None'}
-Short term goals: ${mainframeInfo?.short_term_goals ?? 'None'}
-Long term goals: ${mainframeInfo?.long_term_goals ?? 'None'}
-Do not refer to yourself as ChatGPT or Assistant; refer to yourself as Zeta.`;
-
-    await openai.beta.threads.messages.create(threadId!, {
-      role: 'user',
-      content: `[CONTEXT]\n${context}`,
-    });
-
-    // ===== Upload Supabase files to OpenAI; split images vs docs =====
-    const imageFileIds: string[] = [];
-    const docFileIds: string[] = [];
-
-    if (Array.isArray(attachments) && attachments.length > 0) {
-      for (const a of attachments) {
-        try {
-          const res = await fetch(a.file_url);
-          if (!res.ok) throw new Error(`Fetch failed ${res.status} ${res.statusText}`);
-          const ab = await res.arrayBuffer();
-          const mime = res.headers.get('content-type') || 'application/octet-stream';
-
-          // Node runtime supports File/Blob
-          const file = new File([new Blob([ab], { type: mime })], a.file_name, { type: mime });
-          const upload = await openai.files.create({ file, purpose: 'assistants' });
-
-          const ext = extOf(a.file_name);
-          if (IMAGE_EXTS.has(ext) || (mime.startsWith('image/'))) {
-            imageFileIds.push(upload.id);
-          } else {
-            // treat everything else as a doc (only file_search supports retrieval)
-            docFileIds.push(upload.id);
-          }
-        } catch (e) {
-          console.error('OpenAI file upload failed:', a.file_name, e);
-        }
+    // Direct “what step am I on?” answer
+    if (isOnboardingQuestion(message)) {
+      if (nextStep) {
+        return NextResponse.json({
+          status: 'onboarding',
+          onboarding: true,
+          step: nextStep,
+          onboarding_status: statusNum,
+          reply: stepReply(nextStep, statusNum),
+          threadId,
+        });
+      } else {
+        return NextResponse.json({
+          status: 'onboarding',
+          onboarding: false,
+          step: 'complete',
+          onboarding_status: statusNum,
+          reply: `Onboarding is complete (4/4). ✅`,
+          threadId,
+        });
       }
     }
 
-    // Build the user message:
-    // - text content (if any)
-    // - each image as an image_file content block (vision)
-    // - docs attached with file_search tool (retrieval)
-    const contentBlocks: any[] = [];
-    const userText =
-      (message && message.length > 0 ? message : '') ||
-      (imageFileIds.length || docFileIds.length ? 'Please review the attached file(s).' : '');
+    // Shared context: mainframe + last 5 user_input_log
+    const { mainframeInfo, recentUserInputs } = await getSharedContext(projectId);
 
-    if (userText) {
-      contentBlocks.push({ type: 'text', text: userText });
+    // Optional files intent
+    const { wantsFiles, query } = parseFilesIntent(message);
+    let filesContext: Array<{ file_name: string; file_url: string; created_at: string }> = [];
+    if (wantsFiles) {
+      const files = await fetchProjectFiles(projectId, {
+        search: query,
+        limit: 20,
+      });
+      filesContext = files.map(f => ({
+        file_name: f.file_name,
+        file_url: f.file_url,
+        created_at: f.created_at,
+      }));
     }
 
-    for (const imgId of imageFileIds) {
-      contentBlocks.push({ type: 'image_file', image_file: { file_id: imgId } });
-    }
+    // Build assistant context message
+    const dateISO = now.toISOString();
+    const userName = projRow?.preferred_user_name || 'there';
+    const inputsFormatted =
+      recentUserInputs.length === 0
+        ? 'None'
+        : recentUserInputs
+            .map((u) => `- [${u.created_at}] ${u.author ?? 'user'}: ${u.content}`)
+            .join('\n');
 
-    const docAttachments =
-      docFileIds.length > 0
-        ? docFileIds.map((id) => ({
-            file_id: id,
-            tools: [{ type: 'file_search' as const }], // required for retrieval
-          }))
-        : undefined;
+    const filesFormatted =
+      filesContext.length === 0
+        ? (wantsFiles ? 'No matching files.' : 'Not requested.')
+        : filesContext
+            .map((f) => `- ${f.file_name} — ${f.file_url} (${f.created_at})`)
+            .join('\n');
+
+    const context = `[CONTEXT]
+Now: ${dateISO}
+You are Zeta — the AI assistant for this project.
+Preferred user name: ${userName}
+
+[MAINFRAME]
+${JSON.stringify(mainframeInfo ?? {}, null, 2)}
+
+[RECENT_USER_INPUTS (last 5)]
+${inputsFormatted}
+
+[PROJECT_FILES] — included only when the user calls /files
+${filesFormatted}
+(If the user asks to search files, ask them to use "/files <keywords>" and then base your response on the provided list.)
+
+— End of context.`;
+
+    // Send context then the user message
+    await openai.beta.threads.messages.create(threadId!, {
+      role: 'user',
+      content: context,
+    });
 
     await openai.beta.threads.messages.create(threadId!, {
       role: 'user',
-      content: contentBlocks.length > 0 ? contentBlocks : [{ type: 'text', text: ' ' }],
-      attachments: docAttachments,
+      content: message || ' ',
     });
 
     // Run assistant
-    const run = await openai.beta.threads.runs.create(threadId!, { assistant_id: assistantId });
+    const run = await openai.beta.threads.runs.create(threadId!, {
+      assistant_id: projRow.assistant_id,
+    });
 
-    // Poll until complete
     let runStatus;
     do {
+      // Some SDKs use (threadId, runId); keeping your previous pattern for compatibility
+      // @ts-ignore SDK surface differences
       runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: threadId! });
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 800));
     } while (runStatus.status !== 'completed');
 
-    // Read reply
     const list = await openai.beta.threads.messages.list(threadId!);
     const assistantReply = list.data.find((m) => m.role === 'assistant');
 
@@ -196,39 +244,30 @@ Do not refer to yourself as ChatGPT or Assistant; refer to yourself as Zeta.`;
           chunks.push(p.text.value);
         }
       }
-      return chunks.join('\n\n');
+      return chunks.join('\n\n').trim();
     }
 
     let textContent = extractTextFromAssistantMessage(assistantReply) || '⚠️ No reply.';
 
-    // optional: update-mainframe (non-fatal if it fails)
-    try {
-      const {
-        data: { session },
-      } = await supabaseAdmin.auth.getSession();
-
-      await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/update-mainframe`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-        body: JSON.stringify({
-          user_id: session?.user?.id ?? null,
-          project_id: projectId,
-          zeta_name: 'Zeta',
-          preferred_user_name: userName,
-        }),
-      });
-    } catch (e) {
-      console.warn('update-mainframe call failed (non-fatal):', e);
+    // Append onboarding nudge if still incomplete
+    if (onboardingActive && nextStep) {
+      const nudge =
+        `\n\n—\nWe still need to finish onboarding (status ${statusNum}/4).\n` +
+        `Next step: **${labelForStep(nextStep)}**.\n${getCurrentStepPrompt(nextStep)}`;
+      textContent += nudge;
     }
 
-    return NextResponse.json({ reply: textContent, threadId });
+    return NextResponse.json({
+      reply: textContent,
+      threadId,
+      onboarding: onboardingActive,
+      step: nextStep || 'complete',
+      onboarding_status: statusNum, // 0–4
+    });
   } catch (err: any) {
     console.error('❌ /api/chat error:', err?.message ?? err);
     return NextResponse.json(
-      { reply: '⚠️ Zeta had a GPT issue.', error: String(err?.message ?? err) },
+      { reply: '⚠️ Zeta had an internal error.', error: String(err?.message ?? err) },
       { status: 500 }
     );
   }
