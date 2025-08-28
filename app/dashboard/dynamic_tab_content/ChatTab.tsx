@@ -11,6 +11,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { supabase } from '@/lib/supabaseClient';
 
 type Uploaded = { file_name: string; file_url: string };
+type Verbosity = 'short' | 'normal' | 'long';
 
 interface ChatTabProps {
   activeMainTab: string;
@@ -23,7 +24,10 @@ interface ChatTabProps {
   input: string;
   setInput: (text: string) => void;
   handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-  sendMessage: (opts?: { attachments?: Uploaded[] }) => void;
+
+  // ✨ sendMessage now accepts verbosity as an optional param
+  sendMessage: (opts?: { attachments?: Uploaded[]; verbosity?: Verbosity }) => void;
+
   scrollRef: React.RefObject<HTMLDivElement | null>;
   fontSize: 'sm' | 'base' | 'lg';
   setFontSize: React.Dispatch<React.SetStateAction<'sm' | 'base' | 'lg'>>;
@@ -43,11 +47,14 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   const {
     activeMainTab, chatView, setChatView, chatHidden, setChatHidden,
     messages, loading, input, setInput, handleKeyDown, sendMessage,
-    scrollRef, fontSize, setFontSize, projectId, onRefresh, refreshing,
+    scrollRef, fontSize, setFontSize, projectId, onRefresh,
   } = props;
 
   const [pinnedMessages, setPinnedMessages] = useState<any[]>([]);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // ✨ Verbosity state (UI left of Font)
+  const [verbosity, setVerbosity] = useState<Verbosity>('normal');
 
   // Attachments
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -105,27 +112,32 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   };
 
   const handleSend = async () => {
-  let uploaded: Uploaded[] = [];
-  if (autoUploadOnSend && attachedFiles.length) {
-    try {
-      uploaded = await uploadAttachments();
-    } catch (e) {
-      console.error('📎 Upload failed:', e);
-      alert('Upload failed. Try again.');
-      return;
+    let uploaded: Uploaded[] = [];
+    if (autoUploadOnSend && attachedFiles.length) {
+      try {
+        uploaded = await uploadAttachments();
+      } catch (e) {
+        console.error('📎 Upload failed:', e);
+        alert('Upload failed. Try again.');
+        return;
+      }
     }
-  }
 
-  await sendMessage(uploaded.length ? { attachments: uploaded } : undefined);
-  await onRefresh(); // 👈 🔥 THIS LINE makes it real-time
+    await sendMessage(
+      uploaded.length
+        ? { attachments: uploaded, verbosity }
+        : { verbosity }
+    );
 
-  requestAnimationFrame(() => {
-    virtuosoRef.current?.scrollToIndex({
-      index: Math.max(0, displayedMessages.length),
-      behavior: 'smooth',
+    await onRefresh(); // 👈 real-time refresh
+
+    requestAnimationFrame(() => {
+      virtuosoRef.current?.scrollToIndex({
+        index: Math.max(0, displayedMessages.length),
+        behavior: 'smooth',
+      });
     });
-  });
-};
+  };
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -173,37 +185,51 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     <div className="flex flex-col h-full min-h-0">
       {/* Tabs + Inline Refresh */}
       <div className="flex justify-between items-center px-6 pt-3">
-  <div className="flex items-center gap-2">
-    {(['all', 'today', 'pinned'] as const).map((view) => (
-      <button
-        key={view}
-        onClick={() => setChatView(view)}
-        className={`text-xs px-3 py-1 rounded-md border transition ${
-          chatView === view
-            ? 'bg-blue-600 text-white border-blue-700 shadow'
-            : 'bg-blue-800 text-blue-200 border-blue-500 hover:bg-blue-700'
-        }`}
-      >
-        {view.charAt(0).toUpperCase() + view.slice(1)}
-      </button>
-    ))}
+        <div className="flex items-center gap-2">
+          {(['all', 'today', 'pinned'] as const).map((view) => (
+            <button
+              key={view}
+              onClick={() => setChatView(view)}
+              className={`text-xs px-3 py-1 rounded-md border transition ${
+                chatView === view
+                  ? 'bg-blue-600 text-white border-blue-700 shadow'
+                  : 'bg-blue-800 text-blue-200 border-blue-500 hover:bg-blue-700'
+              }`}
+            >
+              {view.charAt(0).toUpperCase() + view.slice(1)}
+            </button>
+          ))}
+        </div>
 
-    
-  </div>
+        {/* Right-side controls: Verbosity (left) + Font (right) */}
+        <div className="text-xs text-white flex items-center">
+          {/* Verbosity selector */}
+          <div className="flex items-center mr-4">
+            <span className="opacity-80">Verbosity:</span>
+            <select
+              className="ml-2 px-2 py-1 rounded bg-blue-900 border border-blue-500 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+              value={verbosity}
+              onChange={(e) => setVerbosity(e.target.value as Verbosity)}
+            >
+              <option value="short">Short</option>
+              <option value="normal">Normal</option>
+              <option value="long">Long</option>
+            </select>
+          </div>
 
-  <div className="text-xs text-white flex items-center">
-    <span className="opacity-80">Font:</span>
-    <select
-      className="ml-2 px-2 py-1 rounded bg-blue-900 border border-blue-500 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
-      value={fontSize}
-      onChange={(e) => setFontSize(e.target.value as 'sm' | 'base' | 'lg')}
-    >
-      <option value="sm">Small</option>
-      <option value="base">Medium</option>
-      <option value="lg">Large</option>
-    </select>
-  </div>
-</div>
+          {/* Font selector */}
+          <span className="opacity-80">Font:</span>
+          <select
+            className="ml-2 px-2 py-1 rounded bg-blue-900 border border-blue-500 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+            value={fontSize}
+            onChange={(e) => setFontSize(e.target.value as 'sm' | 'base' | 'lg')}
+          >
+            <option value="sm">Small</option>
+            <option value="base">Medium</option>
+            <option value="lg">Large</option>
+          </select>
+        </div>
+      </div>
 
       {/* Hide/Show */}
       <div className="flex justify-end gap-2 px-6 pt-2">

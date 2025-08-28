@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { XP_WEIGHTS } from '@/lib/XP';
 
 type LogRow = {
   id: string;
@@ -13,65 +14,71 @@ type LogRow = {
   created_at: string;
 };
 
+type TaskRow = {
+  id: string;
+  project_id: string;
+  task_type: 'zeta' | 'user'; // who it's for, not creator
+  title: string;
+  status:
+    | 'draft'
+    | 'under_construction'
+    | 'in_progress'
+    | 'confirmed'
+    | 'completed'
+    | 'cancelled';
+  created_at: string;
+  updated_at: string | null;
+};
+
 const PAGE_SIZE = 40;
 
-/** Events that move onboarding forward */
+/** Onboarding triggers */
 const ONBOARDING_EVENTS = new Set<string>([
   'project.vision.update',
   'project.goals.long.update',
   'project.goals.short.update',
-  'api.connect', // filtered by details below
+  'api.connect',
 ]);
 
-/** Debounced sync to avoid spamming the API */
+/** debounce helper */
 function makeDebounced(fn: () => void, wait = 400) {
   let t: ReturnType<typeof setTimeout> | null = null;
   return () => {
     if (t) clearTimeout(t);
     t = setTimeout(() => {
-      t = null;
-      fn();
+      t = null; fn();
     }, wait);
   };
 }
 
-const EVENT_UI: Record<string, { icon: string; border: string }> = {
-  'task.create': { icon: '🆕', border: 'border-lime-400' },
-  'task.edit': { icon: '✏️', border: 'border-yellow-400' },
-  'task.confirm': { icon: '📌', border: 'border-orange-400' },
-  'task.complete': { icon: '✅', border: 'border-green-400' },
-  'task.verify': { icon: '🧪', border: 'border-amber-400' },
-  // files
-  'file.upload': { icon: '📎', border: 'border-emerald-400' },
-  'file.convert': { icon: '🔁', border: 'border-teal-400' },
-  'file.generate': { icon: '🗂️', border: 'border-cyan-400' },
-  // discussions
-  'discussion.start': { icon: '💬', border: 'border-cyan-400' },
-  // integrations
-  'api.connect': { icon: '🔌', border: 'border-fuchsia-400' },
-  'notification.send': { icon: '📣', border: 'border-pink-400' },
-  // calendar
-  'calendar.event': { icon: '🗓️', border: 'border-sky-400' },
-  'calendar.reminder': { icon: '⏰', border: 'border-sky-400' },
-  'calendar.note': { icon: '📝', border: 'border-sky-400' },
-  // project meta
-  'project.vision.update': { icon: '🎯', border: 'border-indigo-400' },
-  'project.goals.short.update': { icon: '🎯', border: 'border-indigo-400' },
-  'project.goals.long.update': { icon: '🏁', border: 'border-indigo-400' },
-  // zeta thinking/ops
-  'zeta.thought': { icon: '🤔', border: 'border-violet-400' },
-  'zeta.outreach': { icon: '📨', border: 'border-violet-400' },
-  // misc
-  'functions.build.start': { icon: '🧩', border: 'border-pink-400' },
-  'memory.insight': { icon: '🧠', border: 'border-violet-400' },
+const EVENT_ICON: Record<string, string> = {
+  'task.create': '🆕',
+  'task.edit': '✏️',
+  'task.confirm': '📌',
+  'task.complete': '✅',
+  'task.verify': '🧪',
+  'file.upload': '📎',
+  'file.convert': '🔁',
+  'file.generate': '🗂️',
+  'discussion.start': '💬',
+  'api.connect': '🔌',
+  'notification.send': '📣',
+  'calendar.event': '🗓️',
+  'calendar.reminder': '⏰',
+  'calendar.note': '📝',
+  'project.vision.update': '🎯',
+  'project.goals.short.update': '🎯',
+  'project.goals.long.update': '🏁',
+  'zeta.thought': '🤔',
+  'zeta.outreach': '📨',
+  'functions.build.start': '🧩',
+  'memory.insight': '🧠',
 };
 
 function formatTime(ts: string) {
   try {
     return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return ts;
-  }
+  } catch { return ts; }
 }
 
 function fallbackMessage(row: LogRow) {
@@ -83,10 +90,10 @@ function fallbackMessage(row: LogRow) {
     case 'task.complete': return `Task completed: ${d.title ?? d.task_id ?? ''}`;
     case 'task.verify': return `Task verified: ${d.title ?? d.task_id ?? ''}`;
     case 'file.upload': return `Uploaded: ${d.file_name ?? d.path ?? ''}`;
-    case 'file.convert': return `Converted ${d.from ?? ''} → ${d.to ?? ''} ${d.file_name ? `(${d.file_name})` : ''}`;
+    case 'file.convert': return `Converted ${d.from ?? ''} → ${d.to ?? ''}${d.file_name ? ` (${d.file_name})` : ''}`;
     case 'file.generate': return `Generated file: ${d.file_name ?? ''}`;
     case 'discussion.start': return `Started discussion: ${d.title ?? d.discussion_id ?? ''}`;
-    case 'api.connect': return `Connected API: ${d.provider ?? ''} ${d.status ? `(${d.status})` : ''}`;
+    case 'api.connect': return `Connected API: ${d.provider ?? ''}${d.status ? ` (${d.status})` : ''}`;
     case 'notification.send': return `Notification sent: ${d.channel ?? ''}${d.title ? ` – ${d.title}` : ''}`;
     case 'calendar.event': return `Event created: ${d.title ?? ''} on ${d.when ?? ''}`;
     case 'calendar.reminder': return `Reminder created: ${d.title ?? ''} on ${d.when ?? ''}`;
@@ -102,14 +109,73 @@ function fallbackMessage(row: LogRow) {
   }
 }
 
-/** Decide if the log should trigger an onboarding sync */
 function isOnboardingRelevant(row: LogRow): boolean {
   if (!ONBOARDING_EVENTS.has(row.event)) return false;
   if (row.event !== 'api.connect') return true;
-  // Only sync for Telegram connections explicitly marked connected
   const provider = String(row.details?.provider ?? '').toLowerCase();
   const status = String(row.details?.status ?? '').toLowerCase();
   return provider === 'telegram' && (status === 'connected' || status === 'ok' || status === 'success');
+}
+
+/** ---- synthetic task logs ---- */
+// creation is always a Zeta action (even for user tasks)
+function toCreateLog(t: TaskRow): LogRow {
+  return {
+    id: `task-create:${t.id}:${t.created_at}`,
+    project_id: t.project_id,
+    actor: 'zeta',
+    event: 'task.create',
+    message: null,
+    details: { task_id: t.id, title: t.title, type: t.task_type, status: t.status },
+    created_at: t.created_at,
+  };
+}
+function eventFromStatus(s: TaskRow['status']) {
+  if (s === 'completed') return 'task.complete';
+  if (s === 'in_progress' || s === 'confirmed') return 'task.confirm';
+  return 'task.edit';
+}
+function toUpdateLog(t: TaskRow): LogRow {
+  const evt = eventFromStatus(t.status);
+  const ts = t.updated_at ?? t.created_at;
+  return {
+    id: `task-update:${t.id}:${ts}:${evt}`,
+    project_id: t.project_id,
+    actor: t.task_type === 'user' ? 'user' : 'zeta',
+    event: evt,
+    message: null,
+    details: { task_id: t.id, title: t.title, type: t.task_type, status: t.status },
+    created_at: ts,
+  };
+}
+function dedupeRows(rows: LogRow[]) {
+  const seen = new Set<string>(); const out: LogRow[] = [];
+  for (const r of rows) {
+    const key = `${r.event}:${(r.details as any)?.task_id ?? ''}:${r.created_at}`;
+    if (seen.has(key)) continue; seen.add(key); out.push(r);
+  }
+  return out;
+}
+
+/** XP per log */
+function xpFor(row: LogRow): number | null {
+  const d = row.details || {};
+  switch (row.event) {
+    case 'task.create': return XP_WEIGHTS.tasks_zeta_created;
+    case 'task.complete': return d.type === 'user' ? XP_WEIGHTS.tasks_user_complete : XP_WEIGHTS.tasks_zeta_complete;
+    case 'notification.send':
+    case 'zeta.outreach': return XP_WEIGHTS.outreach_messages;
+    case 'zeta.thought': return XP_WEIGHTS.zeta_thoughts;
+    case 'file.upload': return XP_WEIGHTS.files_uploaded;
+    case 'file.generate': return XP_WEIGHTS.files_generated;
+    case 'calendar.event':
+    case 'calendar.reminder':
+    case 'calendar.note': return XP_WEIGHTS.calendar_items;
+    case 'project.goals.short.update':
+    case 'project.goals.long.update': return XP_WEIGHTS.goals_created;
+    case 'functions.build.start': return XP_WEIGHTS.functions_built;
+    default: return null;
+  }
 }
 
 export default function LogsPanel({
@@ -123,7 +189,6 @@ export default function LogsPanel({
   const [search, setSearch] = useState('');
   const oldest = useRef<string | null>(null);
 
-  // debounced POST to /api/onboarding/sync
   const syncRef = useRef(
     makeDebounced(async () => {
       try {
@@ -132,56 +197,83 @@ export default function LogsPanel({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ projectId }),
         });
-      } catch (e) {
-        console.error('onboarding sync failed', e);
-      }
+      } catch (e) { console.error('onboarding sync failed', e); }
     }, 400)
   );
 
+  // initial load
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      setLoading(true);
-      setErr(null);
-      const { data, error } = await supabase
-        .from('system_logs')
-        .select('*')
-        .eq('project_id', projectId)
-        .order('created_at', { ascending: false })
-        .limit(PAGE_SIZE);
-      if (cancelled) return;
-      if (error) setErr(error.message);
-      else {
-        setRows((data ?? []) as LogRow[]);
-        oldest.current = data?.length ? data[data.length - 1].created_at : null;
+      setLoading(true); setErr(null);
+      try {
+        const [{ data: sys, error: sysErr }, { data: tasks, error: tErr }] = await Promise.all([
+          supabase.from('system_logs').select('*').eq('project_id', projectId)
+            .order('created_at', { ascending: false }).limit(PAGE_SIZE),
+          supabase.from('task_items')
+            .select('id,project_id,task_type,title,status,created_at,updated_at')
+            .eq('project_id', projectId).order('created_at', { ascending: false }).limit(20),
+        ]);
+        if (sysErr) throw sysErr;
+        if (tErr) throw tErr;
+
+        const sysRows = (sys ?? []) as LogRow[];
+        const taskRows = (tasks ?? []) as unknown as TaskRow[];
+
+        const synthetic: LogRow[] = [];
+        for (const t of taskRows) {
+          synthetic.push(toCreateLog(t));
+          if (t.updated_at && t.updated_at !== t.created_at) synthetic.push(toUpdateLog(t));
+        }
+
+        const merged = dedupeRows([...sysRows, ...synthetic]).sort(
+          (a, b) => (a.created_at < b.created_at ? 1 : -1)
+        );
+
+        if (!cancelled) {
+          setRows(merged);
+          oldest.current = sysRows.length ? sysRows[sysRows.length - 1].created_at : null;
+        }
+      } catch (e: any) {
+        if (!cancelled) setErr(e?.message || 'Failed to load logs.');
+        console.error('LogsPanel load error:', e);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     };
     if (projectId) run();
     return () => { cancelled = true; };
   }, [projectId]);
 
+  // realtime
   useEffect(() => {
     if (!projectId) return;
-    const channel = supabase
+
+    const logsChannel = supabase
       .channel(`logs_${projectId}`)
-      .on(
-        'postgres_changes',
+      .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'system_logs', filter: `project_id=eq.${projectId}` },
         (payload) => {
           const newLog = payload.new as LogRow;
-          setRows((curr) => [newLog, ...curr]);
-
-          if (isOnboardingRelevant(newLog)) {
-            // debounce to avoid multiple rapid calls
-            syncRef.current();
-          }
-        },
-      )
+          setRows((curr) => dedupeRows([newLog, ...curr]));
+          if (isOnboardingRelevant(newLog)) syncRef.current();
+        })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+
+    const tasksChannel = supabase
+      .channel(`tasks_${projectId}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'task_items', filter: `project_id=eq.${projectId}` },
+        (payload) => setRows((curr) => dedupeRows([toCreateLog(payload.new as any), ...curr])))
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'task_items', filter: `project_id=eq.${projectId}` },
+        (payload) => setRows((curr) => dedupeRows([toUpdateLog(payload.new as any), ...curr])))
+      .subscribe();
+
+    return () => { supabase.removeChannel(logsChannel); supabase.removeChannel(tasksChannel); };
   }, [projectId]);
 
+  // pagination for system_logs
   const loadMore = async () => {
     if (!projectId || !oldest.current) return;
     const { data, error } = await supabase
@@ -193,7 +285,9 @@ export default function LogsPanel({
       .limit(PAGE_SIZE);
     if (error) return;
     if (!data?.length) { oldest.current = null; return; }
-    setRows((r) => [...r, ...(data as LogRow[])]);
+    setRows((r) =>
+      dedupeRows([...r, ...(data as LogRow[])]).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+    );
     oldest.current = data[data.length - 1].created_at;
   };
 
@@ -203,12 +297,13 @@ export default function LogsPanel({
     const s = search.toLowerCase();
     return base.filter((r) => {
       const msg = (r.message || fallbackMessage(r)).toLowerCase();
-      return msg.includes(s) || r.event.toLowerCase().includes(s);
+      const title = String(r.details?.title ?? '').toLowerCase();
+      return msg.includes(s) || title.includes(s) || r.event.toLowerCase().includes(s);
     });
   }, [rows, filter, search]);
 
   return (
-    <div className={`p-6 overflow-y-auto text-${fontSize} text-indigo-200 space-y-4`}>
+    <div className={`p-4 overflow-y-auto text-${fontSize} text-blue-100 bg-blue-950/60 space-y-3 rounded-xl`}>
       <div className="flex items-center justify-between">
         <h2 className="text-lg text-white font-semibold">📄 System Logs</h2>
         <div className="flex gap-2">
@@ -216,14 +311,14 @@ export default function LogsPanel({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search…"
-            className="bg-blue-950/60 border border-indigo-500/40 rounded-md px-3 py-1 text-indigo-100 placeholder-indigo-300/50 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            className="bg-blue-900/60 border border-blue-400/40 rounded-md px-3 py-1 text-blue-100 placeholder-blue-200/60 focus:outline-none focus:ring-2 focus:ring-blue-300"
           />
-          <div className="bg-blue-950/60 border border-indigo-500/40 rounded-md overflow-hidden flex">
+          <div className="bg-blue-900/60 border border-blue-400/40 rounded-md overflow-hidden flex">
             {(['all', 'user', 'zeta'] as const).map((k) => (
               <button
                 key={k}
                 onClick={() => setFilter(k)}
-                className={`px-3 py-1 ${filter === k ? 'bg-indigo-600 text-white' : 'text-indigo-200 hover:bg-indigo-700/30'}`}
+                className={`px-3 py-1 ${filter === k ? 'bg-blue-600 text-white' : 'text-blue-100 hover:bg-blue-700/40'}`}
               >
                 {k === 'all' ? 'All' : k === 'user' ? 'User' : 'Zeta'}
               </button>
@@ -237,22 +332,30 @@ export default function LogsPanel({
       {loading && !rows.length ? (
         <div className="opacity-70">Loading logs…</div>
       ) : filtered.length ? (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {filtered.map((row) => {
-            const ui = EVENT_UI[row.event] ?? { icon: '🪵', border: 'border-indigo-400' };
+            const icon = EVENT_ICON[row.event] ?? '🪵';
             const msg = row.message || fallbackMessage(row);
+            const xp = xpFor(row);
             const link =
               (row.details && (row.details.link_url || row.details.url || row.details.file_url)) || null;
+
             return (
-              <div key={row.id} className={`bg-blue-950 border ${ui.border} rounded-lg p-3 shadow`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl leading-none">{ui.icon}</span>
-                    <span className="text-indigo-100">{msg}</span>
+              <div
+                key={row.id}
+                className="rounded-lg bg-blue-900/50 border border-yellow-400/70 ring-1 ring-yellow-300/30 shadow hover:shadow-md transition-shadow"
+              >
+                {/* COMPACT SINGLE-LINE ROW */}
+                <div className="flex items-center gap-3 px-3 h-10">
+                  <span className="text-base leading-none">{icon}</span>
+
+                  {/* message: single line + ellipsis; cuts off near right chips */}
+                  <div className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis text-blue-50">
+                    {msg}
                     {link ? (
                       <a
                         href={link as string}
-                        className="underline text-indigo-300 hover:text-indigo-200 ml-2"
+                        className="underline text-yellow-300 hover:text-yellow-200 ml-2"
                         target="_blank"
                         rel="noreferrer"
                       >
@@ -260,27 +363,37 @@ export default function LogsPanel({
                       </a>
                     ) : null}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full border ${
-                        row.actor === 'user'
-                          ? 'border-amber-400 text-amber-300'
-                          : 'border-indigo-400 text-indigo-300'
-                      }`}
-                    >
-                      {row.actor.toUpperCase()}
+
+                  {/* XP */}
+                  {typeof xp === 'number' && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-yellow-300/70 bg-yellow-200/20 text-yellow-200 shrink-0">
+                      ⚡ +{xp} XP
                     </span>
-                    <span className="opacity-70">{formatTime(row.created_at)}</span>
-                  </div>
+                  )}
+
+                  {/* actor */}
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0
+                      ${row.actor === 'user'
+                        ? 'border-amber-300/70 text-amber-200'
+                        : 'border-blue-300/70 text-blue-200'}`}
+                  >
+                    {row.actor.toUpperCase()}
+                  </span>
+
+                  {/* time */}
+                  <span className="opacity-80 text-blue-200 text-xs shrink-0">
+                    {formatTime(row.created_at)}
+                  </span>
                 </div>
               </div>
             );
           })}
-          <div className="pt-2">
+          <div className="pt-1">
             {oldest.current ? (
               <button
                 onClick={loadMore}
-                className="px-3 py-1 rounded-md bg-indigo-700 hover:bg-indigo-600 text-white border border-indigo-500/60"
+                className="px-3 py-1 rounded-md bg-blue-700 hover:bg-blue-600 text-white border border-blue-500/60"
               >
                 Load older
               </button>

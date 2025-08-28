@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Clock from '@/components/Clock';
 import RefreshButton from '../dashboard_buttons/refresh_button/refresh_button';
+import { getPlanAndUsage } from '@/lib/plan';
 
 type Props = {
   projectName: string;
@@ -13,9 +14,72 @@ type Props = {
   setShowAgentMenu: React.Dispatch<React.SetStateAction<boolean>>;
   showAgentMenu: boolean;
   handleLogout: () => void;
-  onRefresh?: () => Promise<void>;   // added
-  refreshing?: boolean;              // added
+  onRefresh?: () => Promise<void>;
+  refreshing?: boolean;
 };
+
+/** Centered, pretty plan pill */
+function PlanPill({
+  plan,
+  onClick,
+}: {
+  plan: 'free' | 'premium';
+  onClick: () => void;
+}) {
+  const isPremium = plan === 'premium';
+  const tone = isPremium
+    ? {
+        ring: 'ring-amber-300/50',
+        border: 'border-amber-300/40',
+        hover: 'hover:bg-amber-400/10',
+        text: 'text-amber-100',
+        ping: 'bg-amber-300',
+        dot: 'bg-amber-400',
+        emoji: '👑',
+        label: 'Premium',
+      }
+    : {
+        ring: 'ring-emerald-300/50',
+        border: 'border-emerald-300/40',
+        hover: 'hover:bg-emerald-400/10',
+        text: 'text-emerald-100',
+        ping: 'bg-emerald-300',
+        dot: 'bg-emerald-400',
+        
+        label: 'User Subscription',
+      };
+
+  return (
+    <button
+      onClick={onClick}
+      title="Manage plan & billing"
+      className={[
+        'inline-flex items-center gap-2 px-3 py-1.5 rounded-full',
+        'backdrop-blur-sm bg-white/10 shadow-sm border',
+        tone.border,
+        'ring-1', tone.ring,
+        'transition-colors duration-200', tone.hover,
+        'text-xs font-semibold', tone.text,
+      ].join(' ')}
+    >
+      {/* animated status dot */}
+      <span className="relative flex h-2.5 w-2.5">
+        <span className={['absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping', tone.ping].join(' ')} />
+        <span className={['relative inline-flex h-2.5 w-2.5 rounded-full', tone.dot].join(' ')} />
+      </span>
+      <span aria-hidden className="leading-none">{tone.emoji}</span>
+      <span>{tone.label}</span>
+      <svg
+        aria-hidden
+        viewBox="0 0 20 20"
+        className="h-3.5 w-3.5 opacity-80"
+        fill="currentColor"
+      >
+        <path d="M7.05 5.293a1 1 0 011.414 0L12.172 9l-3.707 3.707a1 1 0 01-1.414-1.414L9.343 9 7.05 6.707a1 1 0 010-1.414z" />
+      </svg>
+    </button>
+  );
+}
 
 export default function DashboardHeader({
   projectName,
@@ -30,9 +94,22 @@ export default function DashboardHeader({
 }: Props) {
   const router = useRouter();
 
+  const [plan, setPlan] = useState<'free' | 'premium'>('free');
+  const [limit, setLimit] = useState<number>(3);
+  const [used, setUsed] = useState<number>(0);
+
+  useEffect(() => {
+    (async () => {
+      const usage = await getPlanAndUsage();
+      setPlan(usage.plan);
+      setLimit(usage.limit);
+      setUsed(usage.used);
+    })();
+  }, []);
+
   return (
     <>
-      {/* 🧠 Dashboard Header */}
+      {/* 🧠 Top header */}
       <div className="flex items-center px-6 py-4 border-b border-blue-700">
         <div className="relative flex items-center gap-4 shrink-0">
           <div
@@ -76,45 +153,54 @@ export default function DashboardHeader({
         </div>
       </div>
 
-      {/* 🔐 User Info + Logout */}
+      {/* 🔐 IDs + centered plan pill + right controls */}
       {userEmail && (
-        <div className="flex justify-between items-start px-4 pt-1 pb-1 text-[10px] text-gray-400">
-          <div className="leading-tight space-y-0.5">
-            <p>
-              <span className="font-semibold">👤</span> {userEmail}
-            </p>
-            <p>
-              <span className="font-semibold">📁</span>{' '}
-              <span className="font-mono">{projectId}</span>
-            </p>
-            {threadId && (
+        <div className="px-4 pt-1 pb-1 text-[10px] text-gray-400">
+          <div className="flex items-center w-full">
+            {/* LEFT: IDs */}
+            <div className="leading-tight space-y-0.5">
               <p>
-                <span className="font-semibold">🧵</span>{' '}
-                <span className="font-mono break-all">{threadId}</span>
+                <span className="font-semibold">👤</span> {userEmail}
               </p>
-            )}
-          </div>
+              <p>
+                <span className="font-semibold">📁</span>{' '}
+                <span className="font-mono">{projectId}</span>
+              </p>
+              {threadId && (
+                <p>
+                  <span className="font-semibold">🧵</span>{' '}
+                  <span className="font-mono break-all">{threadId}</span>
+                </p>
+              )}
+            </div>
 
-          <div className="flex gap-2 mt-1 items-center">
-            {/* ⟳ Refresh next to Projects */}
-            <RefreshButton
-              variant="inline"
-              onRefresh={onRefresh ?? (async () => {})}
-              refreshing={refreshing ?? false}
-              className="!text-xs"
-            />
-            <button
-              onClick={() => router.push('/projects')}
-              className="text-xs bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-md"
-            >
-              Projects
-            </button>
-            <button
-              onClick={handleLogout}
-              className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md"
-            >
-              Log Out
-            </button>
+            {/* MIDDLE: perfectly centered plan pill */}
+            <div className="flex-1 flex justify-center">
+              <PlanPill plan={plan} onClick={() => router.push('/settings')} />
+            </div>
+
+            {/* RIGHT: Refresh / Projects / Logout */}
+            <div className="flex gap-2 items-center">
+              <RefreshButton
+                variant="inline"
+                onRefresh={onRefresh ?? (async () => {})}
+                refreshing={refreshing ?? false}
+                className="!text-xs"
+              />
+              <button
+                onClick={() => router.push('/projects')}
+                className="text-xs bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-md"
+                title={`Projects ${used}/${limit}`}
+              >
+                Projects
+              </button>
+              <button
+                onClick={handleLogout}
+                className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md"
+              >
+                Log Out
+              </button>
+            </div>
           </div>
         </div>
       )}

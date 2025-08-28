@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabaseClient';
+import { MainTab } from '@/types/MainTab';
 
 import ChatboardTab from '../dashboard_tabs/ChatboardTab';
 import WorkspaceTabs from '../dashboard_tabs/WorkspaceTabs';
@@ -17,7 +19,22 @@ import DashboardHeader from '../dashboard-header/dashboard-header';
 
 import DiscussionsPanel from '../dashboard_tabs/dashboard_panels/Discussions/DiscussionsPanel';
 import LogsPanel from '../dashboard_tabs/dashboard_panels/Logs/LogsPanel';
-import FilesPanel from '../dashboard_tabs/dashboard_panels/Files/FilesPanel';
+// ✅ Dynamic import of FilesPanel to avoid "lazy resolves to object" issues
+const FilesPanel = dynamic(
+  () =>
+    import('../dashboard_tabs/dashboard_panels/Files/FilesPanel').then(
+      (m) => m.default || (m as any)
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-[320px] text-sm text-blue-200">
+        Loading Files…
+      </div>
+    ),
+  }
+);
+
 import ApisPanel from '../dashboard_tabs/dashboard_panels/APIs/ApisPanel';
 import CalendarPanel from '../dashboard_tabs/dashboard_panels/Calendar/CalendarPanel';
 import GoalsPanel from '../dashboard_tabs/dashboard_panels/Goals/GoalsPanel';
@@ -29,10 +46,12 @@ import NewFunctionPanel from '../dashboard_tabs/dashboard_panels/NewFunction/New
 import WorkshopPanel from '../dashboard_tabs/dashboard_panels/Workshop/WorkshopPanel';
 import TimelinePanel from '../dashboard_tabs/dashboard_panels/Timeline/TimelinePanel';
 
+// ✅ Static import of default export
+import ConnectionsPanel from '../dashboard_tabs/dashboard_panels/Connections/ConnectionsPanel';
+
 import ThoughtButton from '../dashboard_buttons/thought_button/thought_button';
 import MessageButton from '../dashboard_buttons/message_button/message_button';
 import SettingsButton from '../dashboard_buttons/settings_button/settings_button';
-import RefreshButton from '../dashboard_buttons/refresh_button/refresh_button';
 import UploadButton from '../dashboard_buttons/upload_button/upload_button';
 
 type Uploaded = { file_name: string; file_url: string };
@@ -47,33 +66,18 @@ export default function DashboardPage() {
   const [projectName, setProjectName] = useState('Loading...');
   const [assistantId, setAssistantId] = useState<string | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
-  const [recentDocs, setRecentDocs] = useState<{ file_name: string; file_url: string }[]>([]);
+  const [recentDocs, setRecentDocs] = useState<Uploaded[]>([]);
   const [chatView, setChatView] = useState<'all' | 'today' | 'pinned'>('today');
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
 
   const [userName, setUserName] = useState<string>('you');
 
-  const [activeMainTab, setActiveMainTab] = useState<
-    | 'chat'
-    | 'discussions'
-    | 'logs'
-    | 'files'
-    | 'calendar'
-    | 'functions'
-    | 'goals'
-    | 'thoughts'
-    | 'tasks'
-    | 'timeline'
-    | 'notifications'
-    | 'newfunction'
-    | 'workshop'
-    | 'apis'
-  >('chat');
+  const [activeMainTab, setActiveMainTab] = useState<MainTab>('chat');
+
   const [selectedModelId, setSelectedModelId] = useState('gpt-4o');
   const [chatHidden, setChatHidden] = useState(false);
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('sm');
-  const [showUpload, setShowUpload] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -82,18 +86,14 @@ export default function DashboardPage() {
   const router = useRouter();
   const params = useParams();
   const projectId = params.projectId as string;
+
   const isImage = (name: string) => /\.(png|jpe?g|webp|gif)$/i.test(name);
 
   const buildFilesMarkdown = (atts: Uploaded[]) => {
     const lines: string[] = ['📎 Files attached:'];
     for (const a of atts) {
-      if (isImage(a.file_name)) {
-        // inline preview
-        lines.push(`![${a.file_name}](${a.file_url})`);
-      } else {
-        // clickable link
-        lines.push(`- [${a.file_name}](${a.file_url})`);
-      }
+      if (isImage(a.file_name)) lines.push(`![${a.file_name}](${a.file_url})`);
+      else lines.push(`- [${a.file_name}](${a.file_url})`);
     }
     return lines.join('\n');
   };
@@ -105,12 +105,8 @@ export default function DashboardPage() {
   }, [projectId]);
 
   const checkSessionAndProject = async () => {
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user?.email) return router.push('/login');
-
     setUserEmail(session.user.email);
 
     const { data: project, error: projectError } = await supabase
@@ -140,6 +136,7 @@ export default function DashboardPage() {
         content: m.message,
         timestamp: new Date(m.timestamp).getTime(),
       })) || [];
+
     setMessages(formatted);
     setSessionLoading(false);
 
@@ -181,7 +178,6 @@ export default function DashboardPage() {
     if (data) setRecentDocs(data);
   };
 
-  // NOTE: now accepts optional attachments and forwards them to /api/chat
   const sendMessage = async (opts?: { attachments?: Uploaded[] }) => {
     if (!projectId) return;
 
@@ -204,25 +200,18 @@ export default function DashboardPage() {
       ]);
     }, 90_000);
 
-    // local bubbles for immediate UX
     const sentText = input;
     if (hasText) {
       setMessages((prev) => [...prev, { role: 'user', content: sentText, timestamp: Date.now() }]);
     }
     if (hasFiles) {
       const filesMsg = buildFilesMarkdown(attachments);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'user', content: filesMsg, timestamp: Date.now() },
-      ]);
+      setMessages((prev) => [...prev, { role: 'user', content: filesMsg, timestamp: Date.now() }]);
     }
     setInput('');
 
     try {
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
+      const { data: { session }, error } = await supabase.auth.getSession();
       if (error || !session?.access_token || !session?.user?.id) {
         clearTimeout(timeoutId);
         setSendingMessage(false);
@@ -232,7 +221,6 @@ export default function DashboardPage() {
 
       const user_id = session.user.id;
 
-      // Persist user text (if any)
       if (hasText) {
         await supabase.from('zeta_conversation_log').insert({
           user_id,
@@ -243,19 +231,17 @@ export default function DashboardPage() {
         });
       }
 
-      // NEW: persist file note so it shows after refresh
       if (hasFiles) {
         const filesMsg = buildFilesMarkdown(attachments);
         await supabase.from('zeta_conversation_log').insert({
           user_id,
           project_id: projectId,
           role: 'user',
-          message: filesMsg, // markdown with ![img](url) so it renders inline later
+          message: filesMsg,
           timestamp: new Date().toISOString(),
         });
       }
 
-      // Call your API (still forwards attachments so Zeta can analyze them)
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -263,7 +249,7 @@ export default function DashboardPage() {
           projectId,
           message: hasText ? sentText : '',
           modelId: selectedModelId,
-          attachments, // <-- URLs for the API
+          attachments,
         }),
         signal: controller.signal,
       });
@@ -337,8 +323,10 @@ export default function DashboardPage() {
     }
   };
 
+  const PANEL_H = 'calc(100vh - 110px)';
+
   return (
-    <div className="min-h-screen bg-blue-950 text-white px-6 py-8 flex flex-col items-center">
+    <div className="min-h-screen bg-sky-800 text-white px-6 py-6 flex flex-col items-center">
       <div className="flex w-full max-w-[1440px] gap-4 justify-start px-2 items-stretch">
         {/* Left Sidebar */}
         <div className="relative w-[350px] shrink-0 px-3 py-2">
@@ -356,7 +344,6 @@ export default function DashboardPage() {
             />
             <ThoughtButton projectId={projectId} />
             <MessageButton projectId={projectId} />
-            {/* ✅ Upload button (no onOpen prop) */}
             <UploadButton
               projectId={projectId}
               onUploaded={async () => {
@@ -366,14 +353,14 @@ export default function DashboardPage() {
             />
           </div>
 
-          <ZetaLeftSidePanel
-            key={`left-${refreshNonce}`}
-            projectId={projectId}
-          />
+          <ZetaLeftSidePanel key={`left-${refreshNonce}`} projectId={projectId} />
         </div>
 
         {/* Main panel */}
-        <div className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg h-[calc(100vh-140px)] min-h-0 overflow-hidden">
+        <div
+          className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg min-h-0 overflow-hidden"
+          style={{ height: PANEL_H }}
+        >
           <DashboardHeader
             projectName={projectName}
             userEmail={userEmail}
@@ -382,8 +369,8 @@ export default function DashboardPage() {
             showAgentMenu={showAgentMenu}
             setShowAgentMenu={setShowAgentMenu}
             handleLogout={handleLogout}
-            onRefresh={refreshAll}       // ✅ use your real refresh fn
-            refreshing={refreshing}      // ✅ optional loading flag
+            onRefresh={refreshAll}
+            refreshing={refreshing}
           />
 
           <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
@@ -422,56 +409,50 @@ export default function DashboardPage() {
           {activeMainTab === 'discussions' && (
             <DiscussionsPanel key={`discussions-${refreshNonce}`} fontSize={fontSize} />
           )}
+
+          {/* 🌐 Connections */}
+          {activeMainTab === 'connections' && (
+            <ConnectionsPanel key={`connections-${refreshNonce}`} projectId={projectId} />
+          )}
+
           {activeMainTab === 'logs' && <LogsPanel key="Logs" fontSize={fontSize} projectId={projectId} />}
+
           {activeMainTab === 'files' && (
             <FilesPanel
               key={`files-${refreshNonce}`}
               recentDocs={recentDocs}
               fontSize={fontSize}
+              projectId={projectId}
             />
           )}
 
-          {activeMainTab === 'apis' && (
-            <ApisPanel
-              key={`apis-${refreshNonce}`}
-              fontSize={fontSize}
-              projectId={projectId}
-            />
-          )}
-          {activeMainTab === 'calendar' && (
-            <CalendarPanel key={`calendar-${refreshNonce}`} fontSize={fontSize} />
-          )}
-          {activeMainTab === 'goals' && (
-            <GoalsPanel key={`goals-${refreshNonce}`} fontSize="base" projectId={projectId} />
-          )}
+          {activeMainTab === 'apis' && <ApisPanel key={`apis-${refreshNonce}`} fontSize={fontSize} projectId={projectId} />}
+
+          {activeMainTab === 'calendar' && <CalendarPanel key={`calendar-${refreshNonce}`} fontSize={fontSize} />}
+
+          {activeMainTab === 'goals' && <GoalsPanel key={`goals-${refreshNonce}`} fontSize="base" projectId={projectId} />}
+
           {activeMainTab === 'notifications' && (
-            <NotificationsPanel
-              key={`notifications-${refreshNonce}`}
-              projectId={projectId}
-            />
+            <NotificationsPanel key={`notifications-${refreshNonce}`} projectId={projectId} />
           )}
-          {activeMainTab === 'tasks' && (
-            <TasksPanel
-              key={`tasks-${refreshNonce}`}
-              fontSize={fontSize}
-              userName={userName}
-            />
-          )}
+
+          {activeMainTab === 'tasks' && <TasksPanel key={`tasks-${refreshNonce}`} fontSize={fontSize} userName={userName} />}
+
           {activeMainTab === 'thoughts' && (
             <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
           )}
-          {activeMainTab === 'timeline' && (
-  <TimelinePanel key={`timeline-${refreshNonce}`} projectId={projectId} />
-)}
+
+          {activeMainTab === 'timeline' && <TimelinePanel key={`timeline-${refreshNonce}`} projectId={projectId} />}
+
           {activeMainTab === 'functions' && (
             <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
           )}
+
           {activeMainTab === 'newfunction' && (
             <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
           )}
-          {activeMainTab === 'workshop' && (
-            <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />
-          )}
+
+          {activeMainTab === 'workshop' && <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />}
         </div>
 
         <ZetaRightSidePanel key={`right-${refreshNonce}`} userEmail={userEmail} projectId={projectId} />

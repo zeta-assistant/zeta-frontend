@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-/* ========= Types ========= */
 type Integration = {
   id: string;
   project_id: string;
@@ -12,6 +11,7 @@ type Integration = {
   email_address?: string | null;
   is_verified: boolean | null;
   user_chat_id?: string | null;
+  created_at?: string;
 };
 
 type Props = {
@@ -19,12 +19,11 @@ type Props = {
   projectId: string;
 };
 
-/* ========= Helpers ========= */
 const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
-const BOT_USERNAME =
-  process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'yogizeta_bot';
+const isUUID = (s: string) => /^[0-9a-fA-F-]{36}$/.test(s || '');
+const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'yogizeta_bot';
+const FROM_HINT = 'Emails are sent by your function using zeta@pantheonagents.com';
 
-/* ========= Presentational ========= */
 type SectionCardProps = { title: string; subtitle?: string; children: React.ReactNode };
 const SectionCard = ({ title, subtitle, children }: SectionCardProps) => (
   <div className="rounded-2xl border border-slate-200/70 bg-white/80 shadow-sm backdrop-blur p-5 max-w-xl w-full">
@@ -36,17 +35,22 @@ const SectionCard = ({ title, subtitle, children }: SectionCardProps) => (
   </div>
 );
 
-type ItemRowProps = { i: Integration; onDelete: (id: string) => void };
-const ItemRow = ({ i, onDelete }: ItemRowProps) => {
+type ItemRowProps = {
+  i: Integration;
+  onDelete: (id: string) => void;
+  onSendTest?: (to: string) => void;
+};
+const ItemRow = ({ i, onDelete, onSendTest }: ItemRowProps) => {
   const display =
     i.type === 'email'
       ? i.email_address ?? i.value ?? ''
       : i.value ?? i.user_chat_id ?? '';
   const verified = Boolean(i.is_verified);
+
   return (
     <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
-      <div>
-        <div className="text-sm font-medium text-slate-900">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-slate-900 truncate">
           {i.type === 'telegram' ? 'Telegram' : 'Email'} — {display}
         </div>
         <div className="mt-1">
@@ -61,22 +65,33 @@ const ItemRow = ({ i, onDelete }: ItemRowProps) => {
           )}
         </div>
       </div>
-      <button
-        className="text-sm font-medium text-red-600 hover:underline"
-        onClick={() => onDelete(i.id)}
-      >
-        Remove
-      </button>
+
+      <div className="flex items-center gap-3 shrink-0">
+        {i.type === 'email' && onSendTest && display && (
+          <button
+            className="text-sm rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50"
+            onClick={() => onSendTest(display)}
+          >
+            Send test
+          </button>
+        )}
+        <button
+          className="text-sm font-medium text-red-600 hover:underline"
+          onClick={() => onDelete(i.id)}
+        >
+          Remove
+        </button>
+      </div>
     </div>
   );
 };
 
-/* ========= Main ========= */
 export default function APIsTab({ fontSize = 'base', projectId }: Props) {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<string>('');
   const [emailInput, setEmailInput] = useState('');
+  const [testBusy, setTestBusy] = useState(false);
 
   const telegramIntegrations = useMemo(
     () => integrations.filter((i) => i.type === 'telegram'),
@@ -87,23 +102,28 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     [integrations]
   );
 
+  const fail = (msg: string) => setFeedback(msg);
+
   const fetchIntegrations = useCallback(async () => {
     if (!projectId) return;
     try {
       const { data, error } = await supabase
         .from('project_integrations')
-        .select('id, project_id, type, value, email_address, is_verified, user_chat_id')
-        .eq('project_id', projectId);
+        .select(
+          'id, project_id, type, value, email_address, is_verified, user_chat_id, created_at'
+        )
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false });
 
       if (error) {
-        setFeedback(
-          `❌ Failed to fetch integrations: ${error.message || error.code || 'unknown error'}`
+        return fail(
+          `❌ Fetch failed: ${error.message || error.code || 'unknown'} ${error.details ?? ''}`
         );
-        return;
       }
       setIntegrations((data || []) as Integration[]);
-    } catch (e: any) {
-      setFeedback(`❌ Failed to fetch integrations: ${e?.message ?? 'unknown error'}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'unknown error';
+      fail(`❌ Fetch failed: ${msg}`);
     }
   }, [projectId]);
 
@@ -111,26 +131,22 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     fetchIntegrations();
   }, [fetchIntegrations]);
 
-  /* ---------- Telegram open (NEW TAB) ---------- */
+  /* ---------- Telegram ---------- */
   const openTelegramForProject = () => {
     const payload = `proj_${projectId}`;
     const ua = navigator.userAgent || '';
     const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
 
-    // Prefer t.me on mobile (hands off to app/store gracefully)
     if (isMobile) {
       const tme = `https://t.me/${BOT_USERNAME}?start=${payload}`;
       const w = window.open(tme, '_blank', 'noopener,noreferrer');
-      if (!w) setFeedback('Popup blocked. Allow popups and try again, or use the fallback link below.');
+      if (!w) fail('Popup blocked. Allow popups and try again, or use the fallback link below.');
       return;
     }
 
-    // Desktop: Telegram Web (new client "a"), fallback is shown as a link below
     const webA = `https://web.telegram.org/a/#?tgaddr=resolve?domain=${BOT_USERNAME}&start=${payload}`;
     const w = window.open(webA, '_blank', 'noopener,noreferrer');
-    if (!w) {
-      setFeedback('Popup blocked. Allow popups for this site or use the fallback link below.');
-    }
+    if (!w) fail('Popup blocked. Allow popups for this site or use the fallback link below.');
   };
 
   const copyStartCommand = async () => {
@@ -139,48 +155,87 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
       await navigator.clipboard.writeText(text);
       setFeedback('📋 Copied. Paste into your Telegram bot chat.');
     } catch {
-      setFeedback('Copy failed. Select and copy this command: ' + text);
+      fail('Copy failed. Select and copy this command: ' + text);
     }
   };
 
-  /* ---------- Email ----------- */
+  /* ---------- Email CRUD + Test ----------- */
   const addEmail = async () => {
     setFeedback('');
     const value = emailInput.trim();
-    if (!value) return setFeedback('❌ Please enter an email address.');
-    if (!isEmail(value)) return setFeedback('❌ Please enter a valid email.');
+
+    if (!projectId || !isUUID(projectId)) {
+      return fail('❌ Invalid project id (must be a UUID).');
+    }
+    if (!value) return fail('❌ Please enter an email address.');
+    if (!isEmail(value)) return fail('❌ Please enter a valid email.');
     setLoading(true);
 
-    const { error } = await supabase.from('project_integrations').insert([
-      {
-        project_id: projectId,
-        type: 'email',
-        value,
-        email_address: value,
-        is_verified: true,
-      },
-    ]);
+    try {
+      const { data, error } = await supabase
+        .from('project_integrations')
+        .insert([
+          {
+            project_id: projectId,
+            type: 'email',
+            value,
+            email_address: value,
+            is_verified: true,
+          },
+        ])
+        .select()
+        .single();
 
-    if (error) {
-      console.error(error);
-      setFeedback('❌ Failed to add Email.');
+      if (error) {
+        fail(
+          `❌ Failed to add Email: ${error.message || error.code || 'unknown'} ${error.details ?? ''}`
+        );
+        setLoading(false);
+        return;
+      }
+
+      setEmailInput('');
+      await fetchIntegrations();
+      setFeedback('✅ Email saved.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'unknown error';
+      fail(`❌ Failed to add Email: ${msg}`);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setEmailInput('');
-    await fetchIntegrations();
-    setLoading(false);
-    setFeedback('✅ Email saved.');
   };
 
   const deleteIntegration = async (id: string) => {
     const { error } = await supabase.from('project_integrations').delete().eq('id', id);
     if (error) {
-      setFeedback(`❌ Failed to remove: ${error.message || error.code}`);
-      return;
+      return fail(`❌ Failed to remove: ${error.message || error.code}`);
     }
     fetchIntegrations();
+  };
+
+  const sendTestEmail = async (to: string) => {
+    setFeedback('');
+    setTestBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('send-email-message', {
+        body: {
+          to,
+          subject: 'Zeta test email',
+          message:
+            'Hello from Zeta! This is a test notification via Resend (zeta@pantheonagents.com).',
+        },
+      });
+      if (error) {
+        fail(`❌ Failed to send: ${error.message || JSON.stringify(error)}`);
+      } else {
+        setFeedback('✅ Test email sent. Check your inbox/spam.');
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      fail(`❌ Failed to send: ${msg}`);
+    } finally {
+      setTestBusy(false);
+    }
   };
 
   /* ---------- UI ---------- */
@@ -204,14 +259,12 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 mb-4">
             <p className="font-medium">Connect (10 seconds)</p>
             <ol className="list-decimal ml-5 mt-2 space-y-1">
-              <li>
-                Click <b>Open Telegram</b>. It opens in a <b>new tab</b> (or app on mobile).
-              </li>
+              <li>Open Telegram in a new tab.</li>
               <li>
                 In the bot chat <span className="font-mono">@{BOT_USERNAME}</span>, send:{' '}
                 <span className="font-mono">/start proj_{projectId}</span>
               </li>
-              <li>Come back and hit <b>Refresh</b>. You’ll see “Verified”.</li>
+              <li>Hit Refresh here → you’ll see “Verified”.</li>
             </ol>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -236,27 +289,6 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
                 Refresh
               </button>
             </div>
-
-            <p className="mt-3 text-xs text-slate-500">
-              Fallback links:{' '}
-              <a
-                className="underline"
-                href={`https://t.me/${BOT_USERNAME}?start=proj_${projectId}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                t.me/{BOT_USERNAME}
-              </a>{' '}
-              ·{' '}
-              <a
-                className="underline"
-                href={`https://web.telegram.org/a/#?tgaddr=resolve?domain=${BOT_USERNAME}&start=proj_${projectId}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Telegram Web
-              </a>
-            </p>
           </div>
 
           <div className="space-y-2 w-full">
@@ -271,12 +303,17 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
         </SectionCard>
 
         {/* Email */}
-        <SectionCard title="Email" subtitle="Save an email to use for notifications.">
+        <SectionCard title="Email" subtitle={`Save emails to receive notifications. ${FROM_HINT}`}>
           <div className="space-y-3 w-full">
             {emailIntegrations.length > 0 && (
               <div className="space-y-2">
                 {emailIntegrations.map((i) => (
-                  <ItemRow key={i.id} i={i} onDelete={deleteIntegration} />
+                  <ItemRow
+                    key={i.id}
+                    i={i}
+                    onDelete={deleteIntegration}
+                    onSendTest={sendTestEmail}
+                  />
                 ))}
               </div>
             )}
@@ -295,6 +332,26 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
                 className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? 'Adding…' : 'Add'}
+              </button>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => {
+                  const to =
+                    emailIntegrations[0]?.email_address ||
+                    emailIntegrations[0]?.value ||
+                    emailInput.trim();
+                  if (!to || !isEmail(to)) {
+                    fail('❌ Add a valid email first.');
+                    return;
+                  }
+                  if (!testBusy) sendTestEmail(to);
+                }}
+                disabled={testBusy}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {testBusy ? 'Sending…' : 'Send test to first email'}
               </button>
             </div>
 

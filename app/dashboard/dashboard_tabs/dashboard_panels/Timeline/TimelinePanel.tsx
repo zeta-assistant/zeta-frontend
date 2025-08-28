@@ -2,28 +2,27 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import {
+  getXPCounts,
+  getXPProgress,
+  LEVELS,
+  type MetricCounts as XPMetrics,
+} from '@/lib/XP';
 
 type Props = { projectId: string };
 
-type MetricCounts = {
-  user_messages: number;
-  zeta_messages: number;
-  zeta_actions: number;
-  files_uploaded: number;
-  files_generated: number;
-  calendar_items: number;
-  goals_created: number;
-  goals_achieved: number;
-  outreach_messages: number;
-  zeta_thoughts: number;
-  tasks_zeta_created: number;
-  tasks_user_complete: number;
-  tasks_zeta_complete: number;
-  events_past: number;
-  functions_built: number; // used for XP only (not shown)
+type XPProgress = {
+  level: number;
+  title: string;
+  nextTitle: string;
+  pct: number;       // 0..100 within current level
+  remaining: number; // XP to next level
+  current: number;   // XP earned inside current level
+  next: number;      // XP needed to finish current level
+  total: number;     // lifetime XP
 };
 
-const ZERO: MetricCounts = {
+const ZERO: XPMetrics = {
   user_messages: 0,
   zeta_messages: 0,
   zeta_actions: 0,
@@ -41,188 +40,136 @@ const ZERO: MetricCounts = {
   functions_built: 0,
 };
 
-// XP weights + levels
-const XP_WEIGHTS: Record<keyof MetricCounts, number> = {
-  user_messages: 2,
-  zeta_messages: 1,
-  zeta_actions: 3,
-  files_uploaded: 2,
-  files_generated: 4,
-  calendar_items: 2,
-  goals_created: 5,
-  goals_achieved: 10,
-  outreach_messages: 2,
-  zeta_thoughts: 1,
-  tasks_zeta_created: 2,
-  tasks_user_complete: 6,
-  tasks_zeta_complete: 5,
-  events_past: 1,
-  functions_built: 8,
-};
-const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000] as const;
-
-function computeXP(c: MetricCounts) {
-  let xp = 0;
-  (Object.keys(c) as (keyof MetricCounts)[]).forEach((k) => {
-    xp += (c[k] ?? 0) * (XP_WEIGHTS[k] ?? 0);
-  });
-  return xp;
-}
-function levelFromXP(totalXP: number) {
-  let level = 1;
-  for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
-    if (totalXP >= LEVEL_THRESHOLDS[i]) {
-      level = i + 1;
-      break;
-    }
+/** Robust parser for Supabase timestamps */
+function parseSupabaseTS(ts?: string | null): Date | null {
+  if (!ts) return null;
+  const hasTZ = /[zZ]|[+\-]\d{2}:\d{2}$/.test(ts);
+  try {
+    return new Date(hasTZ ? ts : `${ts}Z`);
+  } catch {
+    return null;
   }
-  return Math.min(level, 5);
 }
-function levelProgress(totalXP: number) {
-  const lvl = levelFromXP(totalXP);
-  const start = LEVEL_THRESHOLDS[lvl - 1] ?? 0;
-  const next = LEVEL_THRESHOLDS[Math.min(lvl, 4)] ?? LEVEL_THRESHOLDS[4];
-  const inLevel = Math.max(0, totalXP - start);
-  const needed = Math.max(1, next - start);
-  const pct = lvl >= 5 ? 100 : Math.min(100, Math.round((inLevel / needed) * 100));
-  const remaining = lvl >= 5 ? 0 : Math.max(0, next - totalXP);
-  return { level: lvl, inLevel, start, next, pct, remaining };
-}
+
+// Fun confidence label
 function confidenceForLevel(lvl: number) {
   switch (lvl) {
-    case 1: return 'Weak';
-    case 2: return 'Medium';
-    case 3: return 'Strong';
-    case 4: return 'Very Strong';
-    case 5: return 'True Companion';
-    default: return 'Weak';
+    case 1: return 'Warming up';
+    case 2: return 'Finding rhythm';
+    case 3: return 'Dialed in';
+    case 4: return 'Reliable';
+    case 5: return 'Sharp';
+    case 6: return 'On point';
+    case 7: return 'Elite';
+    case 8: return 'Executive';
+    case 9: return 'Director-grade';
+    case 10: return 'Supreme';
+    default: return '—';
   }
 }
 
-export default function TimelinePanel({ projectId }: Props) {
+const MAX_LEVEL = LEVELS.length; // 10
+
+/* ---------------- Compact Confidence Gauge ---------------- */
+const ConfidenceGauge: React.FC<{ level: number; maxLevel: number; className?: string }> = ({
+  level, maxLevel, className = ''
+}) => {
+  const ratio = Math.max(0, Math.min(1, (level - 1) / (maxLevel - 1))); // 0..1
+  // tiny geometry
+  const cx = 30, cy = 30, r = 22;
+  const angle = Math.PI * (1 - ratio); // π (left) → 0 (right)
+  const needleX = cx + Math.cos(angle) * r;
+  const needleY = cy - Math.sin(angle) * r;
+
+  return (
+    <div className={`rounded-lg border border-blue-800/60 bg-blue-900/40 p-2 ${className}`}>
+      <div className="text-[11px] text-purple-200/90 mb-1 text-center">Confidence</div>
+      <svg viewBox="0 0 60 40" className="w-[96px] h-[64px]">
+        <defs>
+          <linearGradient id="gaugeArc" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#ef4444" />
+            <stop offset="50%" stopColor="#f97316" />
+            <stop offset="100%" stopColor="#f59e0b" />
+          </linearGradient>
+        </defs>
+        {/* arc */}
+        <path d="M6,30 A24,24 0 0 1 54,30" fill="none" stroke="url(#gaugeArc)" strokeWidth="6" strokeLinecap="round" />
+        {/* needle */}
+        <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke="#e5e7eb" strokeWidth="1.8" strokeLinecap="round" />
+        {/* hub */}
+        <circle cx={cx} cy={cy} r="2.6" fill="#111827" stroke="#e5e7eb" strokeWidth="1" />
+      </svg>
+      <div className="mt-1 text-center text-[11px] text-blue-100">{confidenceForLevel(level)}</div>
+    </div>
+  );
+};
+/* ---------------------------------------------------------- */
+
+const TimelinePanel: React.FC<Props> = ({ projectId }) => {
   const [loading, setLoading] = useState(true);
-  const [projectName, setProjectName] = useState<string>('');
   const [projectCreatedAt, setProjectCreatedAt] = useState<string>('');
   const [err, setErr] = useState<string | null>(null);
-  const [counts, setCounts] = useState<MetricCounts>(ZERO);
+
+  const [counts, setCounts] = useState<XPMetrics>(ZERO);
+  const [prog, setProg] = useState<XPProgress>({
+    level: 1,
+    title: 'Junior Assistant',
+    nextTitle: 'Associate Assistant',
+    pct: 0,
+    remaining: 100,
+    current: 0,
+    next: 100,
+    total: 0,
+  });
 
   useEffect(() => {
     if (!projectId) return;
+    let mounted = true;
+
     (async () => {
       setLoading(true);
       setErr(null);
       try {
+        // Basic project info (only created_at needed)
         const { data: proj, error: pErr } = await supabase
           .from('user_projects')
-          .select('name, created_at')
+          .select('created_at')
           .eq('id', projectId)
           .single();
         if (pErr) throw pErr;
-        setProjectName(proj?.name ?? 'Project');
+
+        if (!mounted) return;
         setProjectCreatedAt(proj?.created_at ?? '');
 
-        const nowIso = new Date().toISOString();
-
-        const countFrom = async (table: string, apply: (q: any) => any) => {
-          try {
-            let q = supabase.from(table).select('*', { count: 'exact', head: true });
-            q = apply(q);
-            const { count, error } = await q;
-            if (error) throw error;
-            return count ?? 0;
-          } catch {
-            return 0;
-          }
-        };
-        const tryCount = async (tables: string[], apply: (q: any) => any) => {
-          for (const t of tables) {
-            const n = await countFrom(t, apply);
-            if (n > 0) return n;
-          }
-          return 0;
-        };
-
-        const [
-          user_messages,
-          zeta_messages,
-          zeta_actions,
-          files_uploaded,
-          files_generated,
-          calendar_items,
-          goals_created,
-          goals_achieved,
-          outreach_messages,
-          zeta_thoughts,
-          tasks_zeta_created,
-          tasks_user_complete,
-          tasks_zeta_complete,
-          events_past,
-          functions_built,
-        ] = await Promise.all([
-          countFrom('zeta_conversation_log', (q) => q.eq('project_id', projectId).eq('role', 'user')),
-          countFrom('zeta_conversation_log', (q) => q.eq('project_id', projectId).in('role', ['assistant', 'zeta'])),
-          tryCount(['project_logs', 'system_logs'], (q) =>
-            q.eq('project_id', projectId).neq('event', 'message').in('actor', ['zeta', 'assistant'])
-          ),
-          tryCount(['documents', 'project_files'], (q) => q.eq('project_id', projectId)),
-          tryCount(['project_logs', 'system_logs'], (q) => q.eq('project_id', projectId).eq('event', 'file.generate')),
-          countFrom('calendar_items', (q) => q.eq('project_id', projectId)),
-          countFrom('goals', (q) => q.eq('project_id', projectId)),
-          countFrom('goals', (q) =>
-            q.eq('project_id', projectId).in('status', ['completed', 'done', 'achieved', 'success'])
-          ),
-          tryCount(['project_logs', 'system_logs'], (q) =>
-            q.eq('project_id', projectId).in('event', ['outreach.send', 'notification.send', 'telegram.send'])
-          ),
-          tryCount(['zeta_thoughts', 'thoughts'], (q) => q.eq('project_id', projectId)),
-          countFrom('tasks', (q) => q.eq('project_id', projectId).eq('task_type', 'zeta')),
-          countFrom('tasks', (q) =>
-            q.eq('project_id', projectId).eq('task_type', 'user').in('status', ['completed', 'done'])
-          ),
-          countFrom('tasks', (q) =>
-            q.eq('project_id', projectId).eq('task_type', 'zeta').in('status', ['completed', 'done'])
-          ),
-          (async () => {
-            let n = await countFrom('calendar_items', (q) => q.eq('project_id', projectId).lt('end_time', nowIso));
-            if (n === 0) n = await countFrom('calendar_items', (q) => q.eq('project_id', projectId).lt('start_time', nowIso));
-            return n;
-          })(),
-          tryCount(['custom_functions', 'functions', 'function_specs'], (q) => q.eq('project_id', projectId)),
+        // Counts (for chips) + XP progress (for card)
+        const [c, xp] = await Promise.all([
+          getXPCounts(projectId),
+          getXPProgress(projectId),
         ]);
 
-        setCounts({
-          user_messages,
-          zeta_messages,
-          zeta_actions,
-          files_uploaded,
-          files_generated,
-          calendar_items,
-          goals_created,
-          goals_achieved,
-          outreach_messages,
-          zeta_thoughts,
-          tasks_zeta_created,
-          tasks_user_complete,
-          tasks_zeta_complete,
-          events_past,
-          functions_built,
-        });
+        if (!mounted) return;
+        setCounts({ ...ZERO, ...(c as XPMetrics) });
+        setProg(xp as XPProgress);
       } catch (e: any) {
+        if (!mounted) return;
         setErr(e?.message || 'Failed to load data');
       } finally {
+        if (!mounted) return;
         setLoading(false);
       }
     })();
+
+    return () => { mounted = false; };
   }, [projectId]);
 
-  // Duration breakdown (months / weeks / days / hours)
-  const { daysSince, months, weeks, days, hours } = useMemo(() => {
-    if (!projectCreatedAt) return { daysSince: 0, months: 0, weeks: 0, days: 0, hours: 0 };
-    const start = new Date(projectCreatedAt);
+  // Duration breakdown (months/weeks/days/hours)
+  const { months, weeks, days, hours, startDate } = useMemo(() => {
+    if (!projectCreatedAt) return { months: 0, weeks: 0, days: 0, hours: 0, startDate: null as Date | null };
+    const start = parseSupabaseTS(projectCreatedAt);
     const end = new Date();
+    if (!start) return { months: 0, weeks: 0, days: 0, hours: 0, startDate: null };
 
-    const daysSince = Math.max(0, Math.ceil((end.getTime() - start.getTime()) / 86_400_000));
-
+    // calendar-ish breakdown
     let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
     const mAnchor = new Date(start);
     mAnchor.setMonth(start.getMonth() + months);
@@ -237,14 +184,12 @@ export default function TimelinePanel({ projectId }: Props) {
     ms -= days * 86_400_000;
     const hours = Math.floor(ms / 3_600_000);
 
-    return { daysSince, months, weeks, days, hours };
+    return { months, weeks, days, hours, startDate: start };
   }, [projectCreatedAt]);
 
-  const totalXP = useMemo(() => computeXP(counts), [counts]);
-  const prog = useMemo(() => levelProgress(totalXP), [totalXP]);
-  const confidence = useMemo(() => confidenceForLevel(prog.level), [prog.level]);
+  const maxed = prog.level >= MAX_LEVEL && prog.remaining === 0;
 
-  // --- Small components ---
+  // Small UI atoms
   const RowSection: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
     <div className="rounded-2xl border border-blue-700 bg-blue-950/50 p-3">
       <h3 className="text-sm font-semibold text-purple-200/90 mb-2">{title}</h3>
@@ -265,91 +210,113 @@ export default function TimelinePanel({ projectId }: Props) {
   );
 
   return (
-    <div className="p-3 md:p-4 lg:p-6 text-purple-100">
-      {/* Header */}
-      <div className="mb-3 flex items-center justify-between">
-        <div className="min-w-0">
-          <h2 className="text-lg md:text-xl font-semibold truncate">📈 Timeline</h2>
-          <p className="text-xs md:text-sm text-purple-300/80 truncate">
-            {projectName
-              ? `${projectName} · started ${projectCreatedAt ? new Date(projectCreatedAt).toLocaleDateString() : '—'}`
-              : '—'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => location.reload()}
-            className="px-3 py-1.5 rounded-md border border-blue-600 bg-blue-800 hover:bg-blue-700 text-sm"
-            type="button"
-          >
-            Refresh
-          </button>
-          <div className="rounded-xl border border-blue-600 bg-blue-900/30 px-3 py-2 text-right">
-            <div className="text-[11px] text-purple-300/80">Days since start</div>
-            <div className="text-xl font-semibold leading-tight">{daysSince}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Top row (compact) */}
+    // extra pb so bottom cards aren't clipped
+    <div className="p-3 md:p-4 lg:p-6 pb-10 text-purple-100">
+      {/* Top row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
-        {/* Duration */}
-        <div className="rounded-2xl border border-blue-700 bg-blue-950/50 p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm text-purple-200/90">Project duration</div>
-            <div className="text-[11px] text-purple-300/80">
-              {projectCreatedAt &&
-                new Date(projectCreatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {[
-              { label: 'months', value: months },
-              { label: 'weeks', value: weeks },
-              { label: 'days', value: days },
-              { label: 'hours', value: hours },
-            ].map((t) => (
-              <div key={t.label} className="rounded-xl border border-blue-700 bg-blue-900/40 p-2 text-center">
-                <div className="text-2xl font-semibold leading-6">{t.value}</div>
-                <div className="text-[11px] text-purple-300/80">{t.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* Project duration */}
+<div className="rounded-2xl border border-blue-700 bg-blue-950/50 p-3">
+  <div className="flex items-center justify-between mb-2">
+    <div className="text-sm text-purple-200/90 font-semibold">Project duration</div>
+    <div className="text-[11px] text-purple-300/80">
+      {startDate &&
+        startDate.toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })}
+    </div>
+  </div>
+
+  {/* time tiles */}
+  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+    {[
+      { label: 'months', value: isNaN(Number(months)) ? 0 : months },
+      { label: 'weeks', value: isNaN(Number(weeks)) ? 0 : weeks },
+      { label: 'days', value: isNaN(Number(days)) ? 0 : days },
+      { label: 'hours', value: isNaN(Number(hours)) ? 0 : hours },
+    ].map((t) => (
+      <div
+        key={t.label}
+        className="rounded-xl border border-blue-700 bg-blue-900/40 p-2 text-center"
+      >
+        <div className="text-2xl font-semibold leading-6">{t.value}</div>
+        <div className="text-[11px] text-purple-300/80">{t.label}</div>
+      </div>
+    ))}
+  </div>
+
+  {/* divider */}
+  <div className="mt-3 h-px bg-blue-800/60 rounded" />
+
+  {/* goals row */}
+  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+    <div className="rounded-lg border border-blue-700 bg-blue-900/40 px-3 py-2 flex items-center justify-between">
+      <div className="text-[12px] text-purple-200/90 flex items-center gap-1">
+        <span aria-hidden className="text-base">🎯</span>
+        <span>Goals created</span>
+      </div>
+      <div className="text-lg font-semibold">{counts.goals_created ?? 0}</div>
+    </div>
+
+    <div className="rounded-lg border border-blue-700 bg-blue-900/40 px-3 py-2 flex items-center justify-between">
+      <div className="text-[12px] text-purple-200/90 flex items-center gap-1">
+        <span aria-hidden className="text-base">✅</span>
+        <span>Goals achieved</span>
+      </div>
+      <div className="text-lg font-semibold">{counts.goals_achieved ?? 0}</div>
+    </div>
+  </div>
+</div>
 
         {/* XP / Level */}
         <div className="rounded-2xl border border-blue-700 bg-blue-950/50 p-3">
           <div className="flex items-center justify-between mb-1">
-            <div className="text-sm font-semibold">User XP ⚡</div>
+            <div className="text-sm font-semibold">Zeta XP ⚡</div>
             <div className="px-2 py-0.5 rounded-full border border-purple-400/60 text-[11px] font-semibold">
               LEVEL {prog.level}
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="shrink-0">
-              <div className="w-24 h-24 rounded-xl border border-blue-700 bg-blue-900/60 overflow-hidden grid place-items-center">
+          {/* Titles */}
+          <div className="text-[13px] text-blue-100/90 mb-1">
+            <span className="font-medium">{prog.title}</span>
+            {!maxed && (
+              <>
+                <span className="mx-2">→</span>
+                <span className="opacity-80">Next:</span> {prog.nextTitle}
+              </>
+            )}
+          </div>
+
+          {/* grid: left column (avatar + XP bar under it) | right column (compact gauge) */}
+          <div className="grid grid-cols-[auto,1fr] items-center gap-3">
+            {/* left column */}
+            <div className="shrink-0 w-[120px]">
+              <div className="w-20 h-20 rounded-xl border border-blue-700 bg-blue-900/60 overflow-hidden grid place-items-center mx-auto">
                 <img src="/zeta-avatar.svg" alt="Zeta avatar" className="w-full h-full object-contain" />
               </div>
-              <div className="mt-1 text-center text-[11px] text-purple-300/80">Zeta</div>
+
+              {/* XP bar UNDER the avatar */}
+              <div className="mt-2">
+                <div className="h-2 rounded-full bg-blue-900 overflow-hidden">
+                  <div
+                    className="h-2 bg-gradient-to-r from-amber-300 to-purple-400"
+                    style={{ width: `${Math.min(100, Math.max(0, prog.pct))}%` }}
+                  />
+                </div>
+                <div className="mt-1 text-[11px] text-purple-300/80 text-center">
+                  {maxed
+                    ? `Max level reached · ${prog.total.toLocaleString()} XP`
+                    : `${prog.current} / ${prog.next} XP `}
+                </div>
+              </div>
+
+              
             </div>
 
-            <div className="flex-1 min-w-0">
-              <div className="h-2.5 rounded-full bg-blue-900 overflow-hidden">
-                <div
-                  className="h-2.5 bg-gradient-to-r from-amber-300 to-purple-400"
-                  style={{ width: `${prog.pct}%` }}
-                />
-              </div>
-              <div className="mt-1 text-[11px] text-purple-300/80">
-                {prog.level >= 5 ? 'Max level reached' : `${prog.remaining} XP to Level ${prog.level + 1}`}
-              </div>
-              <div className="mt-2 text-[12px] text-purple-200/90 leading-snug">
-                <span className="font-semibold">Level {prog.level}:</span>{' '}
-                How confident is Zeta in understanding your goals?{' '}
-                <span className="font-semibold">{confidence}</span>
-              </div>
-            </div>
+            {/* right column: smaller gauge */}
+            <ConfidenceGauge level={prog.level} maxLevel={MAX_LEVEL} className="justify-self-end" />
           </div>
         </div>
       </div>
@@ -361,36 +328,37 @@ export default function TimelinePanel({ projectId }: Props) {
         </div>
       )}
 
-      {/* Thin rows of chips (fits on one page) */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-1">
+      {/* Metric chips (extra bottom margin so borders fully show) */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 mb-2">
         <RowSection title="Messages">
-          <Chip label="User messages" value={counts.user_messages} emoji="📨" />
-          <Chip label="Zeta messages" value={counts.zeta_messages} emoji="🤖" />
-          <Chip label="Outreach messages" value={counts.outreach_messages} emoji="📣" />
-          <Chip label="Zeta thoughts" value={counts.zeta_thoughts} emoji="🧠" />
+          <Chip label="User messages" value={counts.user_messages ?? 0} emoji="📨" />
+          <Chip label="Zeta messages" value={counts.zeta_messages ?? 0} emoji="🤖" />
+          <Chip label="Outreach messages" value={counts.outreach_messages ?? 0} emoji="📣" />
+          <Chip label="Zeta thoughts" value={counts.zeta_thoughts ?? 0} emoji="🧠" />
         </RowSection>
 
         <RowSection title="Automation">
-          <Chip label="Autonomous actions" value={counts.zeta_actions} emoji="⚙️" />
-          <Chip label="Tasks by Zeta" value={counts.tasks_zeta_created} emoji="🗒️" />
-          <Chip label="Zeta tasks complete" value={counts.tasks_zeta_complete} emoji="🤝" />
-          <Chip label="User tasks complete" value={counts.tasks_user_complete} emoji="🙌" />
+          <Chip label="Autonomous actions" value={counts.zeta_actions ?? 0} emoji="⚙️" />
+          <Chip label="Tasks by Zeta" value={counts.tasks_zeta_created ?? 0} emoji="🗒️" />
+          <Chip label="Zeta tasks complete" value={counts.tasks_zeta_complete ?? 0} emoji="🤝" />
+          <Chip label="User tasks complete" value={counts.tasks_user_complete ?? 0} emoji="🙌" />
         </RowSection>
 
         <RowSection title="Files">
-          <Chip label="Files uploaded" value={counts.files_uploaded} emoji="📤" />
-          <Chip label="Files generated" value={counts.files_generated} emoji="🧾" />
+          <Chip label="Files uploaded" value={counts.files_uploaded ?? 0} emoji="📤" />
+          <Chip label="Files generated" value={counts.files_generated ?? 0} emoji="🧾" />
         </RowSection>
 
         <RowSection title="Calendar & Goals">
-          <Chip label="Calendar items" value={counts.calendar_items} emoji="🗓️" />
-          <Chip label="Events past" value={counts.events_past} emoji="⏱️" />
-          <Chip label="Goals created" value={counts.goals_created} emoji="🎯" />
-          <Chip label="Goals achieved" value={counts.goals_achieved} emoji="✅" />
+          <Chip label="Calendar items" value={counts.calendar_items ?? 0} emoji="🗓️" />
+          <Chip label="Events past" value={counts.events_past ?? 0} emoji="⏱️" />
+
         </RowSection>
       </div>
 
       {loading && <div className="mt-3 text-xs text-purple-300/70">Loading…</div>}
     </div>
   );
-}
+};
+
+export default TimelinePanel;

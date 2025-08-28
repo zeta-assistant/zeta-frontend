@@ -38,6 +38,8 @@ type TaskItem = {
 type Props = {
   projectId?: string;
   preferredUserName?: string; // unused now, kept for API compatibility
+  fontSize?: 'sm' | 'base' | 'lg';
+userName?: string;
 };
 
 const FREQS: Frequency[] = ['hourly', 'daily', 'weekly', 'monthly'];

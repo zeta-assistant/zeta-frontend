@@ -1,4 +1,4 @@
-  'use client';
+'use client';
 
 import Image from 'next/image';
 import { useState } from 'react';
@@ -11,98 +11,125 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
+const BASE_TRAITS: string[] = [
+  'friendly','concise','proactive','analytical','motivating','candid','decisive','no-nonsense',
+  'optimistic','pragmatic','structured','calm','curious','resourceful','detail-oriented',
+  'big-picture','experimental','data-driven','action-oriented','empathetic','professional',
+  'witty','sarcastic','playful','bossy','coaching','accountability-focused','deadline-driven',
+  'minimalist','thorough',
+];
+
 export default function ZetaSetup() {
   const router = useRouter();
   const user = useUser();
 
   const [preferredUserName, setPreferredUserName] = useState('');
   const [projectName, setProjectName] = useState('');
-  const [vision, setVision] = useState('');
   const [assistantType, setAssistantType] = useState<string | null>(null);
   const [systemInstructions, setSystemInstructions] = useState('');
-  const [privacyLevel, setPrivacyLevel] = useState<string | null>(null);
   const [modelId, setModelId] = useState('gpt-4o');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async () => {
-    if (
-      !projectName ||
-      !assistantType ||
-      !user ||
-      !modelId ||
-      vision.length < 5 ||
-      vision.length > 50
-    ) {
-      console.log('🚨 Validation failed:', {
-        projectName,
-        assistantType,
-        user,
-        modelId,
-        vision,
-        visionLength: vision.length,
-        privacyLevel,
-        systemInstructions,
-      });
+  // Personality
+  const [traits, setTraits] = useState<string[]>([]);
+  const [customTraits, setCustomTraits] = useState<string[]>([]);
+  const [customInput, setCustomInput] = useState('');
 
-      if (!projectName) console.log('❌ projectName is empty');
-      if (!assistantType) console.log('❌ assistantType not selected');
-      if (!user) console.log('❌ user is null (NOT LOGGED IN)');
-      if (!modelId) console.log('❌ modelId is missing');
-      if (vision.length < 5 || vision.length > 50) {
-        console.log(`❌ vision length invalid (${vision.length} characters)`);
-      }
+  // Initiative cadence
+  const [initiativeCadence, setInitiativeCadence] =
+    useState<'hourly' | 'daily' | 'weekly'>('daily');
 
-      alert('Missing or invalid required fields');
+  const ALL_TRAITS = [...BASE_TRAITS, ...customTraits];
+
+  const toggleTrait = (t: string) =>
+    setTraits((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  const selectAllTraits = () => setTraits([...ALL_TRAITS]);
+  const clearAllTraits = () => setTraits([]);
+
+  const addCustomTrait = () => {
+    const t = customInput.trim().toLowerCase();
+    if (!t) return;
+    if (!/^[a-z][a-z -]{0,23}$/.test(t)) {
+      alert('Use letters, spaces, or hyphens (max 24 chars).');
       return;
     }
+    if (ALL_TRAITS.includes(t)) {
+      setTraits((prev) => (prev.includes(t) ? prev : [...prev, t]));
+      setCustomInput('');
+      return;
+    }
+    setCustomTraits((prev) => [...prev, t]);
+    setTraits((prev) => [...prev, t]);
+    setCustomInput('');
+  };
+  const removeCustomTrait = (t: string) => {
+    setCustomTraits((prev) => prev.filter((x) => x !== t));
+    setTraits((prev) => prev.filter((x) => x !== t));
+  };
 
+  const handleSubmit = async () => {
+    if (!projectName || !assistantType || !user || !modelId) {
+      alert('Missing required fields');
+      return;
+    }
     setLoading(true);
-
     try {
-      // Insert into user_projects including vision + preferred_user_name
+      const personalityLine = traits.length ? `Zeta’s personality: ${traits.join(', ')}.` : '';
+      const cadenceLine = `Initiative cadence: ${initiativeCadence}.`;
+      const mergedSystemInstructions = [personalityLine, cadenceLine, systemInstructions]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const safeModelId = modelId === 'gpt-4o' ? modelId : 'gpt-4o';
+
+      // If you haven't run the DB migration to allow NULL, you can use:
+      // const visionToSave: string | null = 'Vision pending'; // (temporary)
+      const visionToSave: string | null = null; // ✅ recommended with NULL-friendly constraint
+
       const { data: projectData, error: insertError } = await supabase
         .from('user_projects')
-        .insert([
-          {
-            user_id: user.id,
-            name: projectName,
-            vision: vision, // ✅ direct link to column
-            preferred_user_name: preferredUserName || null,
-            use_type: assistantType,
-            pantheon_agent: 'zeta',
-            onboarding_complete: true,
-            system_instructions: systemInstructions,
-          },
-        ])
+        .insert([{
+          user_id: user.id,
+          name: projectName,
+          vision: visionToSave,                // now null-safe
+          preferred_user_name: preferredUserName || null,
+          use_type: assistantType,
+          pantheon_agent: 'zeta',
+          onboarding_complete: true,
+          system_instructions: mergedSystemInstructions,
+          model_id: safeModelId,               // NEW
+          personality_traits: traits,          // NEW (text[])
+          initiative_cadence: initiativeCadence, // NEW (enum)
+        }])
         .select()
         .single();
 
       if (insertError) throw insertError;
-
       const projectId = projectData.id;
 
-      // Create assistant
       const res = await fetch('/api/createAssistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectName,
           assistantType,
-          systemInstructions,
+          systemInstructions: mergedSystemInstructions,
           projectId,
           fileUrls: [],
-          privacyLevel,
-          modelId,
+          privacyLevel: null,
+          modelId: safeModelId,
           message: 'Hello Zeta, let’s begin.',
           preferredUserName,
-          vision,
+          vision: visionToSave,              // pass the coerced value (null)
+          personalityTraits: traits,
+          initiativeCadence,
         }),
       });
 
       const assistantRes = await res.json();
       if (!res.ok) throw new Error(assistantRes.error || 'Failed to create assistant');
 
-      router.push(`/dashboard/${projectId}`); // ✅ fixed interpolation
+      router.push(`/dashboard/${projectId}`);
     } catch (err) {
       console.error('❌ Zeta Setup Error:', err);
       alert('Something went wrong. See console for details.');
@@ -112,179 +139,210 @@ export default function ZetaSetup() {
   };
 
   return (
-    <div className="min-h-screen bg-white text-black flex flex-row justify-center items-center px-4 py-10">
-      {/* Left Zeta Mascot */}
-      <div className="hidden md:flex w-1/5 justify-center">
-        <Image
-          src="/zeta-avatar.svg"
-          alt="Zeta Left"
-          width={300}
-          height={300}
-          className="object-contain"
-        />
-      </div>
+    <div className="relative min-h-screen text-black flex items-center justify-center px-6 py-10 overflow-hidden
+                    bg-gradient-to-br from-sky-50 via-sky-100 to-indigo-100">
+      <div className="pointer-events-none select-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-yellow-300/40 blur-3xl" />
+      <div className="pointer-events-none select-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-indigo-700/30 blur-3xl" />
 
-      {/* Center Form */}
-      <div className="w-full max-w-lg space-y-6 text-center">
-        <Image
-          src="/zeta-letterlogo.png"
-          alt="Zeta Logo"
-          width={180}
-          height={180}
-          className="mx-auto"
-        />
-
-        <div>
-          <h1 className="text-2xl font-bold">Zeta Build Setup</h1>
-          <p className="text-sm text-gray-600 mt-2">
-            Zeta Build AI is your intelligent executive assistant, built to automate tasks,
-            analyze data, and support your business or project like a real team member.
+      <div className="w-full max-w-6xl">
+        <div className="flex items-center justify-center gap-3 mb-2">
+          <Image src="/zeta-letterlogo.png" alt="Zeta Logo" width={72} height={72} />
+        </div>
+        <div className="text-center mb-4">
+          <h1 className="text-2xl font-bold leading-tight text-indigo-900">Zeta Build Setup</h1>
+          <p className="text-sm text-indigo-800/80">
+            Zeta Build AI is your intelligent executive assistant—automate tasks, analyze data,
+            and accelerate your side project or business.
           </p>
         </div>
 
-        <Card className="p-6 space-y-6 text-left shadow-md">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-black">
-              What's the name of your project?
-            </label>
-            <Input
-              placeholder="e.g. Crypto Portfolio"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              className="w-full"
-            />
-          </div>
+        <Card className="p-5 shadow-lg border border-white/60 bg-white/85 backdrop-blur-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* LEFT COLUMN */}
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-indigo-950">What&apos;s the name of your project?</label>
+                <Input
+                  placeholder="e.g. Crypto Portfolio"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  className="w-full h-9 text-sm"
+                />
+              </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-black">
-              Using Zeta for work or personal?
-            </label>
-            <div className="flex gap-2">
-              <Button
-                variant={assistantType === 'Work' ? 'default' : 'outline'}
-                onClick={() =>
-                  setAssistantType(assistantType === 'Work' ? null : 'Work')
-                }
-                className="flex-1"
-              >
-                Work
-              </Button>
-              <Button
-                variant={assistantType === 'Personal' ? 'default' : 'outline'}
-                onClick={() =>
-                  setAssistantType(assistantType === 'Personal' ? null : 'Personal')
-                }
-                className="flex-1"
-              >
-                Personal
-              </Button>
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-indigo-950">Using Zeta for work or personal?</label>
+                <div className="flex gap-2">
+                  <Button
+                    variant={assistantType === 'Work' ? 'default' : 'outline'}
+                    onClick={() => setAssistantType(assistantType === 'Work' ? null : 'Work')}
+                    className="flex-1 h-9 text-sm"
+                  >
+                    Work
+                  </Button>
+                  <Button
+                    variant={assistantType === 'Personal' ? 'default' : 'outline'}
+                    onClick={() => setAssistantType(assistantType === 'Personal' ? null : 'Personal')}
+                    className="flex-1 h-9 text-sm"
+                  >
+                    Personal
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-indigo-950">Choose your model</label>
+                <select
+                  value={modelId}
+                  onChange={(e) => setModelId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 h-9 text-sm bg-white/90"
+                >
+                  <option value="gpt-4o">GPT-4o (OpenAI)</option>
+                  <option value="mistral-7b" disabled>Mistral 7B (Coming soon)</option>
+                  <option value="phi-2" disabled>Phi-2 (Coming soon)</option>
+                  <option value="deepseek-chat" disabled>DeepSeek Chat (Coming soon)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-indigo-950">What would you like Zeta to call you?</label>
+                <Input
+                  placeholder="Your preferred name"
+                  value={preferredUserName}
+                  onChange={(e) => setPreferredUserName(e.target.value)}
+                  className="w-full h-9 text-sm"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-indigo-950">Zeta Initiative level</label>
+                <p className="text-xs text-indigo-900/70 -mt-1">
+                  How often would you like Zeta to interact with you and your project?
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['hourly','daily','weekly'] as const).map((cad) => (
+                    <Button
+                      key={cad}
+                      type="button"
+                      variant={initiativeCadence === cad ? 'default' : 'outline'}
+                      onClick={() => setInitiativeCadence(cad)}
+                      className="h-8 text-xs"
+                    >
+                      {cad.charAt(0).toUpperCase() + cad.slice(1)}
+                    </Button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-indigo-900/70">
+                  Connect through <b>Telegram</b> or <b>Email</b> so Zeta can notify you 24/7!
+                </p>
+
+                <div className="mt-2 rounded-xl border border-white/60 bg-white/80 p-2 text-center shadow-sm">
+                  <Image
+                    src="/zeta-productivity.png"
+                    alt="Zeta being productive"
+                    width={260}
+                    height={110}
+                    sizes="(max-width: 768px) 70vw, 260px"
+                    className="mx-auto rounded-lg shadow-sm"
+                    priority={false}
+                  />
+                  <p className="mt-1 text-[11px] text-indigo-900/70">Zeta, powering through your to-dos.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT COLUMN */}
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-indigo-950">
+                  How would you like Zeta to help you complete this project?
+                </label>
+                <Textarea
+                  placeholder="What kind of help do you want from Zeta? What tasks or goals matter most to you?"
+                  className="w-full text-sm bg-white/90"
+                  rows={6}
+                  value={systemInstructions}
+                  onChange={(e) => setSystemInstructions(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <label className="text-sm font-medium text-indigo-950">Choose Zeta’s Personality</label>
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button type="button" variant="outline" onClick={selectAllTraits} className="h-7 px-2 text-xs">
+                      Select all
+                    </Button>
+                    <Button type="button" variant="outline" onClick={clearAllTraits} className="h-7 px-2 text-xs">
+                      Clear
+                    </Button>
+                    {traits.length > 0 && <span className="text-xs text-indigo-900/70">{traits.length} selected</span>}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Input
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomTrait(); } }}
+                    placeholder="Add custom adjective (e.g., relentless, laser-focused)"
+                    className="h-9 text-sm bg-white/90"
+                  />
+                  <Button type="button" onClick={addCustomTrait} className="h-9">Add</Button>
+                </div>
+                {customTraits.length > 0 && (
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {customTraits.map((t) => (
+                      <span key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-indigo-200 bg-white/90">
+                        {t}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${t}`}
+                          className="text-indigo-700/70 hover:text-indigo-900"
+                          onClick={() => removeCustomTrait(t)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {ALL_TRAITS.map((t) => {
+                    const active = traits.includes(t);
+                    return (
+                      <Button
+                        key={t}
+                        type="button"
+                        variant={active ? 'default' : 'outline'}
+                        onClick={() => toggleTrait(t)}
+                        aria-pressed={active}
+                        className="justify-start h-8 text-xs"
+                      >
+                        {t}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <p className="text-[11px] text-indigo-900/70">
+                  Selected traits become adjectives in Zeta’s system instructions for tone/behavior.
+                </p>
+              </div>
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-black">Choose your model</label>
-            <select
-              value={modelId}
-              onChange={(e) => setModelId(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+          <div className="mt-5">
+            <Button
+              onClick={handleSubmit}
+              disabled={!projectName || !assistantType || loading}
+              className="w-full h-10"
             >
-              <option value="gpt-4o">GPT-4o (OpenAI)</option>
-              <option value="mistral-7b">Mistral 7B (Local)</option>
-              <option value="phi-2">Phi-2 (Local)</option>
-              <option value="deepseek-chat">DeepSeek Chat (Local)</option>
-            </select>
+              {loading ? 'Setting Up...' : 'Finish Setup'}
+            </Button>
           </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-black">
-              Describe the vision of your project
-            </label>
-            <Input
-              placeholder="e.g. Automate weekly performance analysis"
-              minLength={5}
-              maxLength={50}
-              value={vision}
-              onChange={(e) => setVision(e.target.value)}
-              className="w-full"
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-black">
-              How would you like Zeta to best assist you complete this project?
-            </label>
-            <Textarea
-              placeholder="What kind of help do you want from Zeta? What tasks or goals matter most to you?"
-              className="w-full"
-              rows={3}
-              value={systemInstructions}
-              onChange={(e) => setSystemInstructions(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-black">
-              How much do you trust Zeta with private or sensitive information about this
-              project?
-            </label>
-            <div className="flex flex-col gap-2">
-              <Button
-                variant={privacyLevel === 'full' ? 'default' : 'outline'}
-                onClick={() => setPrivacyLevel(privacyLevel === 'full' ? null : 'full')}
-              >
-                I trust Zeta fully — nothing’s off-limits
-              </Button>
-              <Button
-                variant={privacyLevel === 'partial' ? 'default' : 'outline'}
-                onClick={() =>
-                  setPrivacyLevel(privacyLevel === 'partial' ? null : 'partial')
-                }
-              >
-                I’m okay sharing some sensitive data
-              </Button>
-              <Button
-                variant={privacyLevel === 'private' ? 'default' : 'outline'}
-                onClick={() =>
-                  setPrivacyLevel(privacyLevel === 'private' ? null : 'private')
-                }
-              >
-                I prefer not to share any sensitive data
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-black">
-              What would you like Zeta to refer to you as?
-            </label>
-            <Input
-              placeholder="Your preferred name"
-              value={preferredUserName}
-              onChange={(e) => setPreferredUserName(e.target.value)}
-              className="w-full"
-            />
-          </div>
-
-          <Button
-            onClick={handleSubmit}
-            disabled={!projectName || !assistantType || loading}
-            className="w-full"
-          >
-            {loading ? 'Setting Up...' : 'Finish Setup'}
-          </Button>
         </Card>
-      </div>
-
-      {/* Right Zeta Mascot */}
-      <div className="hidden md:flex w-1/5 justify-center">
-        <Image
-          src="/zeta-thinking.svg"
-          alt="Zeta Right"
-          width={300}
-          height={300}
-          className="object-contain"
-        />
       </div>
     </div>
   );

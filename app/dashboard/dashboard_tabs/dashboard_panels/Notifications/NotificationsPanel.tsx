@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
+/* ──────────────────────────────────────────────────────────
+   Types
+─────────────────────────────────────────────────────────── */
+
 type NotificationChannels = {
   email: boolean;
   telegram: boolean;
@@ -16,7 +20,7 @@ type RuleType =
   | 'calendar'
   | 'thoughts'
   | 'tasks'
-  | 'usage_frequency'; // ← add this
+  | 'usage_frequency';
 
 type Frequency =
   | 'off'
@@ -51,21 +55,51 @@ const BUILT_INS: Array<{
   subtitle: string;
   defaults: { frequency: Frequency; send_time: string; template?: string };
 }> = [
-  { type: 'relevant_discussion', label: 'Relevant Discussion', subtitle: '(relevant_discussion)', defaults: { frequency: 'hourly', send_time: '15:00' } },
-  { type: 'calendar', label: 'Calendar Digest', subtitle: '(calendar)', defaults: { frequency: 'daily', send_time: '07:30', template: 'Today’s events and reminders.' } },
-  { type: 'outreach', label: 'Outreach Message', subtitle: '(outreach)', defaults: { frequency: 'daily', send_time: '09:00', template: 'Daily outreach touchpoints.' } },
-  { type: 'thoughts', label: 'Zeta Thoughts', subtitle: '(thoughts)', defaults: { frequency: 'daily', send_time: '17:00', template: 'End-of-day insights & ideas.' } },
-  { type: 'tasks', label: 'Tasks Summary', subtitle: '(tasks)', defaults: { frequency: 'daily', send_time: '08:00', template: 'Your tasks for the day.' } },
-  { type: 'usage_frequency', label: 'Usage Frequency (Daily)', subtitle: '(usage_frequency)', defaults: { frequency: 'daily', send_time: '09:15', template: 'Daily feature usage summary.' }
-},
+  {
+    type: 'relevant_discussion',
+    label: 'Relevant Discussion',
+    subtitle: '(relevant_discussion)',
+    defaults: { frequency: 'hourly', send_time: '15:00' },
+  },
+  {
+    type: 'calendar',
+    label: 'Calendar Digest',
+    subtitle: '(calendar)',
+    defaults: { frequency: 'daily', send_time: '07:30', template: 'Today’s events and reminders.' },
+  },
+  {
+    type: 'outreach',
+    label: 'Outreach Message',
+    subtitle: '(outreach)',
+    defaults: { frequency: 'daily', send_time: '09:00', template: 'Daily outreach touchpoints.' },
+  },
+  {
+    type: 'thoughts',
+    label: 'Zeta Thoughts',
+    subtitle: '(thoughts)',
+    defaults: { frequency: 'daily', send_time: '17:00', template: 'End-of-day insights & ideas.' },
+  },
+  {
+    type: 'tasks',
+    label: 'Tasks Summary',
+    subtitle: '(tasks)',
+    defaults: { frequency: 'daily', send_time: '08:00', template: 'Your tasks for the day.' },
+  },
+  {
+    type: 'usage_frequency',
+    label: 'Usage Frequency (Daily)',
+    subtitle: '(usage_frequency)',
+    defaults: { frequency: 'daily', send_time: '09:15', template: 'Daily feature usage summary.' },
+  },
 ];
 
-/* ===== Telegram checker state ===== */
-type TgState = {
-  connected: boolean;
-  pending: boolean;
-  chatId?: string | null;
-};
+/* ===== Integrations state ===== */
+type TgState = { connected: boolean; pending: boolean; chatId?: string | null };
+type EmailState = { connected: boolean; list: string[] };
+
+/* ──────────────────────────────────────────────────────────
+   Component
+─────────────────────────────────────────────────────────── */
 
 export default function NotificationsPanel({ projectId }: Props) {
   const [rules, setRules] = useState<Rule[]>([]);
@@ -78,6 +112,7 @@ export default function NotificationsPanel({ projectId }: Props) {
   const [creating, setCreating] = useState(false);
 
   const [tgState, setTgState] = useState<TgState>({ connected: false, pending: false, chatId: null });
+  const [emailState, setEmailState] = useState<EmailState>({ connected: false, list: [] });
 
   // function endpoints
   const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
@@ -87,9 +122,10 @@ export default function NotificationsPanel({ projectId }: Props) {
     relevantdiscussion: `${SB_URL}/functions/v1/relevantdiscussion`,
     emitThoughts: `${SB_URL}/functions/v1/emit-thoughts`,
     sendTelegram: `${SB_URL}/functions/v1/send-telegram-message`,
+    sendEmail: `${SB_URL}/functions/v1/send-email-message`,
   };
 
-  // ---------- data ----------
+  /* ---------- data ---------- */
   async function fetchRules() {
     setLoading(true);
     const { data, error } = await supabase
@@ -132,10 +168,35 @@ export default function NotificationsPanel({ projectId }: Props) {
     }
   }, [projectId]);
 
+  // Email connection checker
+  const refreshEmailState = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('project_integrations')
+        .select('email_address, value, is_verified')
+        .eq('project_id', projectId)
+        .eq('type', 'email');
+
+      if (error) throw error;
+
+      const list =
+        (data ?? [])
+          .filter((r: any) => r.is_verified)
+          .map((r: any) => (r.email_address || r.value || '').trim())
+          .filter(Boolean);
+
+      setEmailState({ connected: list.length > 0, list });
+    } catch (e) {
+      console.error('refreshEmailState error:', e);
+      setEmailState({ connected: false, list: [] });
+    }
+  }, [projectId]);
+
   useEffect(() => {
     fetchRules();
     refreshTelegramState();
-  }, [projectId, refreshTelegramState]);
+    refreshEmailState();
+  }, [projectId, refreshTelegramState, refreshEmailState]);
 
   const byType = useMemo(() => {
     const map = new Map<RuleType, Rule>();
@@ -143,10 +204,14 @@ export default function NotificationsPanel({ projectId }: Props) {
     return map;
   }, [rules]);
 
-  // ---------- helpers ----------
+  /* ---------- helpers ---------- */
   const Section = ({ children }: { children: React.ReactNode }) => (
-    <div className="rounded-xl border border-slate-200/70 bg-white/80 shadow-sm p-5 space-y-3">{children}</div>
+    <div className="rounded-xl border border-slate-200/70 bg-white/80 shadow-sm p-5 space-y-3">
+      {children}
+    </div>
   );
+
+  const getFirstProjectEmail = () => emailState.list[0] || null;
 
   async function ensureBuiltIn(type: Exclude<RuleType, 'custom'>) {
     setFeedback('');
@@ -248,7 +313,7 @@ export default function NotificationsPanel({ projectId }: Props) {
     }
   };
 
-  // ---------- edit/create ----------
+  /* ---------- edit/create ---------- */
   const startEdit = (rule: Rule) => {
     setCreating(false);
     setEditingId(rule.id);
@@ -331,7 +396,7 @@ export default function NotificationsPanel({ projectId }: Props) {
     fetchRules();
   };
 
-  // ---------- utilities ----------
+  /* ---------- utilities ---------- */
   const getVerifiedTelegramChatId = async (pid: string) => {
     const { data, error } = await supabase
       .from('project_integrations')
@@ -351,34 +416,73 @@ export default function NotificationsPanel({ projectId }: Props) {
     setFeedback('');
     setLastFnResult(null);
     try {
-      const chatId = await getVerifiedTelegramChatId(projectId);
-      if (!chatId) {
-        throw new Error('No verified Telegram chat_id found. Connect Telegram first (Functions → APIs).');
+      const wantTg = rule.channels?.telegram ?? true;
+      const wantEmail = rule.channels?.email ?? false;
+
+      // Telegram path (optional)
+      let tgResult: any = null;
+      if (wantTg) {
+        const chatId = await getVerifiedTelegramChatId(projectId);
+        if (!chatId) {
+          if (!wantEmail) {
+            throw new Error(
+              'No verified Telegram chat_id found. Connect Telegram first (Functions → APIs) or enable Email.'
+            );
+          }
+        } else {
+          const text = (rule.template && rule.template.trim()) || `${rule.name} • test message`;
+          const res = await fetch(URLS.sendTelegram, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: SB_KEY,
+              Authorization: `Bearer ${SB_KEY}`,
+            },
+            body: JSON.stringify({
+              id: `test_${rule.id}_${Date.now()}`,
+              projectId,
+              telegramHandle: chatId,
+              subject: `🔔 ${rule.name} (test)`,
+              text,
+            }),
+          });
+          tgResult = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(tgResult?.error || tgResult?.message || `HTTP ${res.status}`);
+        }
       }
 
-      const text =
-        (rule.template && rule.template.trim()) || `${rule.name} • test message`;
+      // Email path (optional)
+      let emailResult: any = null;
+      if (wantEmail) {
+        const to = getFirstProjectEmail();
+        if (!to) {
+          setFeedback((prev) => (prev ? prev + ' • ' : '') + '⚠️ No email saved. Add one in Functions → APIs.');
+        } else {
+          const text = (rule.template && rule.template.trim()) || `${rule.name} • test message`;
+          const res = await fetch(URLS.sendEmail, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: SB_KEY,
+              Authorization: `Bearer ${SB_KEY}`,
+            },
+            body: JSON.stringify({
+              to,
+              subject: `🔔 ${rule.name} (test)`,
+              message: text,
+            }),
+          });
+          emailResult = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(emailResult?.error || emailResult?.message || `HTTP ${res.status}`);
+        }
+      }
 
-      const res = await fetch(URLS.sendTelegram, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: SB_KEY,
-          Authorization: `Bearer ${SB_KEY}`,
-        },
-        body: JSON.stringify({
-          projectId,
-          chat_id: chatId,
-          text,
-          subject: `🔔 ${rule.name} (test)`,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      setLastFnResult(data);
-      if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
-
-      setFeedback('✅ Test sent to Telegram.');
+      setLastFnResult({ telegram: tgResult, email: emailResult });
+      const channelsSent = [
+        wantTg ? (tgResult ? 'Telegram' : null) : null,
+        wantEmail ? (emailResult ? 'Email' : null) : null,
+      ].filter(Boolean);
+      setFeedback(channelsSent.length ? `✅ Test sent via ${channelsSent.join(' & ')}.` : 'ℹ️ No channel selected.');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setFeedback(`❌ ${msg}`);
@@ -387,201 +491,280 @@ export default function NotificationsPanel({ projectId }: Props) {
   };
 
   const runNow = async (rule: Rule) => {
-  setFeedback('');
-  setLastFnResult(null);
-  try {
-    const chatId = await getVerifiedTelegramChatId(rule.project_id);
-    const channels = {
-      inapp: rule.channels?.inapp ?? true,
-      email: rule.channels?.email ?? false,
-      telegram: (rule.channels?.telegram ?? true) && !!chatId,
-    };
+    setFeedback('');
+    setLastFnResult(null);
+    try {
+      const chatId = await getVerifiedTelegramChatId(rule.project_id);
+      const channelsSelected = {
+        inapp: rule.channels?.inapp ?? true,
+        email: rule.channels?.email ?? false,
+        telegram: (rule.channels?.telegram ?? true) && !!chatId,
+      };
 
-    const makeSendPayload = (subject: string, text: string) => ({
-      // your edge fn requires these:
-      id: `${rule.id}:${Date.now()}`,
-      projectId: rule.project_id,
-      telegramHandle: chatId,
-      // explicitly tell the fn this is a *message*, not (re)connect:
-      mode: 'message',
-      action: 'send_message',
-      skipConnectMessage: true,
-      subject,
-      text,
-      // legacy keys for backward-compat:
-      message: text,
-      chat_id: chatId,
-      telegram_chat_id: chatId,
-    });
+      const makeSendPayload = (subject: string, text: string) => ({
+        id: `${rule.id}:${Date.now()}`,
+        projectId: rule.project_id,
+        telegramHandle: chatId,
+        mode: 'message',
+        action: 'send_message',
+        skipConnectMessage: true,
+        subject,
+        text,
+        message: text, // legacy
+        chat_id: chatId, // legacy
+        telegram_chat_id: chatId, // legacy
+      });
 
-    switch (rule.type) {
+      switch (rule.type) {
       case 'relevant_discussion': {
-        const res = await fetch(URLS.relevantdiscussion, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-          body: JSON.stringify({
-            project_id: rule.project_id,
-            subject: `🔔 ${rule.name}`,
-            channels,
-            chat_id: chatId ?? null,
-            telegram_chat_id: chatId ?? null,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        setLastFnResult(data);
-        if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
-        setFeedback('✅ Triggered.');
-        break;
-      }
-
-      case 'thoughts': {
-        const res = await fetch(URLS.emitThoughts, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-          body: JSON.stringify({
-            project_id: rule.project_id,
-            subject: '🧠 Zeta Thoughts',
-            channels,
-            chat_id: chatId ?? null,
-            telegram_chat_id: chatId ?? null,
-            template: rule.template ?? '',
-            since_hours: 48,
-            limit: 5,
-            generate_if_missing: true,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        setLastFnResult(data);
-        if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
-
-        if (data?.ok === false && data?.reason === 'no thoughts') {
-          setFeedback('ℹ️ No recent thoughts to send. Try running “generate-thought” or widen the window.');
-          return;
-        }
-        if (channels.telegram && chatId) {
-          const tg = data?.telegram;
-          if (tg?.ok) { setFeedback('✅ Sent to Telegram.'); return; }
-          if (tg && tg.status) { setFeedback(`❌ Telegram send failed (status ${tg.status}). ${tg.text || ''}`); return; }
-          setFeedback('⚠️ Ran, but did not attempt Telegram. Check TELEGRAM_BOT_TOKEN on the server.');
-          return;
-        }
-        setFeedback('⚠️ Ran, but Telegram channel/ID not configured.');
-        return;
-      }
-
-      case 'usage_frequency': {
   const wantsTelegram = rule.channels?.telegram ?? true;
-  const chatId = await getVerifiedTelegramChatId(rule.project_id);
-  if (!wantsTelegram || !chatId) {
-    setFeedback('⚠️ Telegram not selected or not connected. Go to Functions → APIs to link Telegram.');
-    return;
-  }
+  const wantsEmail = rule.channels?.email ?? false;
 
-  // Read via RPC (bypasses RLS)
-  const { data, error } = await supabase.rpc('get_daily_usage_for_project', {
-    p_project_id: rule.project_id,
-  });
-  if (error) throw error;
-
-  const rows: any[] = Array.isArray(data) ? data : [];
-  if (!rows.length) {
-    setFeedback('ℹ️ No daily usage snapshot yet. Run the daily refresh first.');
-    return;
-  }
-
-  const latestDate = rows[0].window_date;
-  const todays = rows.filter((r) => r.window_date === latestDate);
-
-  const lines = todays.map((r: any) => {
-    const d = (r.details ?? {}) as any;
-    switch (r.feature) {
-      case 'calendar':
-        return `• Calendar: next 7d = ${d.next_7d ?? r.metric_count}`;
-      case 'chatboard':
-        return `• Chatboard (24h): ${d.user_msgs_1d ?? r.metric_count}`;
-      case 'tasks':
-        return `• Tasks: touched=${d.touched_1d ?? r.metric_count}, done=${d.completed_1d ?? 0}, due_next_7d=${d.due_next_7d ?? 0}`;
-      case 'files':
-        return `• Files uploaded (24h): ${d.added_1d ?? r.metric_count}`;
-      case 'apis':
-        return `• APIs connected: ${d.active_connected ?? r.metric_count}/${d.total_connected ?? r.metric_count}`;
-      case 'goals':
-        return `• Goals (24h): vision=${d.vision_1d ?? 0}, short=${d.short_term_goals_1d ?? 0}, long=${d.long_term_goals_1d ?? 0}`;
-      case 'thoughts':
-        return `• Thoughts (24h): ${d.entries_1d ?? r.metric_count}`;
-      default:
-        return `• ${r.feature}: ${r.metric_count}`;
-    }
-  });
-
-  const text = [`📊 In the last day (${new Date(latestDate).toLocaleDateString()}):`, ...lines].join('\n');
-
-  // Minimal payload ONLY — avoids kicking the “connect” path
-  const payload = {
-    id: `usagefreq_${rule.id}_${Date.now()}`,
-    projectId: rule.project_id,
-    telegramHandle: chatId,
-    subject: '🔔 Usage Frequency (Daily)',
-    text,
+  // let the edge fn handle Telegram/in-app, but NOT email (we'll do it here)
+  const channelsForFn = {
+    ...channelsSelected,
+    email: false,
   };
 
-  const res = await fetch(URLS.sendTelegram, {
+  // trigger the generator
+  const res = await fetch(URLS.relevantdiscussion, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: SB_KEY,
-      Authorization: `Bearer ${SB_KEY}`,
-    },
-    body: JSON.stringify(payload),
+    headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+    body: JSON.stringify({
+      project_id: rule.project_id,
+      subject: `🔔 ${rule.name}`,
+      channels: channelsForFn,
+      chat_id: chatId ?? null,
+      telegram_chat_id: chatId ?? null,
+    }),
   });
 
-  const out = await res.json().catch(() => ({}));
-  setLastFnResult(out);
-  if (!res.ok) throw new Error(out?.error || out?.message || `HTTP ${res.status}`);
+  const data = await res.json().catch(() => ({}));
+  setLastFnResult((prev: any) => ({ ...(prev || {}), relevantdiscussion: data }));
+  if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
 
-  setFeedback('✅ Sent daily usage summary.');
-  return;
+  // if Email is selected, send it directly here
+  if (wantsEmail) {
+    const to = getFirstProjectEmail();
+    if (!to) {
+      setFeedback((prev) => (prev ? prev + ' • ' : '') + '⚠️ No email saved. Add one in Functions → APIs.');
+    } else {
+      // try to reuse the text the Edge fn produced; fall back to the rule template or a generic line
+      const emailText =
+        data?.email?.text ||
+        data?.text ||
+        data?.message ||
+        (rule.template && rule.template.trim()) ||
+        'Relevant discussion digest from Zeta.';
+
+      const emailRes = await fetch(URLS.sendEmail, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        body: JSON.stringify({
+          to,
+          subject: `🔔 ${rule.name}`,
+          message: emailText,
+        }),
+      });
+      const emailOut = await emailRes.json().catch(() => ({}));
+      setLastFnResult((prev: any) => ({ ...(prev || {}), email: emailOut }));
+      if (!emailRes.ok) throw new Error(emailOut?.error || emailOut?.message || `HTTP ${emailRes.status}`);
+    }
+  }
+
+  setFeedback('✅ Triggered.');
+  break;
 }
 
+        case 'thoughts': {
+          const res = await fetch(URLS.emitThoughts, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+            body: JSON.stringify({
+              project_id: rule.project_id,
+              subject: '🧠 Zeta Thoughts',
+              channels: channelsSelected,
+              chat_id: chatId ?? null,
+              telegram_chat_id: chatId ?? null,
+              template: rule.template ?? '',
+              since_hours: 48,
+              limit: 5,
+              generate_if_missing: true,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          setLastFnResult(data);
+          if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
 
-      case 'calendar':
-      case 'outreach':
-      case 'tasks':
-      case 'custom': {
-        const wantsTelegram = rule.channels?.telegram ?? true;
-        if (!wantsTelegram || !chatId) {
-          setFeedback('⚠️ Telegram not selected or not connected.');
+          if (data?.ok === false && data?.reason === 'no thoughts') {
+            setFeedback('ℹ️ No recent thoughts to send. Try running “generate-thought” or widen the window.');
+            return;
+          }
+          if (channelsSelected.telegram && chatId) {
+            const tg = data?.telegram;
+            if (tg?.ok) {
+              setFeedback('✅ Sent to Telegram.');
+              return;
+            }
+            if (tg && tg.status) {
+              setFeedback(`❌ Telegram send failed (status ${tg.status}). ${tg.text || ''}`);
+              return;
+            }
+            setFeedback('⚠️ Ran, but did not attempt Telegram. Check TELEGRAM_BOT_TOKEN on the server.');
+            return;
+          }
+          setFeedback('⚠️ Ran, but Telegram channel/ID not configured.');
+          return;
+        }
+
+        case 'usage_frequency': {
+          const wantsTelegram = rule.channels?.telegram ?? true;
+          const wantsEmail = rule.channels?.email ?? false;
+          const chatId = await getVerifiedTelegramChatId(rule.project_id);
+
+          // Read via RPC (bypasses RLS)
+          const { data, error } = await supabase.rpc('get_daily_usage_for_project', {
+            p_project_id: rule.project_id,
+          });
+          if (error) throw error;
+
+          const rows: any[] = Array.isArray(data) ? data : [];
+          if (!rows.length) {
+            setFeedback('ℹ️ No daily usage snapshot yet. Run the daily refresh first.');
+            return;
+          }
+
+          const latestDate = rows[0].window_date;
+          const todays = rows.filter((r) => r.window_date === latestDate);
+
+          const lines = todays.map((r: any) => {
+            const d = (r.details ?? {}) as any;
+            switch (r.feature) {
+              case 'calendar':
+                return `• Calendar: next 7d = ${d.next_7d ?? r.metric_count}`;
+              case 'chatboard':
+                return `• Chatboard (24h): ${d.user_msgs_1d ?? r.metric_count}`;
+              case 'tasks':
+                return `• Tasks: touched=${d.touched_1d ?? r.metric_count}, done=${d.completed_1d ?? 0}, due_next_7d=${d.due_next_7d ?? 0}`;
+              case 'files':
+                return `• Files uploaded (24h): ${d.added_1d ?? r.metric_count}`;
+              case 'apis':
+                return `• APIs connected: ${d.active_connected ?? r.metric_count}/${d.total_connected ?? r.metric_count}`;
+              case 'goals':
+                return `• Goals (24h): vision=${d.vision_1d ?? 0}, short=${d.short_term_goals_1d ?? 0}, long=${d.long_term_goals_1d ?? 0}`;
+              case 'thoughts':
+                return `• Thoughts (24h): ${d.entries_1d ?? r.metric_count}`;
+              default:
+                return `• ${r.feature}: ${r.metric_count}`;
+            }
+          });
+
+          const text = [`📊 In the last day (${new Date(latestDate).toLocaleDateString()}):`, ...lines].join('\n');
+
+          // Telegram
+          if (wantsTelegram && chatId) {
+            const payload = {
+              id: `usagefreq_${rule.id}_${Date.now()}`,
+              projectId: rule.project_id,
+              telegramHandle: chatId,
+              subject: '🔔 Usage Frequency (Daily)',
+              text,
+            };
+            const res = await fetch(URLS.sendTelegram, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: SB_KEY,
+                Authorization: `Bearer ${SB_KEY}`,
+              },
+              body: JSON.stringify(payload),
+            });
+            const out = await res.json().catch(() => ({}));
+            setLastFnResult((prev: any) => ({ ...(prev || {}), telegram: out }));
+            if (!res.ok) throw new Error(out?.error || out?.message || `HTTP ${res.status}`);
+          }
+
+          // Email
+          if (wantsEmail) {
+            const to = getFirstProjectEmail();
+            if (!to) {
+              setFeedback((prev) => (prev ? prev + ' • ' : '') + '⚠️ No email saved. Add one in Functions → APIs.');
+            } else {
+              const res = await fetch(URLS.sendEmail, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+                body: JSON.stringify({ to, subject: '🔔 Usage Frequency (Daily)', message: text }),
+              });
+              const outEmail = await res.json().catch(() => ({}));
+              setLastFnResult((prev: any) => ({ ...(prev || {}), email: outEmail }));
+              if (!res.ok) throw new Error(outEmail?.error || outEmail?.message || `HTTP ${res.status}`);
+            }
+          }
+
+          setFeedback('✅ Sent daily usage summary.');
+          return;
+        }
+
+        case 'calendar':
+        case 'outreach':
+        case 'tasks':
+        case 'custom': {
+          const wantsTelegram = rule.channels?.telegram ?? true;
+          const wantsEmail = rule.channels?.email ?? false;
+          const text = (rule.template && rule.template.trim()) || rule.name;
+
+          // Telegram (if selected & connected)
+          if (wantsTelegram && chatId) {
+            const res = await fetch(URLS.sendTelegram, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+              body: JSON.stringify(makeSendPayload(`🔔 ${rule.name}`, text)),
+            });
+            const data = await res.json().catch(() => ({}));
+            setLastFnResult((prev: any) => ({ ...(prev || {}), telegram: data }));
+            if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+          }
+
+          // Email (if selected & an email exists)
+          if (wantsEmail) {
+            const to = getFirstProjectEmail();
+            if (!to) {
+              setFeedback((prev) => (prev ? prev + ' • ' : '') + '⚠️ No email saved. Add one in Functions → APIs.');
+            } else {
+              const res = await fetch(URLS.sendEmail, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+                body: JSON.stringify({ to, subject: `🔔 ${rule.name}`, message: text }),
+              });
+              const dataEmail = await res.json().catch(() => ({}));
+              setLastFnResult((prev: any) => ({ ...(prev || {}), email: dataEmail }));
+              if (!res.ok) throw new Error(dataEmail?.error || dataEmail?.message || `HTTP ${res.status}`);
+            }
+          }
+
+          if (!wantsTelegram && !wantsEmail && !(rule.channels?.inapp ?? false)) {
+            setFeedback('ℹ️ Ran, but no delivery channel selected.');
+          } else {
+            setFeedback('✅ Triggered.');
+          }
           break;
         }
-        const text = (rule.template && rule.template.trim()) || rule.name;
-        const res = await fetch(URLS.sendTelegram, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-          body: JSON.stringify(makeSendPayload(`🔔 ${rule.name}`, text)),
-        });
-        const data = await res.json().catch(() => ({}));
-        setLastFnResult(data);
-        if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
-        setFeedback('✅ Triggered.');
-        break;
+
+        default:
+          throw new Error(`Unsupported type: ${rule.type}`);
       }
-
-      default:
-        throw new Error(`Unsupported type: ${rule.type}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setFeedback(`❌ Run Now failed: ${msg}`);
+      console.error('runNow error:', e);
+    } finally {
+      refreshTelegramState();
+      refreshEmailState();
     }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    setFeedback(`❌ Run Now failed: ${msg}`);
-    console.error('runNow error:', e);
-  } finally {
-    refreshTelegramState();
-  }
-};
+  };
 
+  /* ---------- cards ---------- */
 
-
-
-  // ---------- cards ----------
   const BuiltInCard = ({ t }: { t: (typeof BUILT_INS)[number] }) => {
     const rule = byType.get(t.type);
     const telegramSelected = rule?.channels?.telegram ?? defaultChannels.telegram;
@@ -680,9 +863,7 @@ export default function NotificationsPanel({ projectId }: Props) {
     const Wrapper: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       bare ? (
         <div className="w-[calc(100%+2.5rem)] -ml-5">
-          <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 sm:px-5">
-            {children}
-          </div>
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 sm:px-5">{children}</div>
         </div>
       ) : (
         <Section>{children}</Section>
@@ -830,7 +1011,7 @@ export default function NotificationsPanel({ projectId }: Props) {
               onChange={(e) => set({ template: e.target.value })}
               placeholder="What should this say? e.g., “Today’s events and reminders.”"
             />
-            <p className={helpCls}>Used by generic senders (e.g., Telegram). Your Edge functions can override.</p>
+            <p className={helpCls}>Used by generic senders (e.g., Telegram/Email). Your Edge functions can override.</p>
           </div>
         )}
 
@@ -934,7 +1115,7 @@ export default function NotificationsPanel({ projectId }: Props) {
     );
   };
 
-  // ---------- render ----------
+  /* ---------- render ---------- */
 
   const editingBuiltIn = useMemo(() => {
     for (const b of BUILT_INS) {
@@ -963,8 +1144,9 @@ export default function NotificationsPanel({ projectId }: Props) {
     <div className="p-6 overflow-y-auto space-y-4 scroll-smoothbar">
       <div className="rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 shadow flex items-center justify-between">
         <h2 className="text-xl sm:text-2xl font-bold text-white">🛎️ Notifications</h2>
-        {/* Telegram status pill */}
-        <div>
+
+        {/* Status pills */}
+        <div className="flex items-center gap-2">
           {tgState.connected ? (
             <span className="text-xs sm:text-sm inline-flex items-center gap-2 bg-green-600/90 text-white px-3 py-1 rounded-full">
               ✓ Telegram connected
@@ -979,6 +1161,17 @@ export default function NotificationsPanel({ projectId }: Props) {
               ⚠️ Telegram not connected
             </span>
           )}
+
+          {emailState.connected ? (
+            <span className="text-xs sm:text-sm inline-flex items-center gap-2 bg-emerald-600/90 text-white px-3 py-1 rounded-full">
+              ✓ Email connected
+              <span className="font-mono bg-white/20 rounded px-1">{emailState.list[0]}</span>
+            </span>
+          ) : (
+            <span className="text-xs sm:text-sm inline-flex items-center gap-2 bg-slate-600/90 text-white px-3 py-1 rounded-full">
+              ✉️ No email saved
+            </span>
+          )}
         </div>
       </div>
 
@@ -990,10 +1183,7 @@ export default function NotificationsPanel({ projectId }: Props) {
 
       {lastFnResult !== null && (
         <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-          <button
-            className="text-xs text-slate-600 hover:underline"
-            onClick={() => setShowDebug((s) => !s)}
-          >
+          <button className="text-xs text-slate-600 hover:underline" onClick={() => setShowDebug((s) => !s)}>
             {showDebug ? 'Hide details' : 'Show details'}
           </button>
           {showDebug && (
@@ -1023,20 +1213,28 @@ export default function NotificationsPanel({ projectId }: Props) {
             </button>
           )}
         </div>
-        {creating ? (
-          <EditCard isCreate />
-        ) : (
-          customList || <p className="text-slate-600 text-sm">No custom notifications yet.</p>
-        )}
+        {creating ? <EditCard isCreate /> : customList || <p className="text-slate-600 text-sm">No custom notifications yet.</p>}
       </Section>
 
       {/* pretty scrollbar */}
       <style jsx global>{`
-        .scroll-smoothbar { scrollbar-width: thin; scrollbar-color: #c7d2fe transparent; }
-        .scroll-smoothbar::-webkit-scrollbar { width: 8px; }
-        .scroll-smoothbar::-webkit-scrollbar-thumb { background: #c7d2fe; border-radius: 6px; }
-        .scroll-smoothbar:hover::-webkit-scrollbar-thumb { background: #a5b4fc; }
-        .scroll-smoothbar::-webkit-scrollbar-track { background: transparent; }
+        .scroll-smoothbar {
+          scrollbar-width: thin;
+          scrollbar-color: #c7d2fe transparent;
+        }
+        .scroll-smoothbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        .scroll-smoothbar::-webkit-scrollbar-thumb {
+          background: #c7d2fe;
+          border-radius: 6px;
+        }
+        .scroll-smoothbar:hover::-webkit-scrollbar-thumb {
+          background: #a5b4fc;
+        }
+        .scroll-smoothbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
       `}</style>
     </div>
   );
