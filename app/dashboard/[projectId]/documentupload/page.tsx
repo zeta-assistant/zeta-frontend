@@ -2,92 +2,59 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { FaUpload, FaFileAlt } from 'react-icons/fa';
+
+type PF = { id: string; file_name: string; file_url: string; uploaded_at: string };
 
 export default function DocumentUploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [recentFiles, setRecentFiles] = useState<{ file_name: string }[]>([]);
+  const [recentFiles, setRecentFiles] = useState<PF[]>([]);
   const params = useParams();
   const projectId = params.projectId as string;
 
-  const handleUpload = async () => {
+  async function handleUpload() {
     if (!file || !projectId) return;
     setUploading(true);
 
-    const fileName = `${Date.now()}-${file.name}`;
-    const filePath = `${projectId}/${fileName}`;
-
-    // 1) Upload to storage
-    const { error: uploadError } = await supabase.storage
-      .from('project-docs')
-      .upload(filePath, file, { upsert: false });
-
-    if (uploadError) {
-      console.error('❌ Upload failed:', uploadError);
-      setUploading(false);
-      return;
-    }
-
-    // 2) Public (or signed) URL for LogsPanel "open" link
-    let linkUrl: string | undefined;
     try {
-      const { data: pub } = supabase.storage.from('project-docs').getPublicUrl(filePath);
-      linkUrl = pub?.publicUrl;
-      if (!linkUrl) {
-        const { data: signed, error: signedErr } = await supabase.storage
-          .from('project-docs')
-          .createSignedUrl(filePath, 60 * 60);
-        if (signedErr) console.warn('⚠️ Signed URL error:', signedErr);
-        linkUrl = signed?.signedUrl ?? filePath;
+      const fd = new FormData();
+      fd.set('file', file);
+      fd.set('project_id', projectId);
+
+      const res = await fetch('/api/documentupload', { method: 'POST', body: fd });
+      const data = await res.json();
+
+      if (!res.ok) {
+        console.error('upload failed:', data?.error || data);
+        alert(data?.error || 'Upload failed');
+      } else {
+        // recent files + LogsPanel realtime will both update
+        await fetchRecentFiles();
+        setFile(null);
       }
     } catch (e) {
-      console.warn('⚠️ Public/signed URL generation failed:', e);
-      linkUrl = filePath;
+      console.error(e);
+      alert('Upload failed');
+    } finally {
+      setUploading(false);
     }
+  }
 
-    // 3) Insert document metadata
-    const { error: insertError } = await supabase.from('documents').insert({
-      project_id: projectId,
-      file_name: file.name,
-      file_url: filePath,
-    });
-    if (insertError) {
-      console.error('❌ Failed to insert document metadata:', insertError);
+  async function fetchRecentFiles() {
+    try {
+      // read from project_files via your own API (no RLS issues on client)
+      const res = await fetch(`/api/project-files?project_id=${projectId}`);
+      if (!res.ok) throw new Error('fetch project_files failed');
+      const payload = (await res.json()) as { rows: PF[] };
+      setRecentFiles(payload.rows || []);
+    } catch (e) {
+      // optional: fall back to direct client query if your RLS allows it
+      console.warn('fallback to direct client fetch not implemented', e);
+      setRecentFiles([]);
     }
-
-    // 4) ✅ Write log row so LogsPanel shows 📎 immediately
-    const { error: logErr } = await supabase.from('system_logs').insert({
-      project_id: projectId,
-      actor: 'user',
-      event: 'file.upload',
-      details: { file_name: file.name, link_url: linkUrl, path: filePath },
-    });
-    if (logErr) {
-      console.error('⚠️ system_logs insert failed:', logErr);
-    }
-
-    await fetchRecentFiles();
-    setUploading(false);
-    setFile(null);
-  };
-
-  const fetchRecentFiles = async () => {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('file_name')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    if (error) {
-      console.error('❌ Failed to load recent files:', error);
-    } else {
-      setRecentFiles(data || []);
-    }
-  };
+  }
 
   useEffect(() => {
     if (projectId) fetchRecentFiles();
@@ -124,23 +91,32 @@ export default function DocumentUploadPage() {
         <div className="mt-12">
           <h2 className="text-xl font-semibold mb-4">🧠 Zeta’s Memory (Last 5 Files)</h2>
           <div className="grid grid-cols-5 gap-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div
-                key={i}
-                className="bg-white text-purple-700 text-sm rounded-xl shadow p-4 flex flex-col items-center justify-center h-24"
-              >
-                {recentFiles[i] ? (
-                  <>
-                    <FaFileAlt className="text-2xl mb-2" />
-                    <span className="text-xs text-center truncate w-full">
-                      {recentFiles[i].file_name}
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-gray-400">Empty</span>
-                )}
-              </div>
-            ))}
+            {Array.from({ length: 5 }).map((_, i) => {
+              const f = recentFiles[i];
+              return (
+                <div
+                  key={i}
+                  className="bg-white text-purple-700 text-sm rounded-xl shadow p-4 flex flex-col items-center justify-center h-24"
+                >
+                  {f ? (
+                    <>
+                      <FaFileAlt className="text-2xl mb-2" />
+                      <a
+                        href={f.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-center truncate w-full underline"
+                        title={f.file_name}
+                      >
+                        {f.file_name}
+                      </a>
+                    </>
+                  ) : (
+                    <span className="text-gray-400">Empty</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -1,7 +1,8 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap');
+@import 'katex/dist/katex.min.css';
 @layer base {
   :root {
     /* Use RGB values for better browser support */

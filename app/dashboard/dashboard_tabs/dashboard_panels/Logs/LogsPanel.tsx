@@ -57,6 +57,9 @@ const EVENT_ICON: Record<string, string> = {
   'task.confirm': '📌',
   'task.complete': '✅',
   'task.verify': '🧪',
+  'task.delete': '🗑️',         // NEW
+  'goal.delete': '🗑️',         // NEW
+  'calendar.delete': '🗑️',     // NEW
   'file.upload': '📎',
   'file.convert': '🔁',
   'file.generate': '🗂️',
@@ -89,6 +92,12 @@ function fallbackMessage(row: LogRow) {
     case 'task.confirm': return `Task confirmed: ${d.title ?? d.task_id ?? ''}`;
     case 'task.complete': return `Task completed: ${d.title ?? d.task_id ?? ''}`;
     case 'task.verify': return `Task verified: ${d.title ?? d.task_id ?? ''}`;
+    case 'task.delete': return `Task deleted: ${d.title ?? d.task_id ?? ''}`;                 // NEW
+    case 'goal.delete': return `Goal deleted: ${d.title ?? d.goal_id ?? ''}`;                 // NEW
+    case 'calendar.delete': {                                                                 // NEW
+      const when = d.when ?? d.start ?? d.start_time ?? d.start_at ?? '';
+      return `Calendar item deleted: ${d.title ?? d.calendar_id ?? ''}${when ? ` on ${when}` : ''}`;
+    }
     case 'file.upload': return `Uploaded: ${d.file_name ?? d.path ?? ''}`;
     case 'file.convert': return `Converted ${d.from ?? ''} → ${d.to ?? ''}${d.file_name ? ` (${d.file_name})` : ''}`;
     case 'file.generate': return `Generated file: ${d.file_name ?? ''}`;
@@ -117,8 +126,7 @@ function isOnboardingRelevant(row: LogRow): boolean {
   return provider === 'telegram' && (status === 'connected' || status === 'ok' || status === 'success');
 }
 
-/** ---- synthetic task logs ---- */
-// creation is always a Zeta action (even for user tasks)
+/* ---------- synthetic task logs ---------- */
 function toCreateLog(t: TaskRow): LogRow {
   return {
     id: `task-create:${t.id}:${t.created_at}`,
@@ -148,11 +156,57 @@ function toUpdateLog(t: TaskRow): LogRow {
     created_at: ts,
   };
 }
+/* NEW: synthetic delete logs */
+function toTaskDeleteLog(oldRow: any): LogRow {
+  const now = new Date().toISOString();
+  return {
+    id: `task-delete:${oldRow.id}:${now}`,
+    project_id: oldRow.project_id,
+    actor: (oldRow.task_type === 'user') ? 'user' : 'zeta',
+    event: 'task.delete',
+    message: null,
+    details: { task_id: oldRow.id, title: oldRow.title ?? '', type: oldRow.task_type ?? 'zeta' },
+    created_at: now,
+  };
+}
+function toGoalDeleteLog(oldRow: any): LogRow {
+  const now = new Date().toISOString();
+  const createdBy = (oldRow.created_by ?? '').toLowerCase();
+  return {
+    id: `goal-delete:${oldRow.id}:${now}`,
+    project_id: oldRow.project_id,
+    actor: (createdBy === 'zeta' || createdBy === 'assistant') ? 'zeta' : 'user',
+    event: 'goal.delete',
+    message: null,
+    details: { goal_id: oldRow.id, title: oldRow.title ?? oldRow.name ?? '', status: oldRow.status ?? null },
+    created_at: now,
+  };
+}
+function toCalendarDeleteLog(oldRow: any): LogRow {
+  const now = new Date().toISOString();
+  const createdBy = (oldRow.created_by ?? '').toLowerCase();
+  const when = oldRow.when ?? oldRow.start ?? oldRow.start_time ?? oldRow.start_at ?? null;
+  return {
+    id: `calendar-delete:${oldRow.id}:${now}`,
+    project_id: oldRow.project_id,
+    actor: (createdBy === 'zeta' || createdBy === 'assistant') ? 'zeta' : 'user',
+    event: 'calendar.delete',
+    message: null,
+    details: { calendar_id: oldRow.id, title: oldRow.title ?? oldRow.name ?? '', when },
+    created_at: now,
+  };
+}
+
+/* de-dupe (expanded key to handle goal/calendar ids) */
 function dedupeRows(rows: LogRow[]) {
   const seen = new Set<string>(); const out: LogRow[] = [];
   for (const r of rows) {
-    const key = `${r.event}:${(r.details as any)?.task_id ?? ''}:${r.created_at}`;
-    if (seen.has(key)) continue; seen.add(key); out.push(r);
+    const d: any = r.details || {};
+    const entityId = d.task_id || d.goal_id || d.calendar_id || '';
+    const key = `${r.event}:${entityId}:${r.created_at}:${r.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
   }
   return out;
 }
@@ -174,6 +228,11 @@ function xpFor(row: LogRow): number | null {
     case 'project.goals.short.update':
     case 'project.goals.long.update': return XP_WEIGHTS.goals_created;
     case 'functions.build.start': return XP_WEIGHTS.functions_built;
+    // deletions: neutral XP
+    case 'task.delete':
+    case 'goal.delete':
+    case 'calendar.delete':
+      return null;
     default: return null;
   }
 }
@@ -268,9 +327,34 @@ export default function LogsPanel({
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'task_items', filter: `project_id=eq.${projectId}` },
         (payload) => setRows((curr) => dedupeRows([toUpdateLog(payload.new as any), ...curr])))
+      // NEW: deletions
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'task_items', filter: `project_id=eq.${projectId}` },
+        (payload) => setRows((curr) => dedupeRows([toTaskDeleteLog(payload.old as any), ...curr])))
       .subscribe();
 
-    return () => { supabase.removeChannel(logsChannel); supabase.removeChannel(tasksChannel); };
+    // NEW: goal deletions
+    const goalsChannel = supabase
+      .channel(`goals_${projectId}`)
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'goals', filter: `project_id=eq.${projectId}` },
+        (payload) => setRows((curr) => dedupeRows([toGoalDeleteLog(payload.old as any), ...curr])))
+      .subscribe();
+
+    // NEW: calendar deletions
+    const calChannel = supabase
+      .channel(`calendar_${projectId}`)
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'calendar_items', filter: `project_id=eq.${projectId}` },
+        (payload) => setRows((curr) => dedupeRows([toCalendarDeleteLog(payload.old as any), ...curr])))
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(logsChannel);
+      supabase.removeChannel(tasksChannel);
+      supabase.removeChannel(goalsChannel);
+      supabase.removeChannel(calChannel);
+    };
   }, [projectId]);
 
   // pagination for system_logs

@@ -1,4 +1,3 @@
-// lib/XP.ts
 import { supabase } from '@/lib/supabaseClient';
 
 export type MetricCounts = {
@@ -40,23 +39,18 @@ export const XP_WEIGHTS: Record<keyof MetricCounts, number> = {
   goals_achieved: 5,
 };
 
-/* ===================== Levels & thresholds =====================
-   Your spec (incremental XP to reach next):
-   L1→L2: 100 | L2→L3: 200 | L3→L4: 400 | L4→L5: 500
-   L5→L6: 1000 | L6→L7: 1500 | L7→L8: 2000 | L8→L9: 4000 | L9→L10: 5000
-   → Cumulative totals: 0,100,300,700,1200,2200,3700,5700,9700,14700
-*/
+/* ===================== Levels & thresholds ===================== */
 export const LEVELS = [
   { level: 1, title: 'Junior Assistant', total: 0 },
   { level: 2, title: 'Associate Assistant', total: 100 },
   { level: 3, title: 'Apprentice', total: 300 },
-  { level: 4, title: 'Assistant to the Regional Manager', total: 700 }, // the Office gag
+  { level: 4, title: 'Assistant to the Regional Manager', total: 700 },
   { level: 5, title: 'Assistant Regional Manager', total: 1200 },
   { level: 6, title: 'Senior Assistant', total: 2200 },
   { level: 7, title: 'Principal Assistant', total: 3700 },
   { level: 8, title: 'Executive Assistant', total: 5700 },
   { level: 9, title: 'Director of Automation', total: 9700 },
-  { level: 10, title: 'Zeta Prime — Supreme Operator', total: 14700 }, // something sick 😎
+  { level: 10, title: 'Zeta Prime — Supreme Operator', total: 14700 },
 ] as const;
 
 export const LEVEL_THRESHOLDS = LEVELS.map((l) => l.total) as readonly number[];
@@ -123,8 +117,11 @@ export async function getXPCounts(projectId: string): Promise<Partial<MetricCoun
     (await safeCount('thoughts', (q) => q.eq('project_id', projectId))) ||
     (await safeCount('zeta_thoughts', (q) => q.eq('project_id', projectId)));
 
-  // Outreach
+  /* ---------------- Outreach: RUNNING COUNT from logs ---------------- */
   const outreach_messages =
+    (await safeCount('system_logs', (q) =>
+      q.eq('project_id', projectId).in('event', ['zeta.outreach', 'notification.send'])
+    )) ||
     (await safeCount('outreach_messages', (q) => q.eq('project_id', projectId))) ||
     (await safeCount('notifications', (q) =>
       q.eq('project_id', projectId).or('type.eq.outreach,category.eq.outreach')
@@ -156,7 +153,7 @@ export async function getXPCounts(projectId: string): Promise<Partial<MetricCoun
       q.eq('project_id', projectId).in('status', ['done', 'completed', 'complete'])
     )) || 0;
 
-  // Tasks
+  // Tasks (keep as-is; if you move entirely to task_items, replace accordingly)
   const tasks_zeta_created =
     (await safeCount('tasks', (q) => q.eq('project_id', projectId).in('created_by', ['zeta', 'assistant']))) || 0;
 
@@ -183,24 +180,19 @@ export async function getXPCounts(projectId: string): Promise<Partial<MetricCoun
     (await safeCount('functions', (q) => q.eq('project_id', projectId))) ||
     (await safeCount('user_functions', (q) => q.eq('project_id', projectId)));
 
-  // Zeta actions (best-effort via system_logs)
+  /* -------- Autonomous actions: RUNNING COUNT from logs (matches LogsPanel) -------- */
   const zeta_actions =
     (await safeCount('system_logs', (q) =>
       q
         .eq('project_id', projectId)
         .eq('actor', 'zeta')
-        .or(
-          [
-            'event.eq.task.create',
-            'event.eq.task.complete',
-            'event.eq.file.upload',
-            'event.eq.file.generate',
-            'event.eq.calendar.create',
-            'event.eq.goal.create',
-            'event.eq.goal.complete',
-            'event.eq.function.create',
-          ].join(',')
-        )
+        .in('event', [
+          'task.create', 'task.confirm', 'task.complete',
+          'file.upload', 'file.generate', 'file.convert',
+          'calendar.event', 'calendar.reminder', 'calendar.note',
+          'project.goals.short.update', 'project.goals.long.update',
+          'functions.build.start', 'zeta.thought', 'zeta.outreach',
+        ])
     )) || 0;
 
   return {

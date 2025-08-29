@@ -6,7 +6,6 @@ import { supabase } from '@/lib/supabaseClient';
 import TasksSummary from '@/components/TasksSummary';
 
 type Props = {
-  /** Optional. If omitted, we resolve it automatically. */
   projectId?: string;
 };
 
@@ -28,7 +27,6 @@ export default function DashboardTasks({ projectId: propProjectId }: Props) {
   const params = useParams();
   const searchParams = useSearchParams();
 
-  // Resolve projectId: prop → /[projectId] → ?projectId= → localStorage
   const [resolvedId, setResolvedId] = useState<string | null>(propProjectId ?? null);
   const [resolving, setResolving] = useState<boolean>(!propProjectId);
 
@@ -46,7 +44,9 @@ export default function DashboardTasks({ projectId: propProjectId }: Props) {
       const fromQuery = searchParams?.get('projectId') ?? undefined;
       const fromStorage =
         typeof window !== 'undefined'
-          ? localStorage.getItem('currentProjectId') || localStorage.getItem('lastProjectId') || undefined
+          ? localStorage.getItem('currentProjectId') ||
+            localStorage.getItem('lastProjectId') ||
+            undefined
           : undefined;
 
       const immediate = fromRoute || fromQuery || fromStorage;
@@ -68,7 +68,6 @@ export default function DashboardTasks({ projectId: propProjectId }: Props) {
     };
   }, [propProjectId, params, searchParams]);
 
-  // Fetch latest 3 + 3 from task_items (only when we have an ID)
   const [zetaTitles, setZetaTitles] = useState<string[]>([]);
   const [userTitles, setUserTitles] = useState<string[]>([]);
   const [zetaStatuses, setZetaStatuses] = useState<SummaryStatus[]>([]);
@@ -83,7 +82,6 @@ export default function DashboardTasks({ projectId: propProjectId }: Props) {
         setLoading(false);
         return;
       }
-
       setLoading(true);
       try {
         const [{ data: zRows, error: ez }, { data: uRows, error: eu }] = await Promise.all([
@@ -102,7 +100,6 @@ export default function DashboardTasks({ projectId: propProjectId }: Props) {
             .order('created_at', { ascending: false })
             .limit(3),
         ]);
-
         if (ez) throw ez;
         if (eu) throw eu;
 
