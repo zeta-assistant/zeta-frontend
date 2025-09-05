@@ -92,7 +92,7 @@ export default function CalendarPanel({ fontSize }: { fontSize: 'sm' | 'base' | 
   const hasLength = items.some((i) => 'length' in i);
   const hasDetails = items.some((i) => 'details' in i);
 
-  const handleCreateOrEditItem = async (payload: {
+    const handleCreateOrEditItem = async (payload: {
     id?: string;
     type: string;
     title: string;
@@ -100,6 +100,8 @@ export default function CalendarPanel({ fontSize }: { fontSize: 'sm' | 'base' | 
     date: string;
     time?: string | null;
     length?: number | null;
+    reminder_offset_minutes?: number | null;
+    reminder_channels?: { email?: boolean; telegram?: boolean; inapp?: boolean } | null;
   }) => {
     const baseRow: any = {
       type: payload.type.toLowerCase(),
@@ -110,9 +112,15 @@ export default function CalendarPanel({ fontSize }: { fontSize: 'sm' | 'base' | 
     if (hasTime) baseRow.time = payload.time ?? null;
     if (hasLength) baseRow.length = payload.length ?? null;
 
+    // NEW: reminder fields
+    baseRow.reminder_offset_minutes =
+      typeof payload.reminder_offset_minutes === 'number' ? payload.reminder_offset_minutes : 0;
+    baseRow.reminder_channels = payload.reminder_channels ?? { telegram: true, email: false, inapp: true };
+
     if (payload.id) {
       const { error } = await supabase.from('calendar_items').update(baseRow).eq('id', payload.id);
-      if (!error) setItems((prev) => prev.map((i) => (i.id === payload.id ? { ...i, ...baseRow } : i)));
+      if (!error)
+        setItems((prev) => prev.map((i) => (i.id === payload.id ? { ...i, ...baseRow } : i)));
     } else {
       const insertRow = { project_id: projectId, ...baseRow };
       const { data, error } = await supabase.from('calendar_items').insert([insertRow]).select();
@@ -122,7 +130,14 @@ export default function CalendarPanel({ fontSize }: { fontSize: 'sm' | 'base' | 
           project_id: projectId,
           actor: 'user',
           event: `calendar.${baseRow.type}`,
-          details: { title: baseRow.title, when: baseRow.date, time: baseRow.time, length: baseRow.length },
+          details: {
+            title: baseRow.title,
+            when: baseRow.date,
+            time: baseRow.time,
+            length: baseRow.length,
+            reminder_offset_minutes: baseRow.reminder_offset_minutes,
+            reminder_channels: baseRow.reminder_channels,
+          },
         });
       }
     }
@@ -130,6 +145,7 @@ export default function CalendarPanel({ fontSize }: { fontSize: 'sm' | 'base' | 
     setModalOpen(false);
     setEditItem(null);
   };
+
 
   const handleDelete = async (id: string) => {
     const { error } = await supabase.from('calendar_items').delete().eq('id', id);

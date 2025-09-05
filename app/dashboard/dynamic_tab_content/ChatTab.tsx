@@ -111,6 +111,29 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     }
   };
 
+  // NEW: persist each user message (and attachments) to user_input_log
+  const logUserInput = async (content: string, uploaded: Uploaded[], v: Verbosity) => {
+    try {
+      if (!projectId || !content.trim()) return;
+      const timestamp = new Date().toISOString();
+      const meta = {
+        source: 'chat_tab',
+        verbosity: v,
+        attachments: uploaded,
+      };
+      const { error } = await supabase.from('user_input_log').insert({
+        project_id: projectId,
+        timestamp,
+        author: 'user',
+        content,
+        meta,
+      });
+      if (error) console.error('user_input_log insert error:', error);
+    } catch (e) {
+      console.error('user_input_log insert exception:', e);
+    }
+  };
+
   const handleSend = async () => {
     let uploaded: Uploaded[] = [];
     if (autoUploadOnSend && attachedFiles.length) {
@@ -122,6 +145,12 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
         return;
       }
     }
+
+    // NEW: build combined user content and save to user_input_log
+    const text = (input ?? '').trim();
+    const filesMd = uploaded.length ? buildFilesMarkdown(uploaded) : '';
+    const combined = [text, filesMd].filter(Boolean).join('\n\n');
+    await logUserInput(combined, uploaded, verbosity);
 
     await sendMessage(
       uploaded.length

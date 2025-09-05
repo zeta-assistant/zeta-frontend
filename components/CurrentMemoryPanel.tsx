@@ -89,6 +89,45 @@ function timeAgo(ts?: string | null) {
   return `${days}d ago`;
 }
 
+/* ---------- helper to choose newest across MF + logs ---------- */
+type BadgeKind = 'NOTIFICATION' | 'THOUGHT' | 'MESSAGE';
+function chooseMostRecentMessage(opts: {
+  mf: any | null; // mainframe_info row (or null)
+  logTimes: Record<string, string | null>; // event -> ISO timestamp
+}): { text: string | null; kind: BadgeKind | null; at: string | null } {
+  const mf = opts.mf ?? {};
+
+  const notifText    = (mf.latest_notification ?? mf.latest_notificaiton ?? null) as string | null;
+  const thoughtText  = (mf.latest_thought ?? null) as string | null;
+  const outreachText = (mf.latest_outreach_chat ?? null) as string | null;
+
+  const notifAt   = (mf.latest_notification_at   ?? opts.logTimes['notification.send'] ?? null) as string | null;
+  const thoughtAt = (mf.latest_thought_at        ?? opts.logTimes['zeta.thought']      ?? null) as string | null;
+  const outreAt   = (mf.latest_outreach_chat_at  ?? opts.logTimes['zeta.outreach']     ?? null) as string | null;
+
+  type Cand = { text: string; at?: string | null; kind: BadgeKind };
+  const candidates: Cand[] = [];
+  if (outreachText && outreachText.trim()) candidates.push({ text: outreachText, at: outreAt, kind: 'MESSAGE' });
+  if (thoughtText && thoughtText.trim())   candidates.push({ text: thoughtText,  at: thoughtAt, kind: 'THOUGHT' });
+  if (notifText && notifText.trim())       candidates.push({ text: notifText,    at: notifAt,   kind: 'NOTIFICATION' });
+
+  if (candidates.length === 0) return { text: null, kind: null, at: null };
+
+  const withTs = candidates
+    .map(c => ({ ...c, ts: c.at ? Date.parse(c.at) : NaN }))
+    .filter(c => Number.isFinite(c.ts));
+
+  if (withTs.length > 0) {
+    withTs.sort((a, b) => b.ts - a.ts);
+    return { text: withTs[0].text, kind: withTs[0].kind, at: withTs[0].at ?? null };
+  }
+
+  // If no timestamps at all, prefer outreach > thought > notification
+  const first = candidates[0];
+  return { text: first.text, kind: first.kind, at: first.at ?? null };
+}
+
+
 export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   const router = useRouter();
 
@@ -118,6 +157,9 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   /* ------------------ Notifications state ----------------- */
   const [isComposing, setIsComposing] = useState(false);
   const [latestNotification, setLatestNotification] = useState<string | null>(null);
+  const [latestKind, setLatestKind] = useState<BadgeKind | null>(null);
+  const [latestAt, setLatestAt] = useState<string | null>(null); // ← NEW
+
   const DEFAULT_NOTIFICATION =
     'Hey there! Connect to Telegram in Workspace/APIs, and then start receiving notifications! ';
   const [userReply, setUserReply] = useState('');
@@ -209,7 +251,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   }
 
   async function refreshActivityAndUnread(pid: string) {
-    // get last-active stamps
     const { data: p } = await supabase
       .from('user_projects')
       .select('user_last_active,zeta_last_active')
@@ -222,7 +263,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
     setUserLastActive(ula);
     setZetaLastActive(zla);
 
-    // compute unread = logs since user_last_active (or all if null)
     let unread = 0;
     if (ula) {
       const { count } = await supabase
@@ -251,7 +291,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
 
     const t = setInterval(run, 30_000);
 
-    // realtime bump
     const ch = supabase
       .channel(`logs_rhs_${projectId}`)
       .on(
@@ -261,7 +300,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
           const row = payload.new as LogRow;
           setLatestLog(row);
           setZetaLastActive(row.created_at);
-          // optimistic unread increment
           if (!userLastActive || row.created_at > userLastActive) {
             setUnreadCount((n) => n + 1);
           }
@@ -269,7 +307,7 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       )
       .subscribe();
 
-  return () => {
+    return () => {
       clearInterval(t);
       supabase.removeChannel(ch);
     };
@@ -282,26 +320,61 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
     setUnreadCount(0);
   }
 
-  /* --------------- Latest Notification -------------------- */
+  /* --------------- Latest Notification (from mainframe_info + logs) ---------- */
   useEffect(() => {
-    async function fetchLatestNotification() {
-      if (!projectId) return setLatestNotification(null);
-      const { data, error } = await supabase
-        .from('custom_notifications')
-        .select('message')
-        .eq('project_id', projectId)
-        .eq('type', 'relevant_discussion')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) {
-        console.error('❌ relevant discussion error:', error);
+    async function fetchFromMainframe() {
+      if (!projectId) {
         setLatestNotification(null);
-      } else {
-        setLatestNotification(data?.message ?? null);
+        setLatestKind(null);
+        return;
+      }
+
+      try {
+        // mainframe row (avoid 42703 by using '*')
+        const mfQ = supabase
+          .from('mainframe_info')
+          .select('*')
+          .eq('project_id', projectId)
+          .limit(1)
+          .maybeSingle<any>();
+
+        // latest times from logs for three events
+        const logsQ = supabase
+          .from('system_logs')
+          .select('event, created_at')
+          .eq('project_id', projectId)
+          .in('event', ['notification.send', 'zeta.thought', 'zeta.outreach'])
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        const [mfRes, logsRes] = await Promise.all([mfQ, logsQ]);
+
+        if (mfRes.error) console.error('❌ mainframe_info fetch error:', JSON.stringify(mfRes.error));
+        if (logsRes.error) console.error('❌ system_logs fetch error:', JSON.stringify(logsRes.error));
+
+        const mfRow = mfRes.data ?? null;
+
+        const logTimes: Record<string, string | null> = {
+          'notification.send': null,
+          'zeta.thought': null,
+          'zeta.outreach': null,
+        };
+        (logsRes.data ?? []).forEach((r: any) => {
+          if (!logTimes[r.event]) logTimes[r.event] = r.created_at as string;
+        });
+
+        const { text, kind, at } = chooseMostRecentMessage({ mf: mfRow, logTimes });
+setLatestNotification(text ?? null);
+setLatestKind(kind ?? null);
+setLatestAt(at ?? null); // ← NEW
+      } catch (err) {
+        console.error('❌ mainframe_info/logs fetch threw:', err instanceof Error ? err.message : err);
+        setLatestNotification(null);
+        setLatestKind(null);
       }
     }
-    void fetchLatestNotification();
+
+    void fetchFromMainframe();
   }, [projectId]);
 
   /* --------------- Mini-chat helpers ---------------------- */
@@ -368,176 +441,197 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
 
   /* ------------------------- UI --------------------------- */
   return (
-    <div className="h-full w-full flex flex-col bg-indigo-50/60 text-indigo-900">
-      {/* ---------- TOP: Memory (33%) ---------- */}
-      <section className="basis-1/3 min-h-0 overflow-y-auto p-6 border-b border-indigo-200/60">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold">🧠 Memory</h2>
-        </div>
+    <div className="h-full w-full flex flex-col bg-indigo-50/60 text-indigo-900 overflow-hidden">
+      {/* Sticky header: title + tab selector */}
+      <header className="sticky top-0 z-20 border-b border-indigo-200/60 bg-indigo-50/80 backdrop-blur supports-[backdrop-filter]:bg-indigo-50/60">
+        <div className="px-6 pt-4 pb-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold">🧠 Memory</h2>
+          </div>
 
-        <div className="flex gap-2 mt-3 mb-4">
-          {(['daily', 'weekly', 'monthly'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-1 rounded text-sm font-semibold capitalize ${
-                tab === t ? 'bg-white shadow' : 'bg-indigo-200 hover:bg-indigo-300'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+          <div className="flex gap-2 mt-3">
+            {(['daily', 'weekly', 'monthly'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`px-3 py-1 rounded text-sm font-semibold capitalize ${
+                  tab === t ? 'bg-white shadow' : 'bg-indigo-200 hover:bg-indigo-300'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
         </div>
+      </header>
 
+      {/* Scrollable content: memory body + logs + notifications/mini-chat */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-6">
         {tab === 'daily' && (
           <DailyPicker weekDates={weekDates} selectedDate={selectedDate} onPick={(d) => setSelectedDate(d)} />
         )}
 
-        {loading ? (
-          <p className="italic text-indigo-800">Loading memory...</p>
-        ) : memory ? (
-          <p className="leading-relaxed whitespace-pre-wrap">{memory}</p>
-        ) : (
-          <p className="italic">No memory found for this tab.</p>
-        )}
-      </section>
-
-      {/* ---------- BOTTOM: Logs + Notifications (66%) ---------- */}
-      <section className="basis-2/3 min-h-0 overflow-y-auto p-6">
-        {/* Logs header with (N) badge + Mark read */}
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="font-bold text-base flex items-center gap-2">🗒️ Logs</h3>
-          <div className="flex items-center gap-2">
-            <span className="bg-red-500 text-white text-xs rounded-full px-2 py-0.5">({unreadCount})</span>
-            <button onClick={markLogsRead} className="text-xs text-indigo-700 hover:underline">
-              Mark read
-            </button>
-          </div>
-        </div>
-
-        {/* Zeta last active line */}
-        <div className="text-[11px] text-slate-600 mb-2">
-          Zeta was last active:{' '}
-          <span className="font-medium text-slate-700">
-            {zetaLastActive ? `${timeAgo(zetaLastActive)} · ${new Date(zetaLastActive).toLocaleString()}` : '—'}
-          </span>
-        </div>
-
-        {/* Latest log card */}
-        <div className="rounded-2xl border border-indigo-200 bg-white/80 p-3 shadow-sm mb-5">
-          {latestLog ? (
-            <div className="text-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg leading-none">
-                    {(EVENT_UI[latestLog.event] ?? { icon: '🪵' }).icon}
-                  </span>
-                  <span className="font-semibold text-indigo-800">
-                    {latestLog.event}
-                  </span>
-                </div>
-                <span className="text-[11px] text-slate-500">
-                  {new Date(latestLog.created_at).toLocaleString()}
-                </span>
-              </div>
-              <div className="mt-1 text-slate-800 whitespace-pre-wrap">
-                {fallbackMessage(latestLog)}
-              </div>
-            </div>
+        {/* Memory body */}
+        <div className="rounded-2xl border border-indigo-200 bg-white/70 p-4 shadow-sm">
+          {loading ? (
+            <p className="italic text-indigo-800">Loading memory...</p>
+          ) : memory ? (
+            <p className="leading-relaxed whitespace-pre-wrap">{memory}</p>
           ) : (
-            <div className="text-sm italic text-slate-600">No logs yet.</div>
+            <p className="italic">No memory found for this tab.</p>
           )}
         </div>
 
-        {/* Notifications header — no settings/badge */}
-        <h3 className="font-bold text-base flex items-center gap-2 mb-2">🔔 Notifications</h3>
-
-        {/* Mini-chat card */}
-        <div className="rounded-2xl border border-indigo-200 bg-white/80 p-3 shadow-sm">
-          {/* Zeta bubble */}
-          <div className="flex items-start gap-3">
-            <img src="/zeta-avatar.jpg" alt="Zeta avatar" className="w-8 h-8 rounded-full object-cover" />
-            <div className="bg-white text-indigo-900 rounded-xl px-4 py-2 shadow-sm text-xs w-full border border-indigo-100">
-              <p className="font-medium mb-1">Zeta:</p>
-              <p className="leading-snug whitespace-pre-wrap">
-                {latestNotification ?? DEFAULT_NOTIFICATION}
-              </p>
-            </div>
-          </div>
-
-          {/* Your single (local) reply bubble */}
-          {sentUserMsg && (
-            <div className="flex items-start gap-3 justify-end mt-3">
-              <div className="bg-white border border-indigo-200 rounded-xl px-3 py-2 shadow-sm text-xs max-w-[90%]">
-                <div className="font-semibold text-indigo-800 mb-0.5">You</div>
-                <div className="text-slate-800 whitespace-pre-wrap">{sentUserMsg}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Zeta follow-up bubble */}
-          {assistantFollowup && (
-            <div className="flex items-start gap-3 mt-3">
-              <img src="/zeta-avatar.jpg" alt="Zeta" className="w-6 h-6 rounded-full object-cover mt-0.5" />
-              <div className="bg-white border border-blue-200 rounded-xl px-3 py-2 shadow-sm text-xs max-w-[90%]">
-                <div className="font-semibold text-blue-800 mb-0.5">Zeta</div>
-                <div className="text-slate-800 whitespace-pre-wrap">{assistantFollowup}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Composer — only BEFORE first send */}
-          {!locked && (
-            <div className="flex items-start gap-3 mt-4">
-              <div className="w-8 h-8 rounded-full bg-indigo-200 text-indigo-800 font-bold text-xs flex items-center justify-center border">
-                {userInitials}
-              </div>
-              <div className="flex-1">
-                <textarea
-                  value={userReply}
-                  onChange={(e) => setUserReply(e.target.value)}
-                  onKeyDown={handleReplyKeyDown}
-                  onCompositionStart={() => setIsComposing(true)}
-                  onCompositionEnd={() => setIsComposing(false)}
-                  placeholder="Reply to Zeta here…"
-                  rows={1}
-                  className="bg-white text-indigo-900 text-xs px-3 py-2 rounded-xl shadow-sm w-full focus:outline-none border border-indigo-200"
-                  disabled={sending}
-                />
-                <div className="mt-2">
-                  <button
-                    onClick={sendMiniReply}
-                    disabled={!userReply.trim() || sending}
-                    className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    {sending ? 'Sending…' : 'Send'}
-                  </button>
-                </div>
-
-                {error && (
-                  <div className="mt-2 text-[11px] text-red-600">
-                    {typeof error === 'string' ? error : JSON.stringify(error)}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* After first send — hide composer and show only Continue */}
-          {locked && (
-            <div className="mt-4 flex justify-center">
-              <button
-                onClick={continueDiscussion}
-                className="px-4 py-2 rounded-lg bg-amber-500 text-white text-xs md:text-sm hover:bg-amber-600"
-              >
-                Continue discussion →
+        {/* Logs */}
+        <section>
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-bold text-base flex items-center gap-2">🗒️ Logs</h3>
+            <div className="flex items-center gap-2">
+              <span className="bg-red-500 text-white text-xs rounded-full px-2 py-0.5">({unreadCount})</span>
+              <button onClick={markLogsRead} className="text-xs text-indigo-700 hover:underline">
+                Mark read
               </button>
             </div>
-          )}
+          </div>
 
-          <div ref={endRef} />
-        </div>
-      </section>
+          <div className="text-[11px] text-slate-600 mb-2">
+            Zeta was last active:{' '}
+            <span className="font-medium text-slate-700">
+              {zetaLastActive ? `${timeAgo(zetaLastActive)} · ${new Date(zetaLastActive).toLocaleString()}` : '—'}
+            </span>
+          </div>
+
+          <div className="rounded-2xl border border-indigo-200 bg-white/80 p-3 shadow-sm">
+            {latestLog ? (
+              <div className="text-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg leading-none">
+                      {(EVENT_UI[latestLog.event] ?? { icon: '🪵' }).icon}
+                    </span>
+                    <span className="font-semibold text-indigo-800">
+                      {latestLog.event}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    {new Date(latestLog.created_at).toLocaleString()}
+                  </span>
+                </div>
+                <div className="mt-1 text-slate-800 whitespace-pre-wrap">
+                  {fallbackMessage(latestLog)}
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm italic text-slate-600">No logs yet.</div>
+            )}
+          </div>
+        </section>
+
+        {/* Notifications / Mini-chat */}
+        <section>
+          <h3 className="font-bold text-base flex items-center gap-2 mb-2">🔔 Notifications</h3>
+
+          <div className="rounded-2xl border border-indigo-200 bg-white/80 p-3 shadow-sm">
+            {/* Zeta bubble */}
+            <div className="flex items-start gap-3">
+              <img src="/zeta-avatar.jpg" alt="Zeta avatar" className="w-8 h-8 rounded-full object-cover" />
+              <div className="bg-white text-indigo-900 rounded-xl px-4 py-2 shadow-sm text-xs w-full border border-indigo-100">
+                <p className="font-medium mb-1 flex items-center gap-2">
+  <span>Zeta:</span>
+  {latestKind && (
+    <span
+      className={`uppercase tracking-wide rounded-full px-2 py-[2px] text-[10px] font-bold
+      ${latestKind === 'MESSAGE' ? 'bg-blue-100 text-blue-700 border border-blue-200'
+        : latestKind === 'THOUGHT' ? 'bg-violet-100 text-violet-700 border border-violet-200'
+        : 'bg-amber-100 text-amber-700 border border-amber-200'}`}
+    >
+      {latestKind}
+    </span>
+  )}
+  <span className="text-[10px] text-slate-500 ml-1">
+    {latestAt ? `${timeAgo(latestAt) }` : '—'}
+  </span>
+</p>
+                <p className="leading-snug whitespace-pre-wrap">
+                  {latestNotification ?? DEFAULT_NOTIFICATION}
+                </p>
+              </div>
+            </div>
+
+            {/* Your local reply */}
+            {sentUserMsg && (
+              <div className="flex items-start gap-3 justify-end mt-3">
+                <div className="bg-white border border-indigo-200 rounded-xl px-3 py-2 shadow-sm text-xs max-w-[90%]">
+                  <div className="font-semibold text-indigo-800 mb-0.5">You</div>
+                  <div className="text-slate-800 whitespace-pre-wrap">{sentUserMsg}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Zeta follow-up */}
+            {assistantFollowup && (
+              <div className="flex items-start gap-3 mt-3">
+                <img src="/zeta-avatar.jpg" alt="Zeta" className="w-6 h-6 rounded-full object-cover mt-0.5" />
+                <div className="bg-white border border-blue-200 rounded-xl px-3 py-2 shadow-sm text-xs max-w-[90%]">
+                  <div className="font-semibold text-blue-800 mb-0.5">Zeta</div>
+                  <div className="text-slate-800 whitespace-pre-wrap">{assistantFollowup}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Composer — only BEFORE first send */}
+            {!locked && (
+              <div className="flex items-start gap-3 mt-4">
+                <div className="w-8 h-8 rounded-full bg-indigo-200 text-indigo-800 font-bold text-xs flex items-center justify-center border">
+                  {userInitials}
+                </div>
+                <div className="flex-1">
+                  <textarea
+                    value={userReply}
+                    onChange={(e) => setUserReply(e.target.value)}
+                    onKeyDown={handleReplyKeyDown}
+                    onCompositionStart={() => setIsComposing(true)}
+                    onCompositionEnd={() => setIsComposing(false)}
+                    placeholder="Reply to Zeta here…"
+                    rows={1}
+                    className="bg-white text-indigo-900 text-xs px-3 py-2 rounded-xl shadow-sm w-full focus:outline-none border border-indigo-200"
+                    disabled={sending}
+                  />
+                  <div className="mt-2">
+                    <button
+                      onClick={sendMiniReply}
+                      disabled={!userReply.trim() || sending}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {sending ? 'Sending…' : 'Send'}
+                    </button>
+                  </div>
+
+                  {error && (
+                    <div className="mt-2 text-[11px] text-red-600">
+                      {typeof error === 'string' ? error : JSON.stringify(error)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* After first send — hide composer and show only Continue */}
+            {locked && (
+              <div className="mt-4 flex justify-center">
+                <button
+                  onClick={continueDiscussion}
+                  className="px-4 py-2 rounded-lg bg-amber-500 text-white text-xs md:text-sm hover:bg-amber-600"
+                >
+                  Continue discussion →
+                </button>
+              </div>
+            )}
+
+            <div ref={endRef} />
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

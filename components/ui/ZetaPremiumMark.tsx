@@ -18,17 +18,17 @@ type MarkProps = {
   className?: string;
   /** Show a tiny label below the image (Premium/Free) */
   showLabel?: boolean;
-  /** Image src overrides (defaults below) */
-  srcFree?: string;     // default: /zeta-avatar.png
-  srcPremium?: string;  // default: /zeta-premium.png
+  /** Image src overrides */
+  srcFree?: string;
+  srcPremium?: string;
 };
 
 /**
  * ZetaPremiumMark
- * - Premium: golden glow, crown/bolt accents, uses /zeta-premium.png
- * - Free: subtle slate glow, uses /zeta-avatar.png
+ * - Premium: golden glow, crown/bolt accents, /zeta-premium.png
+ * - Free: subtle slate glow, /zeta-avatar.png
  *
- * Place your images in `/public/zeta-avatar.png` and `/public/zeta-premium.png`.
+ * Place images in `/public/zeta-avatar.png` and `/public/zeta-premium.png`.
  */
 export default function ZetaPremiumMark({
   plan = 'premium',
@@ -49,20 +49,16 @@ export default function ZetaPremiumMark({
         type="button"
         onClick={onClick}
         title={title}
-        className={[
-          'relative rounded-2xl focus:outline-none focus:ring-2 focus:ring-offset-2',
-          isPremium ? 'focus:ring-amber-400' : 'focus:ring-slate-300',
-          'transition-transform hover:scale-[1.02]',
-          className,
-        ].join(' ')}
+        className={`relative rounded-2xl transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+          isPremium ? 'focus:ring-amber-400' : 'focus:ring-slate-300'
+        } ${className}`}
         style={{ width: size, height: size }}
       >
         {/* Glow */}
         <div
-          className={[
-            'absolute inset-0 rounded-2xl blur-xl',
-            isPremium ? 'bg-amber-300/40 animate-pulse' : 'bg-slate-300/25',
-          ].join(' ')}
+          className={`absolute inset-0 rounded-2xl blur-xl ${
+            isPremium ? 'bg-amber-300/40 animate-pulse' : 'bg-slate-300/25'
+          }`}
         />
 
         {/* Image */}
@@ -98,16 +94,25 @@ export default function ZetaPremiumMark({
               strokeWidth="4"
               strokeLinejoin="round"
             />
-            <rect x="18" y="85" width="84" height="16" rx="6" fill="#FCD34D" stroke="#B45309" strokeWidth="4" />
+            <rect
+              x="18"
+              y="85"
+              width="84"
+              height="16"
+              rx="6"
+              fill="#FCD34D"
+              stroke="#B45309"
+              strokeWidth="4"
+            />
           </svg>
         )}
 
-        {/* Lightning spark (premium only) */}
+        {/* Lightning spark */}
         {isPremium && (
           <svg
             className="absolute -left-3 -bottom-6 z-20 animate-bounce"
-            width={Math.round(size * 0.30)}
-            height={Math.round(size * 0.30)}
+            width={Math.round(size * 0.3)}
+            height={Math.round(size * 0.3)}
             viewBox="0 0 80 80"
             aria-hidden
           >
@@ -118,12 +123,11 @@ export default function ZetaPremiumMark({
 
       {showLabel && (
         <span
-          className={[
-            'mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border',
+          className={`mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
             isPremium
               ? 'border-amber-400 bg-white text-amber-700'
-              : 'border-slate-300 bg-white text-slate-700',
-          ].join(' ')}
+              : 'border-slate-300 bg-white text-slate-700'
+          }`}
         >
           {isPremium ? '👑 Premium' : '🟢 Free'}
         </span>
@@ -132,10 +136,9 @@ export default function ZetaPremiumMark({
   );
 }
 
-/* ──────────────────────────────────────────────────────────
-   Optional: tiny plan pill for headers/buttons
-   Usage: <PlanTag plan="premium" onClick={()=>router.push('/settings')} />
-─────────────────────────────────────────────────────────── */
+/* ──────────────────────────────
+   Optional: tiny plan pill tag
+────────────────────────────── */
 export function PlanTag({
   plan,
   onClick,
@@ -153,13 +156,11 @@ export function PlanTag({
       type="button"
       onClick={onClick}
       title={title}
-      className={[
-        'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border transition',
+      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border transition ${
         isPremium
           ? 'border-amber-400 bg-white hover:bg-amber-50 text-amber-700'
-          : 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700',
-        className,
-      ].join(' ')}
+          : 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700'
+      } ${className}`}
     >
       <span aria-hidden>{isPremium ? '👑' : '🟢'}</span>
       <span className="font-medium">{isPremium ? 'Premium' : 'Free'}</span>

@@ -327,9 +327,12 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-sky-800 text-white px-6 py-6 flex flex-col items-center">
-      <div className="flex w-full max-w-[1440px] gap-4 justify-start px-2 items-stretch">
+      <div className="flex w-full max-w-[1500px] gap-4 justify-start px-2 items-stretch">
         {/* Left Sidebar */}
-        <div className="relative w-[350px] shrink-0 px-3 py-2">
+        <div
+  className="relative w-[350px] shrink-0 px-3 py-2 flex flex-col"
+  style={{ height: PANEL_H }}
+>
           <img
             src={sendingMessage ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
             alt={sendingMessage ? 'Zeta Thinking' : 'Zeta Mascot'}
@@ -374,7 +377,7 @@ export default function DashboardPage() {
           />
 
           <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
-            <div className="flex gap-4 flex-wrap">
+            <div className="flex gap-4 flex-nowrap">
               <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
               <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
               <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />

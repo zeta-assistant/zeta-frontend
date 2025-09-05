@@ -4,42 +4,24 @@ import OpenAI from 'openai';
 
 /* ──────────────────────────────────────────────────────────
    Steps & Status (0–4)
-   0 = project created
-   1 = vision updated
-   2 = long-term goal created
-   3 = short-term goal created
-   4 = Telegram connected
 ─────────────────────────────────────────────────────────── */
-export const ONBOARDING_STEPS = [
-  'vision',
-  'long_term_goals',
-  'short_term_goals',
-  'telegram',
-] as const;
-
+export const ONBOARDING_STEPS = ['vision','long_term_goals','short_term_goals','telegram'] as const;
 export type OnboardingKey = typeof ONBOARDING_STEPS[number];
 export type OnboardingStatus = 0 | 1 | 2 | 3 | 4;
 
-/** Helper to compare union literals without widening to `number`. */
 function maxStatus(a: OnboardingStatus, b: OnboardingStatus): OnboardingStatus {
   return (a >= b ? a : b) as OnboardingStatus;
 }
 
-export function getStepIndex(step: OnboardingKey): number {
-  return ONBOARDING_STEPS.indexOf(step) + 1;
-}
-
-export function getStepByIndex(index: number): OnboardingKey | null {
-  return ONBOARDING_STEPS[index - 1] ?? null;
-}
+export function getStepIndex(step: OnboardingKey): number { return ONBOARDING_STEPS.indexOf(step) + 1; }
+export function getStepByIndex(index: number): OnboardingKey | null { return ONBOARDING_STEPS[index - 1] ?? null; }
 
 export function getCurrentStepPrompt(step: OnboardingKey): string {
   const prompts: Record<OnboardingKey, string> = {
     vision: 'To get started, can you describe your vision for this project?',
     long_term_goals: 'What are your long-term goals with this project?',
     short_term_goals: 'What are your short-term or immediate goals?',
-    telegram:
-      "Connect your Telegram to receive important notifications. Let me know once it's done or type **'skip'**.",
+    telegram: "Connect your Telegram to receive important notifications. Let me know once it's done or type **'skip'**.",
   };
   return prompts[step];
 }
@@ -47,18 +29,8 @@ export function getCurrentStepPrompt(step: OnboardingKey): string {
 /* ──────────────────────────────────────────────────────────
    Log helpers
 ─────────────────────────────────────────────────────────── */
-type LogRow = {
-  created_at: string;
-  actor: 'user' | 'zeta';
-  event: string;
-  details: any;
-};
-
-type LatestLogOpts = {
-  event?: string;
-  events?: string[];
-  detailsContains?: Record<string, string>;
-};
+type LogRow = { created_at: string; actor: 'user'|'zeta'; event: string; details: any; };
+type LatestLogOpts = { event?: string; events?: string[]; detailsContains?: Record<string, string>; };
 
 async function latestLog(projectId: string, opts: LatestLogOpts): Promise<LogRow | null> {
   let q = supabaseAdmin
@@ -69,14 +41,11 @@ async function latestLog(projectId: string, opts: LatestLogOpts): Promise<LogRow
     .limit(1);
 
   if (opts.event) q = q.eq('event', opts.event);
-  if (opts.events && opts.events.length) q = q.in('event', opts.events);
+  if (opts.events?.length) q = q.in('event', opts.events);
   if (opts.detailsContains) q = q.contains('details', opts.detailsContains);
 
   const { data, error } = await q;
-  if (error) {
-    console.error('latestLog error', error);
-    return null;
-  }
+  if (error) { console.error('latestLog error', error); return null; }
   return (data && data[0]) || null;
 }
 
@@ -101,43 +70,32 @@ export async function checkUploadedFiles(projectId: string): Promise<boolean> {
 
 /* ──────────────────────────────────────────────────────────
    Status derivation and syncing
-   - Derive from user_projects first (columns), then from logs.
 ─────────────────────────────────────────────────────────── */
 function hasText(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
 }
-
 function countItems(v: unknown): number {
   if (Array.isArray(v)) return v.filter(x => typeof x === 'string' && x.trim()).length;
   if (typeof v === 'string') {
-    return v
-      .split(/\n|\\n|•|-|\*/g)
-      .map(s => s.trim().replace(/^[-•*]\s*/, ''))
-      .filter(Boolean).length;
+    return v.split(/\n|\\n|•|-|\*/g).map(s => s.trim().replace(/^[-•*]\s*/, '')).filter(Boolean).length;
   }
   return 0;
 }
 
 export async function deriveOnboardingStatus(projectId: string): Promise<OnboardingStatus> {
-  // Read current project data
   const { data: proj, error: projErr } = await supabaseAdmin
     .from('user_projects')
     .select('vision, long_term_goals, short_term_goals, telegram_connected')
     .eq('id', projectId)
     .single();
+  if (projErr) console.error('deriveOnboardingStatus: failed to load project', projErr);
 
-  if (projErr) {
-    console.error('deriveOnboardingStatus: failed to load project', projErr);
-  }
-
-  // 1) Data-driven status (primary)
   let statusFromData: OnboardingStatus = 0;
   if (hasText(proj?.vision)) statusFromData = 1;
   if (countItems(proj?.long_term_goals) > 0) statusFromData = maxStatus(statusFromData, 2);
   if (countItems(proj?.short_term_goals) > 0) statusFromData = maxStatus(statusFromData, 3);
   if (proj?.telegram_connected === true) statusFromData = 4;
 
-  // 2) Log-driven bump (secondary / fallback)
   const [visionLog, ltLog, stLog, telegramLog] = await Promise.all([
     latestLog(projectId, { event: 'project.vision.update' }),
     latestLog(projectId, { event: 'project.goals.long.update' }),
@@ -151,33 +109,25 @@ export async function deriveOnboardingStatus(projectId: string): Promise<Onboard
   if (stLog) statusFromLogs = maxStatus(statusFromLogs, 3);
   if (telegramLog) statusFromLogs = 4;
 
-  // Take the max of the two sources without widening
   return maxStatus(statusFromData, statusFromLogs);
 }
 
 export async function syncOnboardingStatus(projectId: string): Promise<OnboardingStatus> {
   const status = await deriveOnboardingStatus(projectId);
-
-  // Only write if changed
   const { data: current, error: readErr } = await supabaseAdmin
     .from('user_projects')
     .select('onboarding_status')
     .eq('id', projectId)
     .single();
-
-  if (readErr) {
-    console.error('syncOnboardingStatus: read error', readErr);
-  }
+  if (readErr) console.error('syncOnboardingStatus: read error', readErr);
 
   if (current?.onboarding_status !== status) {
     const { error: updErr } = await supabaseAdmin
       .from('user_projects')
       .update({ onboarding_status: status })
       .eq('id', projectId);
-
     if (updErr) console.error('syncOnboardingStatus: update error', updErr);
   }
-
   return status;
 }
 
@@ -186,91 +136,56 @@ export async function shouldUseOnboarding(projectId: string): Promise<boolean> {
   return status < 4;
 }
 
-/** Returns the next step key based on derived status. */
 export async function getNextOnboardingStep(projectId: string): Promise<OnboardingKey | null> {
   const status = await deriveOnboardingStatus(projectId);
   switch (status) {
-    case 0:
-      return 'vision';
-    case 1:
-      return 'long_term_goals';
-    case 2:
-      return 'short_term_goals';
-    case 3:
-      return 'telegram';
-    default:
-      return null; // 4 = complete
+    case 0: return 'vision';
+    case 1: return 'long_term_goals';
+    case 2: return 'short_term_goals';
+    case 3: return 'telegram';
+    default: return null;
   }
 }
 
-/** For UX like "Step n of 4" (completed steps 0–4) */
 export async function getProgressIndex(projectId: string): Promise<number> {
   return await deriveOnboardingStatus(projectId);
 }
 
 /* ──────────────────────────────────────────────────────────
-   Shared context for BOTH onboarding & regular responses
+   Shared context (now reads user_input_log.timestamp)
 ─────────────────────────────────────────────────────────── */
 export type SharedContext = {
   mainframeInfo: any | null;
-  recentUserInputs: { created_at: string; author?: string | null; content: string }[];
+  recentUserInputs: { timestamp: string; author?: string | null; content: string }[];
 };
 
 export async function getSharedContext(projectId: string): Promise<SharedContext> {
   const [{ data: mf }, { data: inputs }] = await Promise.all([
-    supabaseAdmin
-      .from('mainframe_info')
-      .select('*')
-      .eq('project_id', projectId)
-      .single(),
+    supabaseAdmin.from('mainframe_info').select('*').eq('project_id', projectId).single(),
     supabaseAdmin
       .from('user_input_log')
-      .select('created_at, author, content')
+      .select('timestamp, author, content')
       .eq('project_id', projectId)
-      .order('created_at', { ascending: false })
+      .order('timestamp', { ascending: false })
       .limit(5),
   ]);
 
   return {
     mainframeInfo: mf ?? null,
-    recentUserInputs: inputs ?? [],
+    recentUserInputs: (inputs ?? []) as SharedContext['recentUserInputs'],
   };
-}
-
-/** Call this ONLY when the model/user explicitly asks to look into files. */
-export async function fetchProjectFiles(
-  projectId: string,
-  opts?: { search?: string; limit?: number }
-): Promise<Array<{ id: string; file_name: string; file_url: string; created_at: string }>> {
-  let q = supabaseAdmin
-    .from('project_files')
-    .select('id, file_name, file_url, created_at')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false });
-
-  if (opts?.search?.trim()) q = q.ilike('file_name', `%${opts.search.trim()}%`);
-  if (opts?.limit) q = q.limit(opts.limit);
-
-  const { data, error } = await q;
-  if (error) {
-    console.error('fetchProjectFiles error', error);
-    return [];
-  }
-  return data || [];
 }
 
 /* ──────────────────────────────────────────────────────────
    Handle user replies DURING onboarding
-   - Writes canonical data to user_projects
-   - Logs each event so status is derivable
-   - Syncs onboarding_status after each write
+   - Also logs each message into user_input_log
 ─────────────────────────────────────────────────────────── */
 const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY });
 
 function parseBullets(text: string, maxItems: number): string[] {
   return (text || '')
     .split(/\n|\\n|•|-|\*/g)
-    .map((s) => s.trim().replace(/^[-•*]\s*/, ''))
+    .map(s => s.trim().replace(/^[-•*]\s*/, ''))
     .filter(Boolean)
     .slice(0, maxItems);
 }
@@ -287,6 +202,18 @@ export async function handleUserResponse(
   const raw = (message || '').trim();
   const lc = raw.toLowerCase();
 
+  // Log every onboarding message to user_input_log
+  try {
+    await supabaseAdmin.from('user_input_log').insert({
+      project_id: projectId,
+      content: raw,
+      author: 'user',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error('user_input_log insert failed', e);
+  }
+
   // Allow skip, but do NOT mark Telegram as connected on skip
   if (lc === 'skip') {
     await syncOnboardingStatus(projectId);
@@ -296,10 +223,7 @@ export async function handleUserResponse(
   // Telegram step
   if (currentStep === 'telegram') {
     if (YES_RE.test(lc) || DONE_RE.test(lc) || TELEGRAM_RE.test(lc)) {
-      await supabaseAdmin
-        .from('user_projects')
-        .update({ telegram_connected: true })
-        .eq('id', projectId);
+      await supabaseAdmin.from('user_projects').update({ telegram_connected: true }).eq('id', projectId);
       // api.connect log should be inserted by your verifier.
     }
     await syncOnboardingStatus(projectId);
@@ -307,18 +231,11 @@ export async function handleUserResponse(
   }
 
   // Vision / Goals cleanup via LLM (best effort)
-  if (
-    currentStep === 'vision' ||
-    currentStep === 'long_term_goals' ||
-    currentStep === 'short_term_goals'
-  ) {
+  if (currentStep === 'vision' || currentStep === 'long_term_goals' || currentStep === 'short_term_goals') {
     const promptMap: Record<OnboardingKey, string> = {
-      vision:
-        'The user described their project vision. Rephrase it clearly in 1–2 concise sentences.',
-      long_term_goals:
-        'The user described their long-term goals. Reword them as 1–3 clear bullet items (short phrases).',
-      short_term_goals:
-        'The user shared short-term goals. Rewrite them as 1–5 specific bullet items (short phrases).',
+      vision: 'The user described their project vision. Rephrase it clearly in 1–2 concise sentences.',
+      long_term_goals: 'The user described their long-term goals. Reword them as 1–3 clear bullet items (short phrases).',
+      short_term_goals: 'The user shared short-term goals. Rewrite them as 1–5 specific bullet items (short phrases).',
       telegram: '',
     };
 
@@ -338,43 +255,27 @@ export async function handleUserResponse(
     }
 
     if (currentStep === 'vision') {
-      await supabaseAdmin
-        .from('user_projects')
-        .update({ vision: processed })
-        .eq('id', projectId);
-
+      await supabaseAdmin.from('user_projects').update({ vision: processed }).eq('id', projectId);
       await supabaseAdmin.from('system_logs').insert({
-        project_id: projectId,
-        actor: 'user',
-        event: 'project.vision.update',
+        project_id: projectId, actor: 'user', event: 'project.vision.update',
         details: { excerpt: processed.slice(0, 140) },
       });
-
       await syncOnboardingStatus(projectId);
       return;
     }
 
-    // Goals → newline-separated in user_projects for UI seeding
     const max = currentStep === 'short_term_goals' ? 5 : 3;
     const items = parseBullets(processed, max);
     const value = items.join('\n');
 
-    await supabaseAdmin
-      .from('user_projects')
+    await supabaseAdmin.from('user_projects')
       // @ts-ignore dynamic key write
       .update({ [currentStep]: value })
       .eq('id', projectId);
 
-    const goalEvent =
-      currentStep === 'short_term_goals'
-        ? 'project.goals.short.update'
-        : 'project.goals.long.update';
-
+    const goalEvent = currentStep === 'short_term_goals' ? 'project.goals.short.update' : 'project.goals.long.update';
     await supabaseAdmin.from('system_logs').insert({
-      project_id: projectId,
-      actor: 'user',
-      event: goalEvent,
-      details: { count: items.length },
+      project_id: projectId, actor: 'user', event: goalEvent, details: { count: items.length },
     });
 
     await syncOnboardingStatus(projectId);
@@ -383,19 +284,14 @@ export async function handleUserResponse(
 }
 
 /* ──────────────────────────────────────────────────────────
-   Utility: Given a derived status, what’s the next step?
+   Utility
 ─────────────────────────────────────────────────────────── */
 export function nextStepFromStatus(status: OnboardingStatus): OnboardingKey | null {
   switch (status) {
-    case 0:
-      return 'vision';
-    case 1:
-      return 'long_term_goals';
-    case 2:
-      return 'short_term_goals';
-    case 3:
-      return 'telegram';
-    default:
-      return null;
+    case 0: return 'vision';
+    case 1: return 'long_term_goals';
+    case 2: return 'short_term_goals';
+    case 3: return 'telegram';
+    default: return null;
   }
 }

@@ -17,7 +17,7 @@ type LogRow = {
 type TaskRow = {
   id: string;
   project_id: string;
-  task_type: 'zeta' | 'user'; // who it's for, not creator
+  task_type: 'zeta' | 'user';
   title: string;
   status:
     | 'draft'
@@ -32,7 +32,6 @@ type TaskRow = {
 
 const PAGE_SIZE = 40;
 
-/** Onboarding triggers */
 const ONBOARDING_EVENTS = new Set<string>([
   'project.vision.update',
   'project.goals.long.update',
@@ -40,13 +39,13 @@ const ONBOARDING_EVENTS = new Set<string>([
   'api.connect',
 ]);
 
-/** debounce helper */
 function makeDebounced(fn: () => void, wait = 400) {
   let t: ReturnType<typeof setTimeout> | null = null;
   return () => {
     if (t) clearTimeout(t);
     t = setTimeout(() => {
-      t = null; fn();
+      t = null;
+      fn();
     }, wait);
   };
 }
@@ -57,9 +56,9 @@ const EVENT_ICON: Record<string, string> = {
   'task.confirm': '📌',
   'task.complete': '✅',
   'task.verify': '🧪',
-  'task.delete': '🗑️',         // NEW
-  'goal.delete': '🗑️',         // NEW
-  'calendar.delete': '🗑️',     // NEW
+  'task.delete': '🗑️',
+  'goal.delete': '🗑️',
+  'calendar.delete': '🗑️',
   'file.upload': '📎',
   'file.convert': '🔁',
   'file.generate': '🗂️',
@@ -81,40 +80,73 @@ const EVENT_ICON: Record<string, string> = {
 function formatTime(ts: string) {
   try {
     return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  } catch { return ts; }
+  } catch {
+    return ts;
+  }
+}
+function formatDate(ts: string) {
+  try {
+    return new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  } catch {
+    return ts;
+  }
 }
 
 function fallbackMessage(row: LogRow) {
   const d = row.details || {};
   switch (row.event) {
-    case 'task.create': return `Task created: ${d.title ?? d.task_id ?? ''}`;
-    case 'task.edit': return `Task edited: ${d.title ?? d.task_id ?? ''}`;
-    case 'task.confirm': return `Task confirmed: ${d.title ?? d.task_id ?? ''}`;
-    case 'task.complete': return `Task completed: ${d.title ?? d.task_id ?? ''}`;
-    case 'task.verify': return `Task verified: ${d.title ?? d.task_id ?? ''}`;
-    case 'task.delete': return `Task deleted: ${d.title ?? d.task_id ?? ''}`;                 // NEW
-    case 'goal.delete': return `Goal deleted: ${d.title ?? d.goal_id ?? ''}`;                 // NEW
-    case 'calendar.delete': {                                                                 // NEW
+    case 'task.create':
+      return `Task created: ${d.title ?? d.task_id ?? ''}`;
+    case 'task.edit':
+      return `Task edited: ${d.title ?? d.task_id ?? ''}`;
+    case 'task.confirm':
+      return `Task confirmed: ${d.title ?? d.task_id ?? ''}`;
+    case 'task.complete':
+      return `Task completed: ${d.title ?? d.task_id ?? ''}`;
+    case 'task.verify':
+      return `Task verified: ${d.title ?? d.task_id ?? ''}`;
+    case 'task.delete':
+      return `Task deleted: ${d.title ?? d.task_id ?? ''}`;
+    case 'goal.delete':
+      return `Goal deleted: ${d.title ?? d.goal_id ?? ''}`;
+    case 'calendar.delete': {
       const when = d.when ?? d.start ?? d.start_time ?? d.start_at ?? '';
       return `Calendar item deleted: ${d.title ?? d.calendar_id ?? ''}${when ? ` on ${when}` : ''}`;
     }
-    case 'file.upload': return `Uploaded: ${d.file_name ?? d.path ?? ''}`;
-    case 'file.convert': return `Converted ${d.from ?? ''} → ${d.to ?? ''}${d.file_name ? ` (${d.file_name})` : ''}`;
-    case 'file.generate': return `Generated file: ${d.file_name ?? ''}`;
-    case 'discussion.start': return `Started discussion: ${d.title ?? d.discussion_id ?? ''}`;
-    case 'api.connect': return `Connected API: ${d.provider ?? ''}${d.status ? ` (${d.status})` : ''}`;
-    case 'notification.send': return `Notification sent: ${d.channel ?? ''}${d.title ? ` – ${d.title}` : ''}`;
-    case 'calendar.event': return `Event created: ${d.title ?? ''} on ${d.when ?? ''}`;
-    case 'calendar.reminder': return `Reminder created: ${d.title ?? ''} on ${d.when ?? ''}`;
-    case 'calendar.note': return `Calendar note added: ${d.title ?? ''} on ${d.when ?? ''}`;
-    case 'project.vision.update': return `Vision updated`;
-    case 'project.goals.short.update': return `Short-term goals updated`;
-    case 'project.goals.long.update': return `Long-term goals updated`;
-    case 'zeta.thought': return `Zeta thought: ${d.summary ?? ''}`;
-    case 'zeta.outreach': return `Zeta outreach: ${d.recipient ?? d.channel ?? ''}`;
-    case 'functions.build.start': return `Function build started: ${d.name ?? ''}`;
-    case 'memory.insight': return `Memory updated: ${d.summary ?? ''}`;
-    default: return row.message || row.event;
+    case 'file.upload':
+      return `Uploaded: ${d.file_name ?? d.path ?? ''}`;
+    case 'file.convert':
+      return `Converted ${d.from ?? ''} → ${d.to ?? ''}${d.file_name ? ` (${d.file_name})` : ''}`;
+    case 'file.generate':
+      return `Generated file: ${d.file_name ?? ''}`;
+    case 'discussion.start':
+      return `Started discussion: ${d.title ?? d.discussion_id ?? ''}`;
+    case 'api.connect':
+      return `Connected API: ${d.provider ?? ''}${d.status ? ` (${d.status})` : ''}`;
+    case 'notification.send':
+      return `Notification sent: ${d.channel ?? ''}${d.title ? ` – ${d.title}` : ''}`;
+    case 'calendar.event':
+      return `Event created: ${d.title ?? ''} on ${d.when ?? ''}`;
+    case 'calendar.reminder':
+      return `Reminder created: ${d.title ?? ''} on ${d.when ?? ''}`;
+    case 'calendar.note':
+      return `Calendar note added: ${d.title ?? ''} on ${d.when ?? ''}`;
+    case 'project.vision.update':
+      return `Vision updated`;
+    case 'project.goals.short.update':
+      return `Short-term goals updated`;
+    case 'project.goals.long.update':
+      return `Long-term goals updated`;
+    case 'zeta.thought':
+      return `Zeta thought: ${d.summary ?? ''}`;
+    case 'zeta.outreach':
+      return `Zeta outreach: ${d.recipient ?? d.channel ?? ''}`;
+    case 'functions.build.start':
+      return `Function build started: ${d.name ?? ''}`;
+    case 'memory.insight':
+      return `Memory updated: ${d.summary ?? ''}`;
+    default:
+      return row.message || row.event;
   }
 }
 
@@ -126,7 +158,7 @@ function isOnboardingRelevant(row: LogRow): boolean {
   return provider === 'telegram' && (status === 'connected' || status === 'ok' || status === 'success');
 }
 
-/* ---------- synthetic task logs ---------- */
+/** ---------- synthetic task logs ---------- */
 function toCreateLog(t: TaskRow): LogRow {
   return {
     id: `task-create:${t.id}:${t.created_at}`,
@@ -156,13 +188,12 @@ function toUpdateLog(t: TaskRow): LogRow {
     created_at: ts,
   };
 }
-/* NEW: synthetic delete logs */
 function toTaskDeleteLog(oldRow: any): LogRow {
   const now = new Date().toISOString();
   return {
     id: `task-delete:${oldRow.id}:${now}`,
     project_id: oldRow.project_id,
-    actor: (oldRow.task_type === 'user') ? 'user' : 'zeta',
+    actor: oldRow.task_type === 'user' ? 'user' : 'zeta',
     event: 'task.delete',
     message: null,
     details: { task_id: oldRow.id, title: oldRow.title ?? '', type: oldRow.task_type ?? 'zeta' },
@@ -175,7 +206,7 @@ function toGoalDeleteLog(oldRow: any): LogRow {
   return {
     id: `goal-delete:${oldRow.id}:${now}`,
     project_id: oldRow.project_id,
-    actor: (createdBy === 'zeta' || createdBy === 'assistant') ? 'zeta' : 'user',
+    actor: createdBy === 'zeta' || createdBy === 'assistant' ? 'zeta' : 'user',
     event: 'goal.delete',
     message: null,
     details: { goal_id: oldRow.id, title: oldRow.title ?? oldRow.name ?? '', status: oldRow.status ?? null },
@@ -189,7 +220,7 @@ function toCalendarDeleteLog(oldRow: any): LogRow {
   return {
     id: `calendar-delete:${oldRow.id}:${now}`,
     project_id: oldRow.project_id,
-    actor: (createdBy === 'zeta' || createdBy === 'assistant') ? 'zeta' : 'user',
+    actor: createdBy === 'zeta' || createdBy === 'assistant' ? 'zeta' : 'user',
     event: 'calendar.delete',
     message: null,
     details: { calendar_id: oldRow.id, title: oldRow.title ?? oldRow.name ?? '', when },
@@ -197,9 +228,10 @@ function toCalendarDeleteLog(oldRow: any): LogRow {
   };
 }
 
-/* de-dupe (expanded key to handle goal/calendar ids) */
+/** de-dupe */
 function dedupeRows(rows: LogRow[]) {
-  const seen = new Set<string>(); const out: LogRow[] = [];
+  const seen = new Set<string>();
+  const out: LogRow[] = [];
   for (const r of rows) {
     const d: any = r.details || {};
     const entityId = d.task_id || d.goal_id || d.calendar_id || '';
@@ -215,32 +247,44 @@ function dedupeRows(rows: LogRow[]) {
 function xpFor(row: LogRow): number | null {
   const d = row.details || {};
   switch (row.event) {
-    case 'task.create': return XP_WEIGHTS.tasks_zeta_created;
-    case 'task.complete': return d.type === 'user' ? XP_WEIGHTS.tasks_user_complete : XP_WEIGHTS.tasks_zeta_complete;
+    case 'task.create':
+      return XP_WEIGHTS.tasks_zeta_created;
+    case 'task.complete':
+      return d.type === 'user' ? XP_WEIGHTS.tasks_user_complete : XP_WEIGHTS.tasks_zeta_complete;
     case 'notification.send':
-    case 'zeta.outreach': return XP_WEIGHTS.outreach_messages;
-    case 'zeta.thought': return XP_WEIGHTS.zeta_thoughts;
-    case 'file.upload': return XP_WEIGHTS.files_uploaded;
-    case 'file.generate': return XP_WEIGHTS.files_generated;
+    case 'zeta.outreach':
+      return XP_WEIGHTS.outreach_messages;
+    case 'zeta.thought':
+      return XP_WEIGHTS.zeta_thoughts;
+    case 'file.upload':
+      return XP_WEIGHTS.files_uploaded;
+    case 'file.generate':
+      return XP_WEIGHTS.files_generated;
     case 'calendar.event':
     case 'calendar.reminder':
-    case 'calendar.note': return XP_WEIGHTS.calendar_items;
+    case 'calendar.note':
+      return XP_WEIGHTS.calendar_items;
     case 'project.goals.short.update':
-    case 'project.goals.long.update': return XP_WEIGHTS.goals_created;
-    case 'functions.build.start': return XP_WEIGHTS.functions_built;
-    // deletions: neutral XP
+    case 'project.goals.long.update':
+      return XP_WEIGHTS.goals_created;
+    case 'functions.build.start':
+      return XP_WEIGHTS.functions_built;
     case 'task.delete':
     case 'goal.delete':
     case 'calendar.delete':
       return null;
-    default: return null;
+    default:
+      return null;
   }
 }
 
 export default function LogsPanel({
   fontSize,
   projectId,
-}: { fontSize: 'sm' | 'base' | 'lg'; projectId: string }) {
+}: {
+  fontSize: 'sm' | 'base' | 'lg';
+  projectId: string;
+}) {
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -256,22 +300,31 @@ export default function LogsPanel({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ projectId }),
         });
-      } catch (e) { console.error('onboarding sync failed', e); }
-    }, 400)
+      } catch (e) {
+        console.error('onboarding sync failed', e);
+      }
+    }, 400),
   );
 
-  // initial load
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      setLoading(true); setErr(null);
+      setLoading(true);
+      setErr(null);
       try {
         const [{ data: sys, error: sysErr }, { data: tasks, error: tErr }] = await Promise.all([
-          supabase.from('system_logs').select('*').eq('project_id', projectId)
-            .order('created_at', { ascending: false }).limit(PAGE_SIZE),
-          supabase.from('task_items')
+          supabase
+            .from('system_logs')
+            .select('*')
+            .eq('project_id', projectId)
+            .order('created_at', { ascending: false })
+            .limit(PAGE_SIZE),
+          supabase
+            .from('task_items')
             .select('id,project_id,task_type,title,status,created_at,updated_at')
-            .eq('project_id', projectId).order('created_at', { ascending: false }).limit(20),
+            .eq('project_id', projectId)
+            .order('created_at', { ascending: false })
+            .limit(20),
         ]);
         if (sysErr) throw sysErr;
         if (tErr) throw tErr;
@@ -285,8 +338,8 @@ export default function LogsPanel({
           if (t.updated_at && t.updated_at !== t.created_at) synthetic.push(toUpdateLog(t));
         }
 
-        const merged = dedupeRows([...sysRows, ...synthetic]).sort(
-          (a, b) => (a.created_at < b.created_at ? 1 : -1)
+        const merged = dedupeRows([...sysRows, ...synthetic]).sort((a, b) =>
+          a.created_at < b.created_at ? 1 : -1,
         );
 
         if (!cancelled) {
@@ -301,52 +354,62 @@ export default function LogsPanel({
       }
     };
     if (projectId) run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
-  // realtime
   useEffect(() => {
     if (!projectId) return;
 
     const logsChannel = supabase
       .channel(`logs_${projectId}`)
-      .on('postgres_changes',
+      .on(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'system_logs', filter: `project_id=eq.${projectId}` },
         (payload) => {
           const newLog = payload.new as LogRow;
           setRows((curr) => dedupeRows([newLog, ...curr]));
           if (isOnboardingRelevant(newLog)) syncRef.current();
-        })
+        },
+      )
       .subscribe();
 
     const tasksChannel = supabase
       .channel(`tasks_${projectId}`)
-      .on('postgres_changes',
+      .on(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'task_items', filter: `project_id=eq.${projectId}` },
-        (payload) => setRows((curr) => dedupeRows([toCreateLog(payload.new as any), ...curr])))
-      .on('postgres_changes',
+        (payload) => setRows((curr) => dedupeRows([toCreateLog(payload.new as any), ...curr])),
+      )
+      .on(
+        'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'task_items', filter: `project_id=eq.${projectId}` },
-        (payload) => setRows((curr) => dedupeRows([toUpdateLog(payload.new as any), ...curr])))
-      // NEW: deletions
-      .on('postgres_changes',
+        (payload) => setRows((curr) => dedupeRows([toUpdateLog(payload.new as any), ...curr])),
+      )
+      .on(
+        'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'task_items', filter: `project_id=eq.${projectId}` },
-        (payload) => setRows((curr) => dedupeRows([toTaskDeleteLog(payload.old as any), ...curr])))
+        (payload) => setRows((curr) => dedupeRows([toTaskDeleteLog(payload.old as any), ...curr])),
+      )
       .subscribe();
 
-    // NEW: goal deletions
     const goalsChannel = supabase
       .channel(`goals_${projectId}`)
-      .on('postgres_changes',
+      .on(
+        'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'goals', filter: `project_id=eq.${projectId}` },
-        (payload) => setRows((curr) => dedupeRows([toGoalDeleteLog(payload.old as any), ...curr])))
+        (payload) => setRows((curr) => dedupeRows([toGoalDeleteLog(payload.old as any), ...curr])),
+      )
       .subscribe();
 
-    // NEW: calendar deletions
     const calChannel = supabase
       .channel(`calendar_${projectId}`)
-      .on('postgres_changes',
+      .on(
+        'postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'calendar_items', filter: `project_id=eq.${projectId}` },
-        (payload) => setRows((curr) => dedupeRows([toCalendarDeleteLog(payload.old as any), ...curr])))
+        (payload) => setRows((curr) => dedupeRows([toCalendarDeleteLog(payload.old as any), ...curr])),
+      )
       .subscribe();
 
     return () => {
@@ -357,7 +420,6 @@ export default function LogsPanel({
     };
   }, [projectId]);
 
-  // pagination for system_logs
   const loadMore = async () => {
     if (!projectId || !oldest.current) return;
     const { data, error } = await supabase
@@ -368,9 +430,12 @@ export default function LogsPanel({
       .order('created_at', { ascending: false })
       .limit(PAGE_SIZE);
     if (error) return;
-    if (!data?.length) { oldest.current = null; return; }
+    if (!data?.length) {
+      oldest.current = null;
+      return;
+    }
     setRows((r) =>
-      dedupeRows([...r, ...(data as LogRow[])]).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      dedupeRows([...r, ...(data as LogRow[])]).sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
     );
     oldest.current = data[data.length - 1].created_at;
   };
@@ -429,46 +494,59 @@ export default function LogsPanel({
                 key={row.id}
                 className="rounded-lg bg-blue-900/50 border border-yellow-400/70 ring-1 ring-yellow-300/30 shadow hover:shadow-md transition-shadow"
               >
-                {/* COMPACT SINGLE-LINE ROW */}
-                <div className="flex items-center gap-3 px-3 h-10">
-                  <span className="text-base leading-none">{icon}</span>
+                {/* GRID: icon | message (2 lines) | right chips (stacked) */}
+                <div className="grid grid-cols-[24px,1fr,220px] gap-3 px-3 py-2.5">
+                  {/* icon */}
+                  <div className="flex items-start justify-center pt-0.5 text-base leading-none">{icon}</div>
 
-                  {/* message: single line + ellipsis; cuts off near right chips */}
-                  <div className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis text-blue-50">
-                    {msg}
-                    {link ? (
-                      <a
-                        href={link as string}
-                        className="underline text-yellow-300 hover:text-yellow-200 ml-2"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        open
-                      </a>
-                    ) : null}
+                  {/* message + optional link (allow 2 lines) */}
+                  <div className="min-w-0">
+                    <div className="text-blue-50 whitespace-normal line-clamp-2">
+                      {msg}
+                      {link ? (
+                        <a
+                          href={link as string}
+                          className="underline text-yellow-300 hover:text-yellow-200 ml-2"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          open
+                        </a>
+                      ) : null}
+                    </div>
+                    {/* subtle event tag for context */}
+                    <div className="text-[11px] text-blue-200/70 mt-0.5">{row.event}</div>
                   </div>
 
-                  {/* XP */}
-                  {typeof xp === 'number' && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-yellow-300/70 bg-yellow-200/20 text-yellow-200 shrink-0">
-                      ⚡ +{xp} XP
+                  {/* right column: perfectly aligned chips */}
+                  <div className="flex items-center justify-end gap-2">
+                    {/* date */}
+                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-blue-300/60 bg-blue-200/15 text-blue-100 shrink-0 text-right">
+                      {formatDate(row.created_at)}
                     </span>
-                  )}
 
-                  {/* actor */}
-                  <span
-                    className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0
-                      ${row.actor === 'user'
-                        ? 'border-amber-300/70 text-amber-200'
-                        : 'border-blue-300/70 text-blue-200'}`}
-                  >
-                    {row.actor.toUpperCase()}
-                  </span>
+                    {/* time */}
+                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-blue-300/60 bg-blue-200/10 text-blue-100 shrink-0 text-right">
+                      {formatTime(row.created_at)}
+                    </span>
 
-                  {/* time */}
-                  <span className="opacity-80 text-blue-200 text-xs shrink-0">
-                    {formatTime(row.created_at)}
-                  </span>
+                    {/* XP */}
+                    {typeof xp === 'number' && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full border border-yellow-300/70 bg-yellow-200/20 text-yellow-200 shrink-0 text-right">
+                        ⚡ +{xp} XP
+                      </span>
+                    )}
+
+                    {/* actor */}
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 text-right
+                        ${row.actor === 'user'
+                          ? 'border-amber-300/70 text-amber-200'
+                          : 'border-blue-300/70 text-blue-200'}`}
+                    >
+                      {row.actor.toUpperCase()}
+                    </span>
+                  </div>
                 </div>
               </div>
             );

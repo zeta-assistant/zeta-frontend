@@ -142,7 +142,7 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
   return (
     <div className="flex flex-col items-center pt-[230px] gap-4 pr-1">
       {/* ⚡ Zeta XP & Level (compact) */}
-      <div className={`${PANEL_W} bg-blue-950 border border-blue-700 rounded-2xl p-3 shadow`}>
+      <div className={`${PANEL_W} shrink-0 bg-blue-950 border border-blue-700 rounded-2xl p-3 shadow`}>
         <div className="flex items-center justify-between">
           {/* Left: "Zeta XP ⚡" with title badge right next to it */}
           <div className="flex items-center gap-2">
@@ -176,17 +176,17 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
       </div>
 
       {/* 🧠 Zeta’s Thoughts */}
-      <div className={`${PANEL_W} bg-indigo-100 text-indigo-900 px-4 py-3 rounded-2xl shadow border border-indigo-300 text-sm`}>
+      <div className={`${PANEL_W} shrink-0 bg-indigo-100 text-indigo-900 px-4 py-3 rounded-2xl shadow border border-indigo-300 text-sm`}>
         <p className="font-bold mb-2">🧠 Zeta’s Thoughts</p>
         <p className="text-sm whitespace-pre-wrap">{thoughtText}</p>
       </div>
 
       {/* 📝 Daily Tasks */}
-      <div className={`${PANEL_W}`}>
-        <div className="min-h-[220px] bg-yellow-50 border border-yellow-200 rounded-2xl p-3 shadow">
-          <DashboardTasks projectId={projectId} />
-        </div>
-      </div>
+<div className={`${PANEL_W} flex-1 self-stretch min-h-0`}>
+  <div className="h-full bg-yellow-50 border border-yellow-200 rounded-2xl p-3 shadow overflow-auto">
+    <DashboardTasks projectId={projectId} />
+  </div>
+</div>
 
       {/* (Optional) Functions panel or other modules */}
       {/* <FunctionsPanel projectId={projectId} /> */}

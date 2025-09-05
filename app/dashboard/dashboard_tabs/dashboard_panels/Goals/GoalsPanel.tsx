@@ -1,6 +1,6 @@
 'use client';
 
-import React, { JSX, useEffect, useState } from 'react';
+import React, { JSX, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import dayjs from 'dayjs';
 
@@ -15,6 +15,65 @@ const MAX_LONG = 3;
 
 const VISION_MIN = 1;
 const VISION_MAX = 50;
+
+/** ─────────────────────────────────────────────────────────
+ * Auto-resizing textarea (no scrollbar, no resize handle)
+ * ───────────────────────────────────────────────────────── */
+function AutoTextarea({
+  value,
+  onChange,
+  placeholder,
+  className = '',
+  minRows = 1,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  placeholder?: string;
+  className?: string;
+  minRows?: number;
+  disabled?: boolean;
+}) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  const resize = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
+  useEffect(() => {
+    resize();
+  }, [value]);
+
+  useEffect(() => {
+    // initial mount
+    resize();
+  }, []);
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => {
+        onChange(e);
+        // next tick to allow value to update
+        requestAnimationFrame(resize);
+      }}
+      rows={minRows}
+      disabled={disabled}
+      className={[
+        // kill resize handle + scrollbars
+        'resize-none overflow-hidden',
+        // preserve your styling
+        className,
+      ].join(' ')}
+      style={{ height: 'auto' }}
+    />
+  );
+}
 
 export default function GoalsPanel({
   fontSize,
@@ -41,6 +100,13 @@ export default function GoalsPanel({
   const [selectedLongIds, setSelectedLongIds] = useState<Set<string>>(new Set());
   const [zetaLevel, setZetaLevel] = useState<string>('');
   const [reportNotes, setReportNotes] = useState<string>('');
+
+  // Portfolio preview modal (after save)
+  const [portfolioPreview, setPortfolioPreview] = useState<{
+    title: string;
+    text: string;
+    url: string | null;
+  } | null>(null);
 
   const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -173,9 +239,8 @@ export default function GoalsPanel({
       )
       .subscribe();
 
-    // ❗️Cleanup must NOT return a Promise:
     return () => {
-      void supabase.removeChannel(ch); // swallow the promise
+      void supabase.removeChannel(ch);
     };
   }, [projectId]);
 
@@ -255,19 +320,22 @@ export default function GoalsPanel({
     }
   }
 
-  async function deleteGoal(goalId: string, type: 'short' | 'long') {
-    const backupST = shortTermGoals;
-    const backupLT = longTermGoals;
-    if (type === 'short') setShortTermGoals((p) => p.filter((g) => g.id !== goalId));
-    else setLongTermGoals((p) => p.filter((g) => g.id !== goalId));
-
+  async function deleteGoal(goalId: string | undefined, type: 'short' | 'long') {
+    if (!goalId || typeof goalId !== 'string') {
+      console.error('❌ Invalid goalId passed to deleteGoal:', goalId);
+      alert('Error: Invalid goal ID.');
+      return;
+    }
     if (goalId.startsWith('temp-')) return;
+
     try {
-      const { error } = await supabase.from('goals').delete().eq('id', goalId).eq('project_id', projectId);
+      const { error } = await supabase.from('goals').delete().eq('id', goalId);
       if (error) throw error;
+
+      if (type === 'short') setShortTermGoals((p) => p.filter((g) => g.id !== goalId));
+      else setLongTermGoals((p) => p.filter((g) => g.id !== goalId));
     } catch (e) {
-      if (type === 'short') setShortTermGoals(backupST);
-      else setLongTermGoals(backupLT);
+      console.error('❌ deleteGoal error:', e);
       alert('Failed to delete goal.');
     }
   }
@@ -306,12 +374,12 @@ export default function GoalsPanel({
           key={goal.id}
           className="flex justify-between items-start bg-blue-900/20 border border-blue-700 rounded-md px-3 py-2"
         >
-          <textarea
-            className="flex-1 bg-transparent border-none text-white placeholder:text-white/60 resize-none"
+          <AutoTextarea
             value={goal.description}
             onChange={(e) => updateGoalDescription(goal.id, e.target.value, type)}
-            rows={1}
+            minRows={1}
             placeholder={type === 'short' ? 'New short-term goal...' : 'New long-term goal...'}
+            className="flex-1 bg-transparent border-none text-white placeholder:text-white/60"
           />
           <button
             onClick={() => deleteGoal(goal.id, type)}
@@ -332,8 +400,7 @@ export default function GoalsPanel({
           key={tempId}
           className="flex justify-between items-start bg-blue-900/10 border border-dashed border-blue-700 rounded-md px-3 py-2"
         >
-          <textarea
-            className="flex-1 bg-transparent border-none text-white placeholder:text-white/60 italic resize-none"
+          <AutoTextarea
             value=""
             onChange={(e) => {
               const desc = e.target.value;
@@ -346,8 +413,9 @@ export default function GoalsPanel({
               }
               setNewGoalCounter((c) => c + 1);
             }}
-            rows={1}
+            minRows={1}
             placeholder={type === 'short' ? 'Add new short-term goal...' : 'Add new long-term goal...'}
+            className="flex-1 bg-transparent border-none text-white placeholder:text-white/60 italic"
           />
           <span className="ml-3 text-white/70 select-none">＋</span>
         </li>,
@@ -368,86 +436,198 @@ export default function GoalsPanel({
   const trimmedLen = (vision ?? '').trim().length;
   const overLimit = trimmedLen > VISION_MAX;
 
-  // --- Report (Portfolio) generation ---
+  // --- Helpers used by portfolio generation ---
+
+  // Ensure a tracker row exists for a goal; return tracker object
+  async function ensureTracker(goalId: string): Promise<{ id: string; created_at: string; completed_at: string | null }> {
+    // Try fetch
+    const { data, error } = await supabase
+      .from('goal_trackers')
+      .select('id, created_at, completed_at')
+      .eq('project_id', projectId)
+      .eq('goal_id', goalId)
+      .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') throw error; // unexpected error
+
+    if (data?.id) return { id: data.id, created_at: data.created_at as string, completed_at: (data.completed_at as string | null) ?? null };
+
+    // Insert if missing
+    const ins = await supabase
+      .from('goal_trackers')
+      .insert({ project_id: projectId, goal_id: goalId, status: 'active' })
+      .select('id, created_at, completed_at')
+      .single();
+
+    if (ins.error) throw ins.error;
+    return {
+      id: ins.data.id as string,
+      created_at: ins.data.created_at as string,
+      completed_at: (ins.data.completed_at as string | null) ?? null,
+    };
+  }
+
+  // Aggregate usage from daily_feature_usage_checker for a date window
+  async function aggregateUsage(startISO: string, endISO: string) {
+    // Pull daily rows in range
+    const { data, error } = await supabase
+      .from('daily_feature_usage_checker')
+      .select('usage_date, sys_events_total, user_inputs_total, top_events, feature_counts')
+      .eq('project_id', projectId)
+      .gte('usage_date', dayjs(startISO).format('YYYY-MM-DD'))
+      .lte('usage_date', dayjs(endISO).format('YYYY-MM-DD'))
+      .order('usage_date', { ascending: true });
+
+    if (error) throw error;
+
+    // Aggregate totals
+    const byEvent: Record<string, number> = {};
+    let eventsTotal = 0;
+    let userInputsTotal = 0;
+    const activeDates = new Set<string>();
+
+    for (const r of data ?? []) {
+      const sys = Number(r.sys_events_total || 0);
+      const usr = Number(r.user_inputs_total || 0);
+      eventsTotal += sys;
+      userInputsTotal += usr;
+      if (sys || usr) activeDates.add(r.usage_date as string);
+
+      // feature_counts is expected as jsonb like {"calendar":1,"chat":2}
+      try {
+        const fc = typeof r.feature_counts === 'string' ? JSON.parse(r.feature_counts) : (r.feature_counts || {});
+        for (const k of Object.keys(fc)) {
+          byEvent[k] = (byEvent[k] || 0) + Number(fc[k] || 0);
+        }
+      } catch {
+        // ignore bad json
+      }
+    }
+
+    const daysActive = dayjs(endISO).diff(dayjs(startISO), 'day') + 1;
+    return {
+      start_date: dayjs(startISO).format('YYYY-MM-DD'),
+      end_date: dayjs(endISO).format('YYYY-MM-DD'),
+      days_active: daysActive,
+      active_days_with_usage: activeDates.size,
+      events_total: eventsTotal,
+      user_inputs_total: userInputsTotal,
+      by_event: byEvent,
+    };
+  }
+
+  // --- Report (Portfolio) generation + preview modal opening ---
   async function generateAndSavePortfolio() {
     setReportSaving(true);
+
+    const sanitize = (s: string) =>
+      (s || 'goal-portfolio')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, 80)
+        .replace(/[^\w\-().\s]/g, '')
+        .replace(/\s/g, '_');
+
     try {
       const selectedShort = shortTermGoals.filter((g) => selectedShortIds.has(g.id));
-      const selectedLong  = longTermGoals.filter((g) => selectedLongIds.has(g.id));
+      const selectedLong = longTermGoals.filter((g) => selectedLongIds.has(g.id));
 
       const now = dayjs();
       const title = `Goal Completion Portfolio — ${now.format('YYYY-MM-DD HH.mm')}`;
 
-      const mdLines: string[] = [];
-      mdLines.push(`# ${title}`);
-      mdLines.push('');
-      mdLines.push(`**Project ID:** \`${projectId}\``);
-      if (zetaLevel.trim()) mdLines.push(`**Zeta Level:** ${zetaLevel.trim()}`);
-      if (reportNotes.trim()) mdLines.push(`**Notes:** ${reportNotes.trim()}`);
-      mdLines.push(`**Generated:** ${now.format('MMM D, YYYY • h:mm A')}`);
-      mdLines.push('');
+      const md: string[] = [];
+      md.push(`# ${title}`, '');
+      md.push(`**Project ID:** \`${projectId}\``);
+      if (zetaLevel.trim()) md.push(`**Zeta Level:** ${zetaLevel.trim()}`);
+      if (reportNotes.trim()) md.push(`**Notes:** ${reportNotes.trim()}`);
+      md.push(`**Generated:** ${now.format('MMM D, YYYY • h:mm A')}`, '');
 
-      mdLines.push('## Completed Short-Term Goals');
-      if (selectedShort.length === 0) {
-        mdLines.push('_None selected._');
-      } else {
-        selectedShort.forEach((g) => {
-          mdLines.push(`- ${g.description}${g.created_at ? `  \n  _Created: ${dayjs(g.created_at).format('MMM D, YYYY h:mm A')}_` : ''}`);
-        });
+      async function section(header: string, goals: Goal[]) {
+        md.push(`## ${header}`);
+        if (goals.length === 0) {
+          md.push('_None selected._', '');
+          return;
+        }
+        for (const g of goals) {
+          md.push(`- ${g.description}`);
+          if (g.created_at) md.push(`  - _Created: ${dayjs(g.created_at).format('MMM D, YYYY h:mm A')}_`);
+
+          // Ensure tracker and compute stats (using daily_feature_usage_checker)
+          try {
+            const tr = await ensureTracker(g.id);
+            const startISO = tr.created_at;
+            const endISO = tr.completed_at ?? now.toISOString();
+
+            const stats = await aggregateUsage(startISO, endISO);
+
+            md.push(`  - **Usage window:** ${stats.start_date} → ${stats.end_date}`);
+            md.push(`  - **Days active:** ${stats.days_active}`);
+            md.push(`  - **Active days with usage logged:** ${stats.active_days_with_usage}`);
+            md.push(`  - **System events total:** ${stats.events_total}`);
+            md.push(`  - **User inputs total:** ${stats.user_inputs_total}`);
+
+            const byKeys = Object.keys(stats.by_event || {});
+            if (byKeys.length) {
+              md.push('  - **By feature/event:**');
+              for (const k of byKeys.sort()) {
+                md.push(`    - ${k}: ${stats.by_event[k]}`);
+              }
+            }
+          } catch (e) {
+            console.warn('Stats aggregation skipped for goal:', g.id, e);
+          }
+
+          md.push('');
+        }
       }
-      mdLines.push('');
-      mdLines.push('## Completed Long-Term Goals');
-      if (selectedLong.length === 0) {
-        mdLines.push('_None selected._');
-      } else {
-        selectedLong.forEach((g) => {
-          mdLines.push(`- ${g.description}${g.created_at ? `  \n  _Created: ${dayjs(g.created_at).format('MMM D, YYYY h:mm A')}_` : ''}`);
-        });
-      }
-      mdLines.push('');
 
-      const md = mdLines.join('\n');
+      await section('Completed Short-Term Goals', selectedShort);
+      await section('Completed Long-Term Goals', selectedLong);
 
-      const fileName = `goal-portfolio-${projectId}-${Date.now()}.md`;
-      const filePath = `${projectId}/${fileName}`;
-      const fileBlob = new Blob([md], { type: 'text/markdown' });
+      const fileText = md.join('\n');
 
-      const { error: upErr } = await supabase.storage.from('documents').upload(filePath, fileBlob, {
-        cacheControl: '3600',
-        upsert: false,
-        contentType: 'text/markdown',
-      });
-      if (upErr) throw upErr;
+      // Save to storage + DB so it appears in Files → Generated
+      const BUCKET = 'project-docs';
+      const fileName = `${sanitize(`goal-portfolio-${now.format('YYYY-MM-DD_HH.mm')}`)}.md`;
+      const storagePath = `${projectId}/generated/${fileName}`;
 
-      const { data: pub } = supabase.storage.from('documents').getPublicUrl(filePath);
-      const fileUrl = pub?.publicUrl;
-      if (!fileUrl) throw new Error('Failed to get public URL');
+      const up = await supabase.storage.from(BUCKET).upload(
+        storagePath,
+        new Blob([fileText], { type: 'text/markdown' }),
+        { cacheControl: '3600', upsert: false, contentType: 'text/markdown' }
+      );
+      if (up.error) throw up.error;
 
-      await supabase.from('documents').insert({
+      const pub = supabase.storage.from(BUCKET).getPublicUrl(storagePath).data?.publicUrl ?? null;
+
+      const ins = await supabase.from('documents').insert({
         project_id: projectId,
         file_name: fileName,
-        file_url: fileUrl,
+        file_url: pub,
+        created_by: 'zeta',
       });
+      if (ins.error) throw ins.error;
 
+      // Reset selector modal + open preview
       setReportOpen(false);
       setSelectedShortIds(new Set());
       setSelectedLongIds(new Set());
       setZetaLevel('');
       setReportNotes('');
 
-      alert('Portfolio saved to Files!');
-    } catch (e) {
+      setPortfolioPreview({ title: fileName, text: fileText, url: pub });
+    } catch (e: any) {
       console.error('Portfolio generation failed:', e);
-      alert('Failed to generate portfolio.');
+      alert(`Failed to generate portfolio: ${e?.message ?? e}`);
     } finally {
       setReportSaving(false);
     }
   }
 
   return (
-    <div className={`p-5 text-${fontSize} text-white space-y-5`}>
+    <div className={`text-${fontSize} text-white`}>
       {/* Vision */}
-      <div className="pt-2">
+      <div className="p-5">
         <h3 className="text-base font-semibold text-white mb-2">🧭 Project Vision</h3>
         {!visionEditing ? (
           <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4 flex justify-between items-start shadow">
@@ -461,131 +641,135 @@ export default function GoalsPanel({
             </button>
           </div>
         ) : (
-          <div>
-            <textarea
-              className={`w-full p-2 rounded-md bg-blue-900/40 border ${overLimit ? 'border-red-500' : 'border-blue-700'} text-white placeholder:text-white/60`}
-              rows={4}
+          <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4">
+            <AutoTextarea
               value={vision}
               onChange={(e) => setVision(e.target.value)}
+              minRows={3}
               disabled={visionSaving}
               placeholder="Describe the project vision..."
+              className={`w-full p-2 rounded-md bg-blue-900/40 border ${overLimit ? 'border-red-500' : 'border-blue-700'} text-white placeholder:text-white/60`}
             />
             <div className="mt-1 flex items-center justify-between">
               <span className={`text-xs ${overLimit ? 'text-red-400' : 'text-white/70'}`}>
                 {trimmedLen}/{VISION_MAX}
               </span>
+              <button
+                onClick={saveVision}
+                disabled={visionSaving || trimmedLen < VISION_MIN}
+                className={`px-4 py-1 rounded text-white ${
+                  visionSaving || trimmedLen < VISION_MIN
+                    ? 'bg-blue-700/40 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-500'
+                }`}
+              >
+                {visionSaving ? 'Saving...' : 'Save Vision'}
+              </button>
             </div>
-            <button
-              onClick={saveVision}
-              disabled={visionSaving || trimmedLen < VISION_MIN}
-              className={`mt-2 px-4 py-1 rounded text-white ${
-                visionSaving || trimmedLen < VISION_MIN
-                  ? 'bg-blue-700/40 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-500'
-              }`}
-            >
-              {visionSaving ? 'Saving...' : 'Save Vision'}
-            </button>
           </div>
         )}
       </div>
 
-      {/* Short-term */}
-      <div>
-        <h3 className="text-base font-semibold text-white mb-1">📌 Short-Term Goals</h3>
-        {/* Removed “Maximum 5 goals” line */}
-        {hasExtraShort && (
-          <p className="text-xs text-amber-300 mb-2">
-            You have more than {MAX_SHORT} short-term goals stored. Saving edits only affects the first {MAX_SHORT}.
-          </p>
-        )}
-        <ul className="space-y-2">
-          {shortRealVisible.map((goal) => (
-            <li
-              key={goal.id}
-              className="flex justify-between items-start bg-blue-900/20 border border-blue-700 rounded-md px-3 py-2"
-            >
-              <div className="flex-1">
-                <textarea
-                  className="w-full bg-transparent border-none text-white placeholder:text-white/60 resize-none"
-                  value={goal.description}
-                  onChange={(e) => updateGoalDescription(goal.id, e.target.value, 'short')}
-                  rows={1}
-                />
-                <div className="mt-0.5">
-                  <CreatedMeta ts={goal.created_at} />
-                </div>
-              </div>
-              <button
-                onClick={() => deleteGoal(goal.id, 'short')}
-                className="text-red-400 hover:text-red-500 font-bold px-2"
-                title="Delete goal"
-                type="button"
+      {/* Two-column goals layout */}
+      <div className="px-5 pb-24 grid grid-cols-1 md:grid-cols-2 gap-5">
+        {/* Short-term Column */}
+        <section className="space-y-2">
+          <h3 className="text-base font-semibold text-white">📌 Short-Term Goals</h3>
+          {hasExtraShort && (
+            <p className="text-xs text-amber-300">
+              You have more than {MAX_SHORT} short-term goals stored. Saving edits only affects the first {MAX_SHORT}.
+            </p>
+          )}
+          <ul className="space-y-2">
+            {shortRealVisible.map((goal) => (
+              <li
+                key={goal.id}
+                className="flex justify-between items-start bg-blue-900/20 border border-blue-700 rounded-md px-3 py-2"
               >
-                ✖️
-              </button>
-            </li>
-          ))}
-          {renderEditableEmptySlots(MAX_SHORT, 'short')}
-        </ul>
+                <div className="flex-1">
+                  <AutoTextarea
+                    value={goal.description}
+                    onChange={(e) => updateGoalDescription(goal.id, e.target.value, 'short')}
+                    minRows={1}
+                    className="w-full bg-transparent border-none text-white placeholder:text-white/60"
+                  />
+                  <div className="mt-0.5">
+                    <CreatedMeta ts={goal.created_at} />
+                  </div>
+                </div>
+                <button
+                  onClick={() => deleteGoal(goal.id, 'short')}
+                  className="text-red-400 hover:text-red-500 font-bold px-2"
+                  title="Delete goal"
+                  type="button"
+                >
+                  ✖️
+                </button>
+              </li>
+            ))}
+            {renderEditableEmptySlots(MAX_SHORT, 'short')}
+          </ul>
+        </section>
+
+        {/* Long-term Column */}
+        <section className="space-y-2">
+          <h3 className="text-base font-semibold text-white">📈 Long-Term Goals</h3>
+          <ul className="space-y-2">
+            {Array.from(
+              new Map(
+                longTermGoals
+                  .filter((g) => !g.id.startsWith('temp-'))
+                  .map((g) => [g.description.trim().toLowerCase(), g]),
+              ).values(),
+            ).map((goal) => (
+              <li
+                key={goal.id}
+                className="flex justify-between items-start bg-blue-900/20 border border-blue-700 rounded-md px-3 py-2"
+              >
+                <div className="flex-1">
+                  <AutoTextarea
+                    value={goal.description}
+                    onChange={(e) => updateGoalDescription(goal.id, e.target.value, 'long')}
+                    minRows={1}
+                    className="w-full bg-transparent border-none text-white placeholder:text-white/60"
+                  />
+                  <div className="mt-0.5">
+                    <CreatedMeta ts={goal.created_at} />
+                  </div>
+                </div>
+                <button
+                  onClick={() => deleteGoal(goal.id, 'long')}
+                  className="text-red-400 hover:text-red-500 font-bold px-2"
+                  title="Delete goal"
+                  type="button"
+                >
+                  ✖️
+                </button>
+              </li>
+            ))}
+            {renderEditableEmptySlots(MAX_LONG, 'long')}
+          </ul>
+        </section>
       </div>
 
-      {/* Long-term */}
-      <div>
-        <h3 className="text-base font-semibold text-white mt-4 mb-2">📈 Long-Term Goals</h3>
-        <ul className="space-y-2">
-          {Array.from(
-            new Map(
-              longTermGoals
-                .filter((g) => !g.id.startsWith('temp-'))
-                .map((g) => [g.description.trim().toLowerCase(), g]),
-            ).values(),
-          ).map((goal) => (
-            <li
-              key={goal.id}
-              className="flex justify-between items-start bg-blue-900/20 border border-blue-700 rounded-md px-3 py-2"
-            >
-              <div className="flex-1">
-                <textarea
-                  className="w-full bg-transparent border-none text-white placeholder:text-white/60 resize-none"
-                  value={goal.description}
-                  onChange={(e) => updateGoalDescription(goal.id, e.target.value, 'long')}
-                  rows={1}
-                />
-                <div className="mt-0.5">
-                  <CreatedMeta ts={goal.created_at} />
-                </div>
-              </div>
-              <button
-                onClick={() => deleteGoal(goal.id, 'long')}
-                className="text-red-400 hover:text-red-500 font-bold px-2"
-                title="Delete goal"
-                type="button"
-              >
-                ✖️
-              </button>
-            </li>
-          ))}
-          {renderEditableEmptySlots(MAX_LONG, 'long')}
-        </ul>
-      </div>
+      {/* Sticky action bar */}
+      <div className="sticky bottom-0 z-40 w-full bg-gradient-to-t from-blue-900/80 to-blue-900/0 backdrop-blur px-5 py-3">
+        <div className="flex flex-wrap gap-3">
+          <button
+            disabled={savingGoals}
+            onClick={saveGoals}
+            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded text-white disabled:opacity-60"
+          >
+            {savingGoals ? 'Saving Goals...' : 'Save All Goals'}
+          </button>
 
-      {/* Actions */}
-      <div className="pt-2 flex flex-wrap gap-3">
-        <button
-          disabled={savingGoals}
-          onClick={saveGoals}
-          className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded text-white"
-        >
-          {savingGoals ? 'Saving Goals...' : 'Save All Goals'}
-        </button>
-
-        <button
-          onClick={() => setReportOpen(true)}
-          className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-white"
-        >
-          Report Completed Goal
-        </button>
+          <button
+            onClick={() => setReportOpen(true)}
+            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-white"
+          >
+            Report Completed Goal
+          </button>
+        </div>
       </div>
 
       {/* Report Modal */}
@@ -702,6 +886,43 @@ export default function GoalsPanel({
               >
                 {reportSaving ? 'Saving…' : 'Generate & Save Portfolio'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Portfolio Preview Modal */}
+      {portfolioPreview && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-blue-950 border border-blue-700 shadow-xl p-0 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-blue-700">
+              <div className="text-white font-semibold truncate pr-3">
+                {portfolioPreview.title}
+              </div>
+              <div className="flex items-center gap-2">
+                {portfolioPreview.url && (
+                  <a
+                    href={portfolioPreview.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs px-2 py-1 rounded border border-emerald-600 bg-emerald-700 hover:bg-emerald-600 text-white"
+                  >
+                    Open ↗
+                  </a>
+                )}
+                <button
+                  onClick={() => setPortfolioPreview(null)}
+                  className="text-xs px-2 py-1 rounded border border-blue-600 bg-blue-800 hover:bg-blue-700 text-white"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 max-h-[70vh] overflow-auto">
+              <pre className="whitespace-pre-wrap text-sm leading-6 text-blue-50">
+{portfolioPreview.text}
+              </pre>
             </div>
           </div>
         </div>

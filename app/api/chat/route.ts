@@ -8,7 +8,6 @@ import {
   getNextOnboardingStep,
   deriveOnboardingStatus,
   getSharedContext,
-  fetchProjectFiles,
   type OnboardingKey,
 } from '@/lib/onboarding';
 
@@ -20,15 +19,59 @@ export const dynamic = 'force-dynamic';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY! });
 
+/* --------------------------- Local types ---------------------------- */
+type AutonomyPolicy = 'off' | 'shadow' | 'ask' | 'auto';
+
+type ProjectFileRow = {
+  file_name: string;
+  file_url: string;
+  created_at: string;
+};
+
+type RecentUserInput = {
+  // getSharedContext may return timestamp or created_at depending on your impl
+  timestamp?: string;
+  created_at?: string;
+  author?: string | null;
+  content: string;
+};
+
+/* ------------------ Local helper: fetchProjectFiles ------------------ */
+async function fetchProjectFiles(
+  projectId: string,
+  opts?: { search?: string; limit?: number }
+): Promise<ProjectFileRow[]> {
+  const { search = '', limit = 20 } = opts || {};
+  let q = supabaseAdmin
+    .from('documents')
+    .select('file_name, file_url, created_at')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (search) {
+    // match file_name or file_url
+    q = q.ilike('file_name', `%${search}%`);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []) as ProjectFileRow[];
+}
+
 /* ------------------------- Onboarding helpers ------------------------- */
 const PROGRESSION: OnboardingKey[] = ['vision', 'long_term_goals', 'short_term_goals', 'telegram'];
 
 function labelForStep(k: OnboardingKey): string {
   switch (k) {
-    case 'vision': return 'Project vision';
-    case 'long_term_goals': return 'Long-term goals';
-    case 'short_term_goals': return 'Short-term goals';
-    case 'telegram': return 'Connect Telegram';
+    case 'vision':
+      return 'Project vision';
+    case 'long_term_goals':
+      return 'Long-term goals';
+    case 'short_term_goals':
+      return 'Short-term goals';
+    case 'telegram':
+      return 'Connect Telegram';
   }
 }
 
@@ -64,7 +107,7 @@ async function handleRequiredActions(
   runId: string,
   run: any,
   projectId: string,
-  autonomyPolicy: 'off' | 'shadow' | 'ask' | 'auto'
+  autonomyPolicy: AutonomyPolicy
 ) {
   const tcalls = run?.required_action?.submit_tool_outputs?.tool_calls ?? [];
   if (!tcalls.length) return;
@@ -97,11 +140,8 @@ async function handleRequiredActions(
           out = { error: `Unsupported mode: ${mode}` };
         }
         tool_outputs.push({ tool_call_id: tc.id, output: JSON.stringify(out) });
-
       } else if (name === 'propose_autonomy') {
-        // Send the model's plan to the Edge Function to apply/log changes
-        const baseUrl =
-          process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+        const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
         const srk = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
         if (!baseUrl || !srk) {
@@ -120,19 +160,22 @@ async function handleRequiredActions(
             body: JSON.stringify({
               projectId,
               policy: autonomyPolicy,
-              plan: args, // raw model proposal (can include delete flags, etc.)
+              plan: args, // raw model proposal
             }),
           });
 
           let out: any;
-          try { out = await res.json(); } catch { out = { ok: res.ok }; }
+          try {
+            out = await res.json();
+          } catch {
+            out = { ok: res.ok };
+          }
 
           tool_outputs.push({
             tool_call_id: tc.id,
             output: JSON.stringify(out),
           });
         }
-
       } else {
         tool_outputs.push({
           tool_call_id: tc.id,
@@ -155,7 +198,6 @@ async function handleRequiredActions(
 
 /* ------------------------- Helper: clamp short ------------------------ */
 function clampShort(text: string): string {
-  // Keep code/math intact; basic sentence clamp otherwise.
   const parts = text.split(/(?<=[.!?])\s+/).filter(Boolean);
   const firstTwo = parts.slice(0, 2).join(' ');
   const words = firstTwo.split(/\s+/);
@@ -169,7 +211,7 @@ export async function POST(req: Request) {
       message,
       projectId,
       modelId = 'gpt-4o',
-      verbosity = 'normal', // ✨ accept verbosity
+      verbosity = 'normal',
     }: {
       message: string;
       projectId: string;
@@ -193,8 +235,7 @@ export async function POST(req: Request) {
     if (projErr) throw projErr;
     if (!projRow?.assistant_id) throw new Error('Missing assistant ID');
 
-    const autonomyPolicy =
-      (projRow?.autonomy_policy as 'off' | 'shadow' | 'ask' | 'auto') ?? 'auto';
+    const autonomyPolicy: AutonomyPolicy = (projRow?.autonomy_policy as AutonomyPolicy) ?? 'auto';
 
     // Thread management (1h expiry)
     const { data: existingThread } = await supabaseAdmin
@@ -226,10 +267,7 @@ export async function POST(req: Request) {
 
       await supabaseAdmin.from('user_projects').update({ thread_id: threadId }).eq('id', projectId);
     } else {
-      await supabaseAdmin
-        .from('threads')
-        .update({ last_active: now.toISOString() })
-        .eq('thread_id', threadId!);
+      await supabaseAdmin.from('threads').update({ last_active: now.toISOString() }).eq('thread_id', threadId!);
     }
 
     // Onboarding status
@@ -265,22 +303,36 @@ export async function POST(req: Request) {
 
     // Files intent
     const { wantsFiles, query } = parseFilesIntent(message);
-    let filesContext: Array<{ file_name: string; file_url: string; created_at: string }> = [];
+    let filesContext: ProjectFileRow[] = [];
     if (wantsFiles) {
       const files = await fetchProjectFiles(projectId, { search: query, limit: 20 });
-      filesContext = files.map(f => ({ file_name: f.file_name, file_url: f.file_url, created_at: f.created_at }));
+      filesContext = files.map((f: ProjectFileRow) => ({
+        file_name: f.file_name,
+        file_url: f.file_url,
+        created_at: f.created_at,
+      }));
     }
 
     const dateISO = now.toISOString();
     const userName = projRow?.preferred_user_name || 'there';
+
     const inputsFormatted =
-      recentUserInputs.length === 0
+      (!recentUserInputs || (recentUserInputs as RecentUserInput[]).length === 0)
         ? 'None'
-        : recentUserInputs.map((u) => `- [${u.created_at}] ${u.author ?? 'user'}: ${u.content}`).join('\n');
+        : (recentUserInputs as RecentUserInput[])
+            .map((u) => {
+              const ts = u.created_at ?? u.timestamp ?? '';
+              const who = u.author ?? 'user';
+              const content = u.content ?? '';
+              return `- [${ts}] ${who}: ${content}`;
+            })
+            .join('\n');
 
     const filesFormatted =
       filesContext.length === 0
-        ? (wantsFiles ? 'No matching files.' : 'Not requested.')
+        ? wantsFiles
+          ? 'No matching files.'
+          : 'Not requested.'
         : filesContext.map((f) => `- ${f.file_name} — ${f.file_url} (${f.created_at})`).join('\n');
 
     // ✨ Verbosity instruction injected into context

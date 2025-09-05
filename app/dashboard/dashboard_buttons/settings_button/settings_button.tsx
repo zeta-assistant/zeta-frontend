@@ -4,6 +4,15 @@ import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
+// --- XP logic shared with TimelinePanel ---
+import {
+  computeXP,
+  levelProgress,
+  LEVELS,
+  type MetricCounts as XPMetrics,
+  getXPCounts, // fallback
+} from '@/lib/XP';
+
 type XPState = {
   level: number;
   pct: number;        // 0..100
@@ -13,7 +22,40 @@ type XPState = {
   total: number;      // lifetime XP
 };
 
-const ZERO_XP: XPState = { level: 1, pct: 0, remaining: 0, current: 0, next: 0, total: 0 };
+const ZERO_XP: XPState = { level: 1, pct: 0, remaining: 100, current: 0, next: 100, total: 0 };
+
+const ZERO_COUNTS: XPMetrics = {
+  user_messages: 0,
+  zeta_messages: 0,
+  zeta_actions: 0,
+  files_uploaded: 0,
+  files_generated: 0,
+  calendar_items: 0,
+  goals_created: 0,
+  goals_achieved: 0,
+  outreach_messages: 0,
+  zeta_thoughts: 0,
+  tasks_zeta_created: 0,
+  tasks_user_complete: 0,
+  tasks_zeta_complete: 0,
+  events_past: 0,
+  functions_built: 0,
+};
+
+function progressFromCounts(c: Partial<XPMetrics>): XPState {
+  const full = { ...ZERO_COUNTS, ...c };
+  const total = computeXP(full);
+  const lp = levelProgress(total);
+  const isMax = lp.level >= lp.maxLevel && lp.pct === 100;
+  return {
+    level: lp.level,
+    pct: isMax ? 100 : lp.pct,
+    remaining: isMax ? 0 : lp.remaining,
+    current: isMax ? 0 : lp.inLevel,
+    next: isMax ? 0 : lp.needed,
+    total,
+  };
+}
 
 function formatDateAU(iso?: string | null) {
   if (!iso) return '—';
@@ -37,34 +79,6 @@ function normalizeTraits(raw: unknown): string[] {
     }
   }
   return [];
-}
-
-/** Convert total XP → UI progress using your lib’s thresholds */
-async function progressFromTotal(total: number): Promise<XPState> {
-  try {
-    const mod: any = await import('@/lib/XP'); // uses your LEVEL_THRESHOLDS + levelProgress()
-    const lp = typeof mod.levelProgress === 'function'
-      ? mod.levelProgress(total)
-      : null;
-
-    if (lp) {
-      return {
-        level: lp.level ?? 1,
-        pct: Math.max(0, Math.min(100, Number(lp.pct ?? 0))),
-        remaining: Number(lp.remaining ?? 0),
-        current: Number(lp.inLevel ?? 0),
-        next: Number(lp.needed ?? 0),
-        total: Number(total ?? 0),
-      };
-    }
-  } catch (e) {
-    console.warn('progressFromTotal() fallback:', e);
-  }
-  // Fallback: simple next=100 for all levels
-  const next = 100;
-  const current = Math.min(total % 100, 100);
-  const pct = Math.round((current / next) * 100);
-  return { level: 1, pct, remaining: next - current, current, next, total };
 }
 
 export async function savePreferredNameForProject(
@@ -105,8 +119,8 @@ export async function savePreferredNameForProject(
       return;
     }
 
+    // mirror preferred name to mainframe_info
     const MF_COL = 'preferred_user_name';
-
     const { data: existingRow, error: checkErr } = await supabase
       .from('mainframe_info')
       .select('project_id')
@@ -166,33 +180,64 @@ export default function SettingsButton({
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [personalityTraits, setPersonalityTraits] = useState<string[]>([]);
   const [xp, setXP] = useState<XPState>(ZERO_XP);
+  const [plan, setPlan] = useState<string | null>(null);
 
-  // Prefill when opening (and grab created_at + traits + XP from user_projects)
+  // Prefill when opening (created_at + plan from user_projects; traits/name from mainframe_info; XP same as TimelinePanel)
   useEffect(() => {
     if (!showModal || !projectId) return;
     (async () => {
-      const { data, error } = await supabase
+      // 1) user_projects: created_at + plan
+      const { data: proj, error: projErr } = await supabase
         .from('user_projects')
-        .select('preferred_user_name, created_at, personality_traits, xp_total, level')
+        .select('created_at, plan')
         .eq('id', projectId)
         .maybeSingle();
 
-      if (!error && data) {
-        setPreferredName(data.preferred_user_name ?? '');
-        setCreatedAt(data.created_at ?? null);
-        setPersonalityTraits(normalizeTraits(data.personality_traits));
-        const total = Number(data.xp_total ?? 0);
-        const prog = await progressFromTotal(total);
-        // trust server level (generated) but keep progress from total
-        setXP({ ...prog, level: Number(data.level ?? prog.level) });
+      if (!projErr && proj) {
+        setCreatedAt((proj as any).created_at ?? null);
+        setPlan((proj as any).plan ?? null);
+      } else {
+        setCreatedAt(null);
+        setPlan(null);
+      }
+
+      // 2) mainframe_info: preferred name + traits
+      const { data: mf, error: mfErr } = await supabase
+        .from('mainframe_info')
+        .select('preferred_user_name, personality_traits')
+        .eq('project_id', projectId)
+        .maybeSingle();
+
+      if (!mfErr && mf) {
+        setPreferredName((mf as any).preferred_user_name ?? '');
+        setPersonalityTraits(normalizeTraits((mf as any).personality_traits));
       } else {
         setPreferredName('');
-        setCreatedAt(null);
         setPersonalityTraits([]);
+      }
+
+      // 3) XP — mirror TimelinePanel exactly (RPC → fallback → compute)
+      try {
+        let serverCounts: Partial<XPMetrics> | null = null;
+        try {
+          const { data, error } = await supabase.rpc('fetch_xp_counts', { p_project_id: projectId });
+          if (!error && data) serverCounts = typeof data === 'string' ? JSON.parse(data) : data;
+        } catch {
+          serverCounts = null;
+        }
+
+        const counts: Partial<XPMetrics> = serverCounts ?? (await getXPCounts(projectId));
+        const prog = progressFromCounts(counts);
+        setXP(prog);
+      } catch (e) {
+        console.warn('XP prefill (settings) failed, defaulting to ZERO:', e);
         setXP(ZERO_XP);
       }
     })();
   }, [showModal, projectId]);
+
+  // Unlock when plan is premium or pro
+  const modelLocked = !(plan && ['premium', 'pro'].includes(String(plan).toLowerCase()));
 
   return (
     <>
@@ -247,6 +292,14 @@ export default function SettingsButton({
                     <div className="text-xs text-indigo-700/80">
                       Created on <span className="font-medium">{formatDateAU(createdAt)}</span>
                     </div>
+                    {plan && (
+                      <div className="mt-1 text-[11px] text-indigo-700/80">
+                        Plan:{' '}
+                        <span className="font-semibold capitalize">
+                          {plan}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -275,7 +328,7 @@ export default function SettingsButton({
                   </div>
                 </div>
 
-                {/* Traits */}
+                {/* Personality traits (from mainframe_info) */}
                 <div className="mt-4">
                   <div className="text-xs font-semibold text-indigo-800 mb-1">Personality traits</div>
                   {personalityTraits.length > 0 ? (
@@ -297,19 +350,51 @@ export default function SettingsButton({
 
               {/* Right: Settings form */}
               <div className="rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm">
+                {/* Model select (Premium/Pro) */}
                 <div>
-                  <label className="block text-sm font-semibold mb-1">🧠 Choose Intelligence Engine</label>
-                  <select
-                    value={selectedModelId}
-                    onChange={(e) => setSelectedModelId(e.target.value)}
-                    className="w-full border border-indigo-300 rounded-md p-2 text-sm bg-indigo-50 text-indigo-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                  >
-                    <option value="gpt-4o">OpenAI</option>
-                    <option value="deepseek-chat">DeepSeek</option>
-                    <option value="mistral-7b">SLM</option>
-                  </select>
+                  <label className="block text-sm font-semibold mb-1 flex items-center gap-2">
+                    🧠 Choose Intelligence Engine
+                    {!(['premium','pro'].includes(String(plan ?? '').toLowerCase())) && (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide
+                                   text-yellow-800 bg-yellow-100 border border-yellow-300 rounded-full px-2 py-0.5"
+                        title="Upgrade to Premium to change models"
+                      >
+                        🔒 Premium
+                      </span>
+                    )}
+                  </label>
+
+                  <div className="relative">
+                    {!(plan && ['premium','pro'].includes(String(plan).toLowerCase())) && (
+                      <div
+                        className="absolute inset-0 z-10 rounded-md bg-white/60 cursor-not-allowed"
+                        aria-hidden
+                      />
+                    )}
+
+                    <select
+                      value={selectedModelId}
+                      onChange={(e) => setSelectedModelId(e.target.value)}
+                      disabled={!(plan && ['premium','pro'].includes(String(plan).toLowerCase()))}
+                      className={`w-full border border-indigo-300 rounded-md p-2 text-sm bg-indigo-50 text-indigo-900 shadow-sm
+                                 focus:outline-none focus:ring-2 focus:ring-indigo-400
+                                 ${!(plan && ['premium','pro'].includes(String(plan).toLowerCase())) ? 'opacity-70' : ''}`}
+                    >
+                      <option value="gpt-4o">OpenAI</option>
+                      <option value="deepseek-chat">DeepSeek</option>
+                      <option value="mistral-7b">SLM</option>
+                    </select>
+                  </div>
+
+                  {!(plan && ['premium','pro'].includes(String(plan).toLowerCase())) && (
+                    <div className="mt-1 text-[11px] text-indigo-700/70">
+                      Changing models is a <span className="font-semibold">Premium</span> feature.
+                    </div>
+                  )}
                 </div>
 
+                {/* Preferred name */}
                 <div className="mt-5">
                   <label className="block text-sm font-semibold mb-1">🏷️ What should Zeta call you?</label>
                   <input
@@ -321,6 +406,7 @@ export default function SettingsButton({
                   />
                 </div>
 
+                {/* Actions */}
                 <div className="mt-6 flex justify-end gap-2">
                   <button
                     onClick={() => setShowModal(false)}
@@ -347,8 +433,13 @@ export default function SettingsButton({
             </div>
 
             <div className="mt-4 text-[11px] text-indigo-700/70">
-              Tip: Traits come from <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">user_projects.personality_traits</code>.
-              XP comes from <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">user_projects.xp_total</code> (level is generated).
+              Tip: XP here is computed live the same way as Timeline
+              (<code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">fetch_xp_counts</code> →{' '}
+              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">lib/XP</code>).
+              Traits & preferred name come from{' '}
+              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">mainframe_info</code>.
+              Plan & created date are from{' '}
+              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">user_projects</code>.
             </div>
           </div>
         </div>

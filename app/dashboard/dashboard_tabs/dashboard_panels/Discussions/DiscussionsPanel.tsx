@@ -1,166 +1,476 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { NewDiscussionForm } from '@/components/tab_components/NewDiscussionForm';
-import { ThreadChatTab } from '@/components/tab_components/ThreadChatTab';
 
 type Discussion = {
-  thread_id: string; // ← OpenAI thread ID
+  thread_id: string;
   title: string;
+  last_updated?: string | null;
 };
 
+type Msg = {
+  id?: string;
+  thread_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at?: string;
+};
+
+const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
+const MAX_DISCUSSIONS = 20;
+
 export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base' | 'lg' }) {
-  const { projectId } = useParams();
+  const { projectId } = useParams<{ projectId: string }>();
+  const search = useSearchParams();
+  const seedFromQuery = useMemo(() => (search?.get('seed') || '').trim() || null, [search]);
+
   const [discussions, setDiscussions] = useState<Discussion[]>([]);
-  const [selectedThread, setSelectedThread] = useState<Discussion | null>(null);
-  const [showNewForm, setShowNewForm] = useState(false);
+  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [bootHandled, setBootHandled] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selected, setSelected] = useState<Discussion | null>(null);
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [msgLoading, setMsgLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [input, setInput] = useState('');
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const [notify, setNotify] = useState(true);
+
+  /* ------------------------- list data ------------------------- */
+  async function refreshList() {
+    if (!projectId) return;
+    const { data, error } = await supabase
+      .from('discussions')
+      .select('thread_id, title, last_updated')
+      .eq('project_id', projectId)
+      .order('last_updated', { ascending: false });
+
+    if (error) setError(error.message);
+    setDiscussions(data || []);
+    setLoading(false);
+  }
+
+  useEffect(() => { void refreshList(); }, [projectId]);
 
   useEffect(() => {
     if (!projectId) return;
-
-    (async () => {
-      const { data } = await supabase
-        .from('discussions')
-        .select('thread_id, title')
-        .eq('project_id', projectId)
-        .order('last_updated', { ascending: false });
-
-      setDiscussions(data || []);
-    })();
+    const ch = supabase
+      .channel(`realtime_discussions_${projectId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'discussions', filter: `project_id=eq.${projectId}` },
+        () => void refreshList()
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
   }, [projectId]);
 
-  const deleteDiscussion = async (threadId: string) => {
-    const { error } = await supabase
-      .from('discussions')
-      .delete()
-      .eq('thread_id', threadId);
+  /* ------------------------- helpers --------------------------- */
+  async function createDiscussionRow(title: string): Promise<string | null> {
+    setStatus('Creating discussion…');
+    setError(null);
 
-    if (error) {
-      console.error('❌ Error deleting discussion:', error.message);
-      return;
+    // Guard: max 20
+    if (discussions.length >= MAX_DISCUSSIONS) {
+      setStatus(null);
+      setError(`Limit reached: you can have up to ${MAX_DISCUSSIONS} discussions per project.`);
+      return null;
     }
 
-    setDiscussions((prev) => prev.filter((d) => d.thread_id !== threadId));
-    setSelectedThread(null);
-  };
+    const res = await fetch('/api/discussion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, projectId, modelId: 'gpt-4o', fileId: null }),
+    });
 
-  if (showNewForm) {
-    return (
-      <div className={`p-6 text-${fontSize} text-blue-200 bg-blue-950`}>
-        <h2 className="text-lg text-white font-semibold mb-4">➕ Start a New Discussion</h2>
+    let json: any = {};
+    try { json = await res.json(); } catch {}
 
-        <NewDiscussionForm
-          onCreate={async (newDiscussion: Discussion) => {
-            setShowNewForm(false);
+    if (!res.ok) {
+      const msg = json?.error || `Failed to create discussion (HTTP ${res.status})`;
+      setError(msg);
+      setStatus(null);
+      return null;
+    }
 
-            // ⏳ Wait until thread is inserted in Supabase
-            let retries = 0;
-            let exists = false;
+    const openaiThreadId = json?.threadId as string | undefined;
+    if (!openaiThreadId) {
+      setError('Discussion created but no threadId returned.');
+      setStatus(null);
+      return null;
+    }
 
-            while (!exists && retries < 10) {
-              const { data } = await supabase
-                .from('threads')
-                .select('openai_thread_id')
-                .eq('openai_thread_id', newDiscussion.thread_id)
-                .single();
-
-              if (data) {
-                exists = true;
-                break;
-              }
-
-              await new Promise((r) => setTimeout(r, 500));
-              retries++;
-            }
-
-            if (!exists) {
-              console.error('❌ Thread was never inserted!');
-              return;
-            }
-
-            setSelectedThread(newDiscussion);
-
-            const { data } = await supabase
-              .from('discussions')
-              .select('thread_id, title')
-              .eq('project_id', projectId)
-              .order('last_updated', { ascending: false });
-
-            setDiscussions(data || []);
-          }}
-        />
-
-        <button
-          onClick={() => setShowNewForm(false)}
-          className="mt-4 text-sm text-blue-300 hover:text-blue-100"
-        >
-          ← Cancel
-        </button>
-      </div>
-    );
+    setStatus('Discussion created.');
+    return openaiThreadId;
   }
 
-  if (!selectedThread) {
-    return (
-      <div className={`p-6 overflow-y-auto text-${fontSize} text-blue-200 space-y-6 bg-blue-950`}>
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg text-white font-semibold">💬 Choose a Discussion</h2>
-          <button
-            onClick={() => setShowNewForm(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded shadow text-sm"
-          >
-            ➕ New Discussion
-          </button>
-        </div>
-
-        {discussions.length === 0 ? (
-          <p className="text-blue-300/70">No discussions yet.</p>
-        ) : (
-          discussions.map((d) => (
-            <div
-              key={d.thread_id}
-              onClick={() => setSelectedThread(d)}
-              className="cursor-pointer bg-gradient-to-br from-blue-700 to-blue-800 hover:from-blue-600 hover:to-blue-700 px-4 py-3 rounded-xl shadow border border-blue-600 text-white transition"
-            >
-              {d.title}
-            </div>
-          ))
-        )}
-      </div>
-    );
+  async function postViaChatboard(message: string) {
+    setStatus('Posting initial message…');
+    await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, message, modelId: 'gpt-4o', verbosity: 'short' }),
+    });
   }
+
+  async function deleteDiscussion(threadId: string) {
+    if (!projectId) return;
+    const ok = confirm('Delete this discussion and its messages? This cannot be undone.');
+    if (!ok) return;
+
+    setStatus('Deleting discussion…');
+    setError(null);
+
+    try {
+      // Delete messages first (fast and safe)
+      await supabase.from('discussion_messages').delete().eq('thread_id', threadId);
+
+      // Delete from discussions
+      await supabase
+        .from('discussions')
+        .delete()
+        .eq('project_id', projectId as string)
+        .eq('thread_id', threadId);
+
+      // (Optional) clean up threads row if you store it per-discussion
+      await supabase
+        .from('threads')
+        .delete()
+        .or(`openai_thread_id.eq.${threadId},thread_id.eq.${threadId}`)
+        .eq('project_id', projectId as string);
+
+      // Update UI
+      if (selected?.thread_id === threadId) setSelected(null);
+      await refreshList();
+      setStatus('Discussion deleted.');
+      setTimeout(() => setStatus(null), 1500);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to delete discussion.');
+    }
+  }
+
+  /* -------------------- seed auto-create ---------------------- */
+  useEffect(() => {
+    if (!projectId || bootHandled) return;
+    const seed = seedFromQuery;
+    if (!seed) { setBootHandled(true); return; }
+
+    (async () => {
+      if (discussions.length >= MAX_DISCUSSIONS) {
+        setError(`Limit reached: you can have up to ${MAX_DISCUSSIONS} discussions per project.`);
+        setBootHandled(true);
+        return;
+      }
+      setCreating(true);
+      try {
+        const title = 'Follow-up from Notification';
+        const _thread = await createDiscussionRow(title);
+        if (_thread) {
+          await postViaChatboard('Discussion created from notification.');
+          await postViaChatboard(seed);
+          await refreshList();
+          setSelected({ thread_id: _thread, title, last_updated: new Date().toISOString() });
+        }
+      } finally {
+        setCreating(false);
+        setBootHandled(true);
+        setStatus(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, seedFromQuery, bootHandled]);
+
+  /* -------------------- message loading + RT ------------------- */
+  async function loadMessages(threadId: string) {
+    setMsgLoading(true);
+    const { data, error } = await supabase
+      .from('discussion_messages')
+      .select('id, thread_id, role, content, created_at')
+      .eq('thread_id', threadId)
+      .order('created_at', { ascending: true });
+    if (!error) setMessages(data || []);
+    setMsgLoading(false);
+  }
+
+  useEffect(() => {
+    if (!selected?.thread_id) return;
+    void loadMessages(selected.thread_id);
+
+    const ch = supabase
+      .channel(`realtime_discussion_${selected.thread_id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'discussion_messages', filter: `thread_id=eq.${selected.thread_id}` },
+        (payload) => {
+          const row = payload.new as Msg;
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === row.role && last.content === row.content) return prev;
+            return [...prev, row];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(ch); };
+  }, [selected?.thread_id]);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, sending]);
+
+  async function pollAssistantOnce(threadId: string, sinceIso: string): Promise<Msg | null> {
+    const { data } = await supabase
+      .from('discussion_messages')
+      .select('id, thread_id, role, content, created_at')
+      .eq('thread_id', threadId)
+      .eq('role', 'assistant')
+      .gt('created_at', sinceIso)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    return (data && data[0]) || null;
+  }
+
+  function appendAssistantIfMissing(text: string) {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'assistant' && last.content === text) return prev;
+      const thread_id = selected?.thread_id || '';
+      return [
+        ...prev,
+        { id: `assistant-${Date.now()}`, thread_id, role: 'assistant', content: text, created_at: new Date().toISOString() },
+      ];
+    });
+  }
+
+  async function sendMessage() {
+    const trimmed = input.trim();
+    if (!trimmed || sending || !selected?.thread_id) return;
+
+    setSending(true);
+    setError(null);
+
+    const optimistic: Msg = {
+      id: `local-${Date.now()}`,
+      thread_id: selected.thread_id,
+      role: 'user',
+      content: trimmed,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((m) => [...m, optimistic]);
+    setInput('');
+
+    const sinceIso = new Date().toISOString();
+
+    try {
+      const res = await fetch('/api/discussion-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId: selected.thread_id, message: trimmed }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || `Reply failed: ${res.status}`);
+
+      if (json?.reply && typeof json.reply === 'string' && json.reply.trim()) {
+        appendAssistantIfMissing(json.reply.trim());
+      } else {
+        for (let i = 0; i < 8; i++) {
+          const hit = await pollAssistantOnce(selected.thread_id, sinceIso);
+          if (hit) { appendAssistantIfMissing(hit.content); break; }
+          await new Promise((r) => setTimeout(r, 800));
+        }
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to send');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  /* -------------------------- UI ---------------------------- */
+  const filtered = useMemo(
+    () => discussions.filter((d) => (d.title || '').toLowerCase().includes(filter.toLowerCase())),
+    [discussions, filter]
+  );
+
+  const atLimit = discussions.length >= MAX_DISCUSSIONS;
 
   return (
-    <div className={`p-6 text-${fontSize} text-blue-200 space-y-6 bg-blue-950 flex flex-col h-full`}>
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg text-white font-semibold">
-          🧵 Discussion: {selectedThread.title || selectedThread.thread_id}
-        </h2>
-        <div className="flex gap-3">
-          <button
-            onClick={() => setSelectedThread(null)}
-            className="text-sm text-blue-300 hover:text-blue-100"
-          >
-            ← Back
-          </button>
-          <button
-            onClick={() => {
-              if (confirm('Are you sure you want to delete this discussion?')) {
-                deleteDiscussion(selectedThread.thread_id);
-              }
-            }}
-            className="text-sm text-red-400 hover:text-red-200"
-          >
-            🗑 Delete
-          </button>
+    <div className={`h-full flex flex-col bg-gradient-to-b from-blue-950 to-blue-900 text-${fontSize} text-blue-100`}>
+      {/* header */}
+      <div className="sticky top-0 z-10 border-b border-white/10 bg-blue-950/70 backdrop-blur px-5 py-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">💬 Discussions</h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setNotify(!notify)}
+              className={`rounded-lg px-3 py-2 text-sm ${notify ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-700'}`}
+              title="Notifications toggle (UI only)"
+            >
+              {notify ? '🔔 On' : '🔕 Off'}
+            </button>
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search…"
+              className="hidden md:block px-3 py-2 rounded-lg bg-blue-900/60 border border-blue-700/60 text-blue-100 placeholder:text-blue-300/60 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <button
+              onClick={async () => {
+                setCreating(true);
+                try {
+                  setError(null);
+                  if (atLimit) {
+                    setError(`Limit reached: you can have up to ${MAX_DISCUSSIONS} discussions per project.`);
+                    return;
+                  }
+                  const threadId = await createDiscussionRow('New Discussion');
+                  if (threadId) {
+                    await postViaChatboard('Discussion created.');
+                    await postViaChatboard('Please greet me naturally and ask what I’d like to talk about.');
+                    await refreshList();
+                    setSelected({ thread_id: threadId, title: 'New Discussion', last_updated: new Date().toISOString() });
+                    await loadMessages(threadId);
+                  }
+                } finally {
+                  setCreating(false);
+                  setStatus(null);
+                }
+              }}
+              disabled={creating || atLimit}
+              title={atLimit ? `Limit ${MAX_DISCUSSIONS} reached` : 'Create new discussion'}
+              className={`rounded-lg px-3 py-2 shadow ${atLimit ? 'bg-blue-600/50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'} text-white`}
+            >
+              ➕ New
+            </button>
+          </div>
         </div>
+        {(status || error || atLimit) && (
+          <div className="mt-2 text-sm">
+            {status && <span className="text-blue-200">{status}</span>}
+            {error && <span className="text-red-300 ml-3">{error}</span>}
+            {atLimit && !error && <span className="text-yellow-300 ml-3">Max {MAX_DISCUSSIONS} discussions reached.</span>}
+          </div>
+        )}
       </div>
 
-      {/* 💬 Chat UI */}
-      <div className="flex-1 overflow-y-auto">
-        <ThreadChatTab threadId={selectedThread.thread_id} fontSize={fontSize} />
+      {/* content: list + chat pane */}
+      <div className="flex-1 grid grid-cols-1 xl:grid-cols-2 gap-4 p-5">
+        {/* left */}
+        <div className="space-y-4">
+          {loading ? (
+            <div className="space-y-3 animate-pulse">
+              <div className="h-12 rounded-xl bg-blue-800/40" />
+              <div className="h-12 rounded-xl bg-blue-800/40" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="text-blue-300/80">
+              {discussions.length === 0 ? 'No discussions yet.' : 'No results.'}
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-4">
+              {filtered.map((d) => {
+                const isActive = selected?.thread_id === d.thread_id;
+                return (
+                  <div
+                    key={d.thread_id}
+                    className={`rounded-2xl p-4 transition shadow bg-gradient-to-br from-blue-800/70 to-blue-850/70 border border-blue-700/60 ${
+                      isActive ? 'ring-2 ring-purple-500' : 'hover:from-blue-700/70 hover:to-blue-800/70'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <button onClick={() => setSelected(d)} className="text-left flex-1">
+                        <div className="font-semibold text-white line-clamp-2">
+                          {d.title || 'Untitled'}
+                        </div>
+                        <div className="mt-2 text-xs text-blue-200/80">Last: {fmt(d.last_updated)}</div>
+                      </button>
+                      <button
+                        onClick={() => deleteDiscussion(d.thread_id)}
+                        className="shrink-0 text-xs px-2 py-1 rounded-lg bg-red-600/90 hover:bg-red-700 text-white"
+                        title="Delete discussion"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* right: phone-style chat */}
+        <div className="flex flex-col items-center">
+          <div className="w-full max-w-sm h-[600px] rounded-2xl border border-blue-700/60 bg-blue-900/40 flex flex-col overflow-hidden shadow-lg">
+            {!selected ? (
+              <div className="flex-1 grid place-items-center text-blue-300/80 p-6">
+                Select a discussion to open the conversation.
+              </div>
+            ) : (
+              <>
+                <div className="border-b border-blue-700/60 px-4 py-3 text-center font-semibold text-white">
+                  {selected.title || 'Discussion'}
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {msgLoading ? (
+                    <div className="space-y-2 animate-pulse">
+                      <div className="h-12 w-10/12 rounded-xl bg-blue-800/40" />
+                    </div>
+                  ) : (
+                    <>
+                      {messages.map((msg) => {
+                        const isUser = msg.role === 'user';
+                        return (
+                          <div key={msg.id ?? `${msg.created_at}-${Math.random()}`} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                            <div
+                              className={[
+                                'px-4 py-2 rounded-2xl shadow whitespace-pre-wrap leading-relaxed max-w-[75%]',
+                                isUser ? 'bg-purple-600 text-white rounded-br-none' : 'bg-blue-700 text-white rounded-bl-none',
+                              ].join(' ')}
+                              title={msg.created_at ? new Date(msg.created_at).toLocaleString() : ''}
+                            >
+                              {msg.content}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {sending && (
+                        <div className="flex justify-start">
+                          <div className="bg-blue-700 text-white px-3 py-2 rounded-2xl rounded-bl-none animate-pulse">…</div>
+                        </div>
+                      )}
+                      <div ref={endRef} />
+                    </>
+                  )}
+                </div>
+                <div className="border-t border-blue-700/60 px-4 py-3">
+                  <div className="flex gap-2">
+                    <input
+                      className="flex-1 p-3 rounded-xl bg-blue-900/70 border border-blue-600/70 text-white placeholder:text-blue-300/60 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      placeholder="Type a message…"
+                      onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                    />
+                    <button
+                      onClick={sendMessage}
+                      disabled={sending || !input.trim()}
+                      className="rounded-xl px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-60"
+                    >
+                      {sending ? '…' : 'Send'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@supabase/auth-helpers-react';
 import { supabase } from '@/lib/supabaseClient';
@@ -10,6 +10,16 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+
+type Plan = 'loading' | 'free' | 'premium' | 'pro';
+const normalizePlanRow = (row: any): Plan => {
+  if (!row) return 'free';
+  if (row.is_premium === true) return 'premium';
+  const raw = (row.plan ?? '').toString().trim().toLowerCase();
+  if (raw === 'pro') return 'pro';
+  if (['premium', 'plus', 'paid', 'trial_premium'].includes(raw)) return 'premium';
+  return 'free';
+};
 
 const BASE_TRAITS: string[] = [
   'friendly','concise','proactive','analytical','motivating','candid','decisive','no-nonsense',
@@ -30,16 +40,40 @@ export default function ZetaSetup() {
   const [modelId, setModelId] = useState('gpt-4o');
   const [loading, setLoading] = useState(false);
 
+  const [plan, setPlan] = useState<Plan>('loading');
+  const isPremium = plan === 'premium' || plan === 'pro';
+
   // Personality
   const [traits, setTraits] = useState<string[]>([]);
   const [customTraits, setCustomTraits] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
 
-  // Initiative cadence
+  // Initiative cadence ⇄ notifications frequency
   const [initiativeCadence, setInitiativeCadence] =
     useState<'hourly' | 'daily' | 'weekly'>('daily');
 
-  const ALL_TRAITS = [...BASE_TRAITS, ...customTraits];
+  // fetch plan for the current user (or global default “free”)
+  useEffect(() => {
+    (async () => {
+      try {
+        // If the user has any project marked premium, treat setup as premium.
+        const { data, error } = await supabase
+          .from('user_projects')
+          .select('is_premium, plan')
+          .eq('user_id', user?.id || '')
+          .limit(1);
+        if (!error && data && data.length) {
+          setPlan(normalizePlanRow(data[0]));
+        } else {
+          setPlan('free');
+        }
+      } catch {
+        setPlan('free');
+      }
+    })();
+  }, [user?.id]);
+
+  const ALL_TRAITS = useMemo(() => [...BASE_TRAITS, ...customTraits], [customTraits]);
 
   const toggleTrait = (t: string) =>
     setTraits((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
@@ -80,33 +114,43 @@ export default function ZetaSetup() {
         .filter(Boolean)
         .join('\n\n');
 
-      const safeModelId = modelId === 'gpt-4o' ? modelId : 'gpt-4o';
+      // Gate non-OpenAI if not premium
+      const safeModelId = isPremium ? modelId : 'gpt-4o';
 
-      // If you haven't run the DB migration to allow NULL, you can use:
-      // const visionToSave: string | null = 'Vision pending'; // (temporary)
-      const visionToSave: string | null = null; // ✅ recommended with NULL-friendly constraint
+      const visionToSave: string | null = null;
 
       const { data: projectData, error: insertError } = await supabase
         .from('user_projects')
         .insert([{
           user_id: user.id,
           name: projectName,
-          vision: visionToSave,                // now null-safe
+          vision: visionToSave,
           preferred_user_name: preferredUserName || null,
           use_type: assistantType,
           pantheon_agent: 'zeta',
           onboarding_complete: true,
           system_instructions: mergedSystemInstructions,
-          model_id: safeModelId,               // NEW
-          personality_traits: traits,          // NEW (text[])
-          initiative_cadence: initiativeCadence, // NEW (enum)
+          model_id: safeModelId,
+          personality_traits: traits,
+          initiative_cadence: initiativeCadence, // ← save cadence
+          plan: plan === 'loading' ? 'free' : plan, // store current plan snapshot
         }])
         .select()
         .single();
 
       if (insertError) throw insertError;
       const projectId = projectData.id;
+      // right after: const projectId = projectData.id;
+await supabase
+  .from('mainframe_info')
+  .upsert({
+    project_id: projectId,
+    personality_traits: traits,
+    preferred_user_name: preferredUserName || null,
+  }, { onConflict: 'project_id' });
 
+
+      // Create assistant
       const res = await fetch('/api/createAssistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,7 +164,7 @@ export default function ZetaSetup() {
           modelId: safeModelId,
           message: 'Hello Zeta, let’s begin.',
           preferredUserName,
-          vision: visionToSave,              // pass the coerced value (null)
+          vision: visionToSave,
           personalityTraits: traits,
           initiativeCadence,
         }),
@@ -190,18 +234,39 @@ export default function ZetaSetup() {
                 </div>
               </div>
 
+              {/* Model picker — premium-gated */}
               <div className="space-y-1">
-                <label className="text-sm font-medium text-indigo-950">Choose your model</label>
-                <select
-                  value={modelId}
-                  onChange={(e) => setModelId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 h-9 text-sm bg-white/90"
-                >
-                  <option value="gpt-4o">GPT-4o (OpenAI)</option>
-                  <option value="mistral-7b" disabled>Mistral 7B (Coming soon)</option>
-                  <option value="phi-2" disabled>Phi-2 (Coming soon)</option>
-                  <option value="deepseek-chat" disabled>DeepSeek Chat (Coming soon)</option>
-                </select>
+                <label className="text-sm font-medium text-indigo-950 flex items-center gap-2">
+                  Choose your model
+                  {!isPremium && (
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-yellow-800 bg-yellow-100 border border-yellow-300 rounded-full px-2 py-0.5">
+                      🔒 Premium
+                    </span>
+                  )}
+                </label>
+                <div className="relative">
+                  {!isPremium && (
+                    <div className="absolute inset-0 pointer-events-none rounded-md ring-1 ring-yellow-200/60" />
+                  )}
+                  <select
+                    value={modelId}
+                    onChange={(e) => setModelId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-3 h-9 text-sm bg-white/90"
+                  >
+                    <option value="gpt-4o">GPT-4o (OpenAI)</option>
+                    <option value="mistral-7b" disabled={!isPremium}>Mistral 7B</option>
+                    <option value="deepseek-chat" disabled={!isPremium}>DeepSeek Chat</option>
+                    <option value="phi-2" disabled={!isPremium}>Phi-2</option>
+                    <option value="__custom" disabled>
+                      🚧 Use custom model
+                    </option>
+                  </select>
+                  {!isPremium && (
+                    <p className="mt-1 text-[11px] text-indigo-900/70">
+                      Only the default model is available on Free. Upgrade to use other providers or a custom model.
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -214,23 +279,31 @@ export default function ZetaSetup() {
                 />
               </div>
 
+              {/* Initiative level — hourly locked for Free */}
               <div className="space-y-1">
                 <label className="text-sm font-medium text-indigo-950">Zeta Initiative level</label>
                 <p className="text-xs text-indigo-900/70 -mt-1">
                   How often would you like Zeta to interact with you and your project?
                 </p>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['hourly','daily','weekly'] as const).map((cad) => (
-                    <Button
-                      key={cad}
-                      type="button"
-                      variant={initiativeCadence === cad ? 'default' : 'outline'}
-                      onClick={() => setInitiativeCadence(cad)}
-                      className="h-8 text-xs"
-                    >
-                      {cad.charAt(0).toUpperCase() + cad.slice(1)}
-                    </Button>
-                  ))}
+                  {(['hourly','daily','weekly'] as const).map((cad) => {
+                    const disabled = cad === 'hourly' && !isPremium;
+                    const active = initiativeCadence === cad;
+                    return (
+                      <Button
+                        key={cad}
+                        type="button"
+                        variant={active ? 'default' : 'outline'}
+                        disabled={disabled}
+                        onClick={() => setInitiativeCadence(cad)}
+                        className={`h-8 text-xs ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        title={disabled ? 'Premium feature' : undefined}
+                      >
+                        {cad.charAt(0).toUpperCase() + cad.slice(1)}
+                        {disabled && ' 🔒'}
+                      </Button>
+                    );
+                  })}
                 </div>
                 <p className="text-[11px] text-indigo-900/70">
                   Connect through <b>Telegram</b> or <b>Email</b> so Zeta can notify you 24/7!
