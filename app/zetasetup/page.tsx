@@ -29,6 +29,21 @@ const BASE_TRAITS: string[] = [
   'minimalist','thorough',
 ];
 
+// —— local date/time helper (uses the user's device time) ——
+function nowLocal() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const MM = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const HH = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return {
+    ymd: `${yyyy}-${MM}-${dd}`,   // YYYY-MM-DD
+    hms: `${HH}:${mm}:${ss}`,     // HH:MM:SS
+  };
+}
+
 export default function ZetaSetup() {
   const router = useRouter();
   const user = useUser();
@@ -56,7 +71,6 @@ export default function ZetaSetup() {
   useEffect(() => {
     (async () => {
       try {
-        // If the user has any project marked premium, treat setup as premium.
         const { data, error } = await supabase
           .from('user_projects')
           .select('is_premium, plan')
@@ -132,31 +146,35 @@ export default function ZetaSetup() {
           system_instructions: mergedSystemInstructions,
           model_id: safeModelId,
           personality_traits: traits,
-          initiative_cadence: initiativeCadence, // ← save cadence
-          plan: plan === 'loading' ? 'free' : plan, // store current plan snapshot
+          initiative_cadence: initiativeCadence,
+          plan: plan === 'loading' ? 'free' : plan,
         }])
         .select()
         .single();
 
       if (insertError) throw insertError;
+
       const projectId = projectData.id;
       const isoNow = new Date().toISOString();
-const today = isoNow.slice(0, 10); // YYYY-MM-DD for a DATE column
+      const { ymd: today, hms: localTime } = nowLocal(); // <-- device local time
 
-await supabase
-  .from('mainframe_info')
-  .upsert(
-    {
-      id: projectId,                 // <- use id as the PK to match the rest of your app
-      project_id: projectId,         // keep if this column exists in your schema
-      preferred_user_name: preferredUserName || null,
-      personality_traits: traits,
-      current_date: today,           // <- REQUIRED: satisfies NOT NULL on DATE column
-      updated_at: isoNow,            // optional
-      created_at: isoNow,            // optional (ignored on conflict)
-    },
-    { onConflict: 'id' }             // <- conflict target should be 'id'
-  );
+      const { error: mfErr } = await supabase
+        .from('mainframe_info')
+        .upsert(
+          {
+            id: projectId,                 // use id as PK to match the rest of your app
+            project_id: projectId,         // keep if this column exists in your schema
+            preferred_user_name: preferredUserName || null,
+            personality_traits: traits,
+            current_date: today,           // DATE column
+            current_time: localTime,       // <-- REQUIRED: satisfies NOT NULL on TIME/TEXT column
+            updated_at: isoNow,
+            created_at: isoNow,
+          },
+          { onConflict: 'id' }
+        );
+
+      if (mfErr) throw mfErr;
 
       // Create assistant
       const res = await fetch('/api/createAssistant', {
