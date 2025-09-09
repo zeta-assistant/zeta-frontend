@@ -48,29 +48,46 @@ export default function Client() {
   }, []);
 
   const handleSignup = async () => {
-    setAuthError(null);
-    setResentMsg(null);
-    if (!valid || loading) return;
-    setLoading(true);
+  setAuthError(null);
+  setResentMsg(null);
+  if (!valid || loading) return;
+  setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo: redirectTo },
-    });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: redirectTo }, // safe to keep; ignored if confirmations are off
+  });
 
-    setLoading(false);
-    if (error) {
-      const msg = error.message?.toLowerCase() || '';
-      if (msg.includes('already registered')) {
-        setAuthError('That email is already registered. Try logging in instead.');
-      } else {
-        setAuthError(error.message);
-      }
-      return;
+  setLoading(false);
+  if (error) {
+    const msg = error.message?.toLowerCase() || '';
+    if (msg.includes('already registered')) {
+      setAuthError('That email is already registered. Try logging in instead.');
+    } else {
+      setAuthError(error.message);
     }
-    setSent(true);
-  };
+    return;
+  }
+
+  // CASE A: Supabase returned a session (email confirmations disabled)
+  if (data?.session) {
+    router.replace('/onboarding');
+    return;
+  }
+
+  // CASE B: No session returned, but confirmations might be disabled.
+  // Try signing in immediately with the same credentials.
+  const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+  if (!signInErr) {
+    router.replace('/onboarding');
+    return;
+  }
+
+  // CASE C: Still no session -> confirmations are required.
+  setSent(true);
+};
+
 
   const resendVerification = async () => {
     if (resending) return;
