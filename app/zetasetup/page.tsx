@@ -118,6 +118,7 @@ export default function ZetaSetup() {
 
       const visionToSave: string | null = null;
 
+      // 1) Create the project
       const { data: projectData, error: insertError } = await supabase
         .from('user_projects')
         .insert([{
@@ -131,8 +132,8 @@ export default function ZetaSetup() {
           system_instructions: mergedSystemInstructions,
           model_id: safeModelId,
           personality_traits: traits,
-          initiative_cadence: initiativeCadence, // ← save cadence
-          plan: plan === 'loading' ? 'free' : plan, // store current plan snapshot
+          initiative_cadence: initiativeCadence,
+          plan: plan === 'loading' ? 'free' : plan,
         }])
         .select()
         .single();
@@ -141,47 +142,50 @@ export default function ZetaSetup() {
 
       const projectId = projectData.id;
 
-      // timestamps: ISO for timestamptz; YYYY-MM-DD for DATE
-      const isoNow = new Date().toISOString();
-      const today = isoNow.slice(0, 10);
+      // 2) Create/Upsert mainframe_info WITHOUT project_id (force null explicitly)
+      const isoNow = new Date().toISOString();     // TIMESTAMPTZ-friendly
+      const today  = isoNow.slice(0, 10);          // YYYY-MM-DD for DATE
 
-      // Insert without project_id first to avoid FK race
+      const mfPayload = {
+        id: projectId,                       // PK = user_projects.id
+        project_id: null as any,             // ⬅️ hard-null to dodge FK shenanigans on first write
+        preferred_user_name: preferredUserName || null,
+        personality_traits: traits,
+        current_date: today,                 // DATE NOT NULL
+        current_time: isoNow,                // TIMESTAMPTZ NOT NULL (DB also has default now())
+        updated_at: isoNow,
+        created_at: isoNow,
+      };
+
+      console.log('[MF upsert payload]', mfPayload);
+
       const { error: mfErr } = await supabase
         .from('mainframe_info')
-        .upsert(
-          {
-            id: projectId,                       // PK = user_projects.id
-            // project_id: projectId,             // omitted initially (FK can race)
-            preferred_user_name: preferredUserName || null,
-            personality_traits: traits,
-            current_date: today,                 // DATE NOT NULL
-            current_time: isoNow,                // TIMESTAMPTZ NOT NULL
-            updated_at: isoNow,
-            created_at: isoNow,
-          },
-          { onConflict: 'id' }
-        );
+        .upsert(mfPayload, { onConflict: 'id' });
 
       if (mfErr) throw mfErr;
 
-      // Try to backfill project_id right away; ignore if it fails
-      const { data: projExists } = await supabase
+      // 3) Best-effort backfill project_id in a separate step (ignore failure)
+      const { data: exists } = await supabase
         .from('user_projects')
         .select('id')
         .eq('id', projectId)
         .maybeSingle();
 
-      if (projExists) {
-        await supabase
+      if (exists) {
+        const { error: backfillErr } = await supabase
           .from('mainframe_info')
           .update({ project_id: projectId })
-          .eq('id', projectId)
-          .then(({ error }) => {
-            if (error) console.warn('[mainframe_info project_id backfill skipped]', error.message);
-          });
+          .eq('id', projectId);
+
+        if (backfillErr) {
+          console.warn('[mainframe_info project_id backfill skipped]', backfillErr.message);
+        }
+      } else {
+        console.warn('[mainframe_info project_id backfill skipped] user_projects not visible yet');
       }
 
-      // Create assistant
+      // 4) Create assistant
       const res = await fetch('/api/createAssistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -385,7 +389,7 @@ export default function ZetaSetup() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Input
+                  < Input
                     value={customInput}
                     onChange={(e) => setCustomInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomTrait(); } }}
