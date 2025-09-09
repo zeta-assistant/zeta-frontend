@@ -38,7 +38,7 @@ export type Rule = {
   type: RuleType
   template?: string | null
   frequency: Frequency
-  send_time: string // "HH:MM"
+  send_time: string // "HH:MM" (accepts HH:MM:SS; seconds ignored in UI)
   day_of_week: number | null
   is_enabled: boolean
   channels: NotificationChannels | null
@@ -72,6 +72,7 @@ export const BUILT_INS: Array<{
     type: 'calendar',
     label: 'Calendar Digest',
     subtitle: ' ',
+    // default is daily
     defaults: { frequency: 'daily', send_time: '07:30', template: 'Today’s events and reminders.' },
   },
   {
@@ -106,6 +107,7 @@ export function buildUrls(sbUrl: string) {
     sendEmail: `${sbUrl}/functions/v1/send-email-message`,
     dailyChatMessage: `${sbUrl}/functions/v1/daily-chat-message`,
     calendarDigest: `${sbUrl}/functions/v1/calendar-digest`,
+    // Note: no armJob URL here; arming is via RPC security definer on the DB.
   }
 }
 
@@ -135,7 +137,7 @@ export function normalizePlanRow(row: any): Plan {
   if (row.is_premium === true) return 'premium'
   const raw = (row.plan ?? '').toString().trim().toLowerCase()
   if (raw === 'pro') return 'pro'
-  if (['premium', 'plus', 'paid'].includes(raw)) return 'premium'
+  if (['premium', 'plus', 'paid', 'trial_premium'].includes(raw)) return 'premium'
   return 'free'
 }
 
@@ -362,7 +364,7 @@ export async function getVerifiedTelegramChatId(
   if (error) throw toError(error)
 
   const id = (data as any)?.user_chat_id?.toString().trim()
-  if (!id || !/^[0-9\-@]+$/.test(id)) return null // allow @channel
+  if (!id || !/^[0-9\-@A-Za-z_]+$/.test(id)) return null
   return id
 }
 
@@ -384,9 +386,7 @@ async function fetchLatestUsageSnapshot(
         .limit(1)
 
       if (!error && Array.isArray(data) && data.length) return data[0] as any
-    } catch {
-      // ignore and try next
-    }
+    } catch {}
   }
 
   const { data } = await supabase
@@ -413,7 +413,7 @@ function normalizeGoals(raw: any): string[] {
   try {
     const parsed = JSON.parse(s)
     if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
-  } catch { /* ignore */ }
+  } catch {}
   return s.split(/[\n,]/g).map(v => v.trim()).filter(Boolean)
 }
 
@@ -448,20 +448,22 @@ function pickNextStep(goals: string[], level: 'low' | 'mid' | 'high', recentInpu
 ─────────────────────────────────────────────────────────── */
 
 type Urls = ReturnType<typeof buildUrls>
+
 /** If this is a manual run (Run Now), require Premium for ALL types. */
 async function assertManualRunAllowed(
   supabase: SupabaseClient,
   projectId: string,
   opts?: { manual?: boolean }
 ) {
-  if (!opts?.manual) return; // only gate manual runs
-  const ok = await isPremiumProject(supabase, projectId);
+  if (!opts?.manual) return
+  const ok = await isPremiumProject(supabase, projectId)
   if (!ok) {
-    const err = new Error('Premium required to use Run Now.');
-    (err as any).code = 'PREMIUM_REQUIRED';
-    throw err;
+    const err = new Error('Premium required to use Run Now.')
+    ;(err as any).code = 'PREMIUM_REQUIRED'
+    throw err
   }
 }
+
 /** Calendar digest trigger. Delegates delivery to the edge fn, honoring selected channels. */
 export async function runCalendarDigest(
   supabase: any,
@@ -470,42 +472,43 @@ export async function runCalendarDigest(
   sbKey: string,
   opts?: { manual?: boolean }
 ): Promise<{ result: any; feedback: string }> {
-  await assertManualRunAllowed(supabase, rule.project_id, opts);
+  await assertManualRunAllowed(supabase, rule.project_id, opts)
 
   const chatRow = await supabase
     .from('project_integrations')
     .select('user_chat_id,is_verified')
     .eq('project_id', rule.project_id)
     .eq('type', 'telegram')
-    .maybeSingle();
-  const canTelegram = !!(chatRow?.data?.is_verified && chatRow?.data?.user_chat_id);
+    .maybeSingle()
+  const canTelegram = !!(chatRow?.data?.is_verified && chatRow?.data?.user_chat_id)
 
   const channels = {
     inapp: rule.channels?.inapp ?? true,
     telegram: (rule.channels?.telegram ?? true) && canTelegram,
     email: rule.channels?.email ?? false,
-  };
+  }
 
   const res = await fetch(urls.calendarDigest, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
     body: JSON.stringify({ project_id: rule.project_id, channels }),
-  });
+  })
 
-  let data: any = null;
+  let data: any = null
   try {
-    data = await res.json();
+    data = await res.json()
   } catch {
-    try { data = { text: await res.text() }; } catch { data = {}; }
+    try { data = { text: await res.text() } } catch { data = {} }
   }
 
-  if (!res.ok) throw new Error(data?.error || data?.message || data?.text || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(data?.error || data?.message || data?.text || `HTTP ${res.status}`)
 
-  let fb = '✅ Calendar digest sent.';
-  if (channels.telegram && data?.telegram?.ok === false) fb = '⚠️ Digest ran, Telegram failed.';
-  if (!channels.telegram && !channels.email && !channels.inapp) fb = 'ℹ️ Ran, but no delivery channel selected.';
-  return { result: data, feedback: fb };
+  let fb = '✅ Calendar digest sent.'
+  if (channels.telegram && data?.telegram?.ok === false) fb = '⚠️ Digest ran, Telegram failed.'
+  if (!channels.telegram && !channels.email && !channels.inapp) fb = 'ℹ️ Ran, but no delivery channel selected.'
+  return { result: data, feedback: fb }
 }
+
 export async function sendTest(
   supabase: SupabaseClient,
   rule: Rule,
@@ -514,26 +517,24 @@ export async function sendTest(
   getFirstProjectEmail: () => string | null,
   projectIdForTelegram: string
 ): Promise<{ result: any; feedback: string }> {
-  const wantTg = rule.channels?.telegram ?? true;
-  const wantEmail = rule.channels?.email ?? false;
+  const wantTg = rule.channels?.telegram ?? true
+  const wantEmail = rule.channels?.email ?? false
 
-  // Premium gate for thoughts/usage_frequency tests too
-  await assertPremiumForType(supabase, rule.project_id, rule.type);
+  await assertPremiumForType(supabase, rule.project_id, rule.type)
 
-  // Telegram path (optional)
-  let tgResult: any = null;
+  let tgResult: any = null
   if (wantTg) {
-    const chatId = await getVerifiedTelegramChatId(supabase, projectIdForTelegram);
+    const chatId = await getVerifiedTelegramChatId(supabase, projectIdForTelegram)
     if (!chatId) {
       if (!wantEmail) {
         return {
           result: null,
           feedback:
             '❌ No verified Telegram chat_id found. Connect Telegram first (Functions → APIs) or enable Email.',
-        };
+        }
       }
     } else {
-      const text = (rule.template && rule.template.trim()) || `${rule.name} • test message`;
+      const text = (rule.template && rule.template.trim()) || `${rule.name} • test message`
       const res = await fetch(urls.sendTelegram, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
@@ -544,42 +545,41 @@ export async function sendTest(
           subject: `🔔 ${rule.name} (test)`,
           text,
         }),
-      });
-      tgResult = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(tgResult?.error || tgResult?.message || `HTTP ${res.status}`);
+      })
+      tgResult = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(tgResult?.error || tgResult?.message || `HTTP ${res.status}`)
     }
   }
 
-  // Email path (optional)
-  let emailResult: any = null;
+  let emailResult: any = null
   if (wantEmail) {
-    const to = getFirstProjectEmail();
+    const to = getFirstProjectEmail()
     if (!to) {
       return {
         result: { telegram: tgResult, email: emailResult },
         feedback: '⚠️ No email saved. Add one in Functions → APIs.',
-      };
+      }
     } else {
-      const text = (rule.template && rule.template.trim()) || `${rule.name} • test message`;
+      const text = (rule.template && rule.template.trim()) || `${rule.name} • test message`
       const res = await fetch(urls.sendEmail, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
         body: JSON.stringify({ to, subject: `🔔 ${rule.name} (test)`, message: text }),
-      });
-      emailResult = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(emailResult?.error || emailResult?.message || `HTTP ${res.status}`);
+      })
+      emailResult = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(emailResult?.error || emailResult?.message || `HTTP ${res.status}`)
     }
   }
 
   const channelsSent = [
     wantTg ? (tgResult ? 'Telegram' : null) : null,
     wantEmail ? (emailResult ? 'Email' : null) : null,
-  ].filter(Boolean);
+  ].filter(Boolean)
 
   return {
     result: { telegram: tgResult, email: emailResult },
     feedback: channelsSent.length ? `✅ Test sent via ${channelsSent.join(' & ')}.` : 'ℹ️ No channel selected.',
-  };
+  }
 }
 
 export async function runRelevantDiscussion(
@@ -590,16 +590,16 @@ export async function runRelevantDiscussion(
   getFirstProjectEmail: () => string | null,
   opts?: { manual?: boolean }
 ): Promise<{ result: any; feedback: string }> {
-  await assertManualRunAllowed(supabase, rule.project_id, opts);
+  await assertManualRunAllowed(supabase, rule.project_id, opts)
 
-  const wantsEmail = rule.channels?.email ?? false;
-  const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id);
+  const wantsEmail = rule.channels?.email ?? false
+  const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id)
 
   const channelsForFn = {
     inapp: rule.channels?.inapp ?? true,
     telegram: (rule.channels?.telegram ?? true) && !!chatId,
     email: false,
-  };
+  }
 
   const res = await fetch(urls.relevantdiscussion, {
     method: 'POST',
@@ -611,36 +611,36 @@ export async function runRelevantDiscussion(
       chat_id: chatId ?? null,
       telegram_chat_id: chatId ?? null,
     }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`)
 
   if (wantsEmail) {
-    const to = getFirstProjectEmail();
+    const to = getFirstProjectEmail()
     if (to) {
       const emailText =
         data?.email?.text ||
         data?.text ||
         data?.message ||
         (rule.template && rule.template.trim()) ||
-        'Relevant discussion digest from Zeta.';
+        'Relevant discussion digest from Zeta.'
 
       const emailRes = await fetch(urls.sendEmail, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
         body: JSON.stringify({ to, subject: `🔔 ${rule.name}`, message: emailText }),
-      });
-      const emailOut = await emailRes.json().catch(() => ({}));
-      if (!emailRes.ok) throw new Error(emailOut?.error || (emailOut as any)?.message || `HTTP ${emailRes.status}`);
-      return { result: { relevantdiscussion: data, email: emailOut }, feedback: '✅ Triggered.' };
+      })
+      const emailOut = await emailRes.json().catch(() => ({}))
+      if (!emailRes.ok) throw new Error(emailOut?.error || (emailOut as any)?.message || `HTTP ${emailRes.status}`)
+      return { result: { relevantdiscussion: data, email: emailOut }, feedback: '✅ Triggered.' }
     }
     return {
       result: { relevantdiscussion: data },
       feedback: '✅ Triggered. ⚠️ Email selected but none saved (Functions → APIs).',
-    };
+    }
   }
 
-  return { result: { relevantdiscussion: data }, feedback: '✅ Triggered.' };
+  return { result: { relevantdiscussion: data }, feedback: '✅ Triggered.' }
 }
 
 export async function runThoughts(
@@ -650,15 +650,15 @@ export async function runThoughts(
   sbKey: string,
   opts?: { manual?: boolean }
 ): Promise<{ result: any; feedback: string }> {
-  await assertManualRunAllowed(supabase, rule.project_id, opts);
-  await assertPremiumForType(supabase, rule.project_id, 'thoughts');
+  await assertManualRunAllowed(supabase, rule.project_id, opts)
+  await assertPremiumForType(supabase, rule.project_id, 'thoughts')
 
-  const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id);
+  const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id)
   const channelsSelected = {
     inapp: rule.channels?.inapp ?? true,
     email: false,
     telegram: (rule.channels?.telegram ?? true) && !!chatId,
-  };
+  }
 
   const res = await fetch(urls.emitThoughts, {
     method: 'POST',
@@ -666,7 +666,7 @@ export async function runThoughts(
     body: JSON.stringify({
       project_id: rule.project_id,
       subject: '🧠 Zeta Thoughts',
-      channels: channelsSelected,
+      channels: { ...channelsSelected, telegram: channelsSelected.telegram, email: false },
       chat_id: chatId ?? null,
       telegram_chat_id: chatId ?? null,
       template: rule.template ?? '',
@@ -674,26 +674,26 @@ export async function runThoughts(
       limit: 5,
       generate_if_missing: true,
     }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`)
 
   if (data?.ok === false && data?.reason === 'no thoughts') {
-    return { result: data, feedback: 'ℹ️ No recent thoughts to send. Try running “generate-thought”.' };
+    return { result: data, feedback: 'ℹ️ No recent thoughts to send. Try running “generate-thought”.' }
   }
 
   if (channelsSelected.telegram && chatId) {
-    const tg = data?.telegram;
-    if (tg?.ok) return { result: data, feedback: '✅ Sent to Telegram.' };
+    const tg = data?.telegram
+    if (tg?.ok) return { result: data, feedback: '✅ Sent to Telegram.' }
     if (tg && tg.status)
-      return { result: data, feedback: `❌ Telegram send failed (status ${tg.status}). ${tg.text || ''}` };
+      return { result: data, feedback: `❌ Telegram send failed (status ${tg.status}). ${tg.text || ''}` }
     return {
       result: data,
       feedback: '⚠️ Ran, but did not attempt Telegram. Check TELEGRAM_BOT_TOKEN on the server.',
-    };
+    }
   }
 
-  return { result: data, feedback: '⚠️ Ran, but Telegram channel/ID not configured.' };
+  return { result: data, feedback: '⚠️ Ran, but Telegram channel/ID not configured.' }
 }
 
 export async function runUsageFrequency(
@@ -704,41 +704,41 @@ export async function runUsageFrequency(
   getFirstProjectEmail: () => string | null,
   opts?: { manual?: boolean }
 ): Promise<{ result: any; feedback: string }> {
-  await assertManualRunAllowed(supabase, rule.project_id, opts);
-  await assertPremiumForType(supabase, rule.project_id, 'usage_frequency');
+  await assertManualRunAllowed(supabase, rule.project_id, opts)
+  await assertPremiumForType(supabase, rule.project_id, 'usage_frequency')
 
   const { data: mfRow, error: mfErr } = await supabase
     .from('mainframe_info')
     .select('short_term_goals, current_date')
     .eq('project_id', rule.project_id)
-    .maybeSingle();
-  if (mfErr) throw toError(mfErr);
+    .maybeSingle()
+  if (mfErr) throw toError(mfErr)
 
-  const snapshot = await fetchLatestUsageSnapshot(supabase, rule.project_id);
+  const snapshot = await fetchLatestUsageSnapshot(supabase, rule.project_id)
   if (!snapshot) {
-    return { result: null, feedback: 'ℹ️ No daily usage snapshot yet.' };
+    return { result: null, feedback: 'ℹ️ No daily usage snapshot yet.' }
   }
 
-  const sys = Number(snapshot.sys_events_total ?? 0);
-  const user = Number(snapshot.user_inputs_total ?? 0);
-  const total = sys + user;
+  const sys = Number(snapshot.sys_events_total ?? 0)
+  const user = Number(snapshot.user_inputs_total ?? 0)
+  const total = sys + user
 
-  const goals = normalizeGoals(mfRow?.short_term_goals);
-  const recentInputs = Array.isArray(snapshot.recent_inputs) ? snapshot.recent_inputs : [];
+  const goals = normalizeGoals(mfRow?.short_term_goals)
+  const recentInputs = Array.isArray(snapshot.recent_inputs) ? snapshot.recent_inputs : []
 
   const coerceTs = (v: any): number | null => {
-    if (!v) return null;
+    if (!v) return null
     const candidate =
       (typeof v === 'object' && (v.timestamp || v.ts || v.created_at)) ||
-      (typeof v === 'string' ? v : null);
-    if (!candidate) return null;
-    const t = Date.parse(String(candidate));
-    return Number.isFinite(t) ? t : null;
-  };
-  let lastInteractionMs: number | null = null;
+      (typeof v === 'string' ? v : null)
+    if (!candidate) return null
+    const t = Date.parse(String(candidate))
+    return Number.isFinite(t) ? t : null
+  }
+  let lastInteractionMs: number | null = null
   for (const item of recentInputs) {
-    const ts = coerceTs(item);
-    if (ts && (!lastInteractionMs || ts > lastInteractionMs)) lastInteractionMs = ts;
+    const ts = coerceTs(item)
+    if (ts && (!lastInteractionMs || ts > lastInteractionMs)) lastInteractionMs = ts
   }
   if (!lastInteractionMs) {
     const { data: lastMsgRows } = await supabase
@@ -746,40 +746,40 @@ export async function runUsageFrequency(
       .select('timestamp')
       .eq('project_id', rule.project_id)
       .order('timestamp', { ascending: false })
-      .limit(1);
-    const lastMsg = Array.isArray(lastMsgRows) ? lastMsgRows[0] : lastMsgRows;
+      .limit(1)
+    const lastMsg = Array.isArray(lastMsgRows) ? lastMsgRows[0] : lastMsgRows
     if (lastMsg?.timestamp) {
-      const t = Date.parse(String(lastMsg.timestamp));
-      if (Number.isFinite(t)) lastInteractionMs = t;
+      const t = Date.parse(String(lastMsg.timestamp))
+      if (Number.isFinite(t)) lastInteractionMs = t
     }
   }
-  const lastInteraction = lastInteractionMs ? new Date(lastInteractionMs).toLocaleString() : '—';
+  const lastInteraction = lastInteractionMs ? new Date(lastInteractionMs).toLocaleString() : '—'
   const headerDate = mfRow?.current_date
     ? new Date(mfRow.current_date).toLocaleDateString()
-    : new Date().toLocaleDateString();
+    : new Date().toLocaleDateString()
 
-  const level: 'low' | 'mid' | 'high' = total < 5 ? 'low' : total < 20 ? 'mid' : 'high';
+  const level: 'low' | 'mid' | 'high' = total < 5 ? 'low' : total < 20 ? 'mid' : 'high'
 
   const pickNextStepLocal = (goalsList: string[], lvl: 'low'|'mid'|'high', ri?: any[]): string => {
-    const primary = goalsList[0] || '';
-    const arr = Array.isArray(ri) ? ri : [];
-    const last = arr[0] || arr[arr.length - 1] || null;
+    const primary = goalsList[0] || ''
+    const arr = Array.isArray(ri) ? ri : []
+    const last = arr[0] || arr[arr.length - 1] || null
     const hint = (() => {
-      if (!last) return '';
-      if (typeof last === 'string') return last.slice(0, 60);
+      if (!last) return ''
+      if (typeof last === 'string') return last.slice(0, 60)
       if (typeof last === 'object') {
-        const t = (last.text || last.title || last.content || '').toString();
-        return t.slice(0, 60);
+        const t = (last.text || last.title || last.content || '').toString()
+        return t.slice(0, 60)
       }
-      return '';
-    })();
-    const goalBit = primary ? `on “${primary}”` : 'on one of your goals';
-    const hintBit = hint ? ` (e.g., “${hint}…”)` : '';
+      return ''
+    })()
+    const goalBit = primary ? `on “${primary}”` : 'on one of your goals'
+    const hintBit = hint ? ` (e.g., “${hint}…”)` : ''
 
-    if (lvl === 'low') return `Try one quick win ${goalBit}: add a subtask or schedule a 25-minute focus block${hintBit}.`;
-    if (lvl === 'mid') return `Great momentum — ship the next unit ${goalBit}: capture 3 concrete TODOs and plan the next session${hintBit}.`;
-    return `You’re leveling up — set a small milestone ${goalBit} for the next 2–3 days and jot 1 learning${hintBit}.`;
-  };
+    if (lvl === 'low') return `Try one quick win ${goalBit}: add a subtask or schedule a 25-minute focus block${hintBit}.`
+    if (lvl === 'mid') return `Great momentum — ship the next unit ${goalBit}: capture 3 concrete TODOs and plan the next session${hintBit}.`
+    return `You’re leveling up — set a small milestone ${goalBit} for the next 2–3 days and jot 1 learning${hintBit}.`
+  }
 
   const text = [
     `📈 Daily Usage Check (${headerDate}):`,
@@ -793,12 +793,12 @@ export async function runUsageFrequency(
       : level === 'mid'
       ? `Nice momentum — ${total} interactions today.\nGreat work using Zeta to move your goals. ${pickNextStepLocal(goals, 'mid', recentInputs)}`
       : `You're on fire — ${total} interactions today.\nLeveling up fast. ${pickNextStepLocal(goals, 'high', recentInputs)}`
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n')
 
-  const result: any = {};
-  const wantsTelegram = rule.channels?.telegram ?? true;
-  const wantsEmail = rule.channels?.email ?? false;
-  const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id);
+  const result: any = {}
+  const wantsTelegram = rule.channels?.telegram ?? true
+  const wantsEmail = rule.channels?.email ?? false
+  const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id)
 
   if (wantsTelegram && chatId) {
     const res = await fetch(urls.sendTelegram, {
@@ -811,26 +811,26 @@ export async function runUsageFrequency(
         subject: '🔔 Usage Frequency (Daily)',
         text,
       }),
-    });
-    const out = await res.json().catch(() => ({}));
-    result.telegram = out;
-    if (!res.ok) throw new Error(out?.error || out?.message || `HTTP ${res.status}`);
+    })
+    const out = await res.json().catch(() => ({}))
+    result.telegram = out
+    if (!res.ok) throw new Error(out?.error || out?.message || `HTTP ${res.status}`)
   }
 
   if (wantsEmail) {
-    const to = getFirstProjectEmail();
-    if (!to) return { result, feedback: '✅ Sent usage message. • ⚠️ No email saved. Add one in Functions → APIs.' };
+    const to = getFirstProjectEmail()
+    if (!to) return { result, feedback: '✅ Sent usage message. • ⚠️ No email saved. Add one in Functions → APIs.' }
     const res = await fetch(urls.sendEmail, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
       body: JSON.stringify({ to, subject: '🔔 Usage Frequency (Daily)', message: text }),
-    });
-    const outEmail = await res.json().catch(() => ({}));
-    result.email = outEmail;
-    if (!res.ok) throw new Error(outEmail?.error || outEmail?.message || `HTTP ${res.status}`);
+    })
+    const outEmail = await res.json().catch(() => ({}))
+    result.email = outEmail
+    if (!res.ok) throw new Error(outEmail?.error || outEmail?.message || `HTTP ${res.status}`)
   }
 
-  return { result, feedback: '✅ Sent usage message.' };
+  return { result, feedback: '✅ Sent usage message.' }
 }
 
 export async function runOutreach(
@@ -841,15 +841,15 @@ export async function runOutreach(
   getFirstProjectEmail: () => string | null,
   opts?: { manual?: boolean }
 ): Promise<{ result: any; feedback: string }> {
-  await assertManualRunAllowed(supabase, rule.project_id, opts);
+  await assertManualRunAllowed(supabase, rule.project_id, opts)
 
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 25_000);
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), 25_000)
 
-  const { data: sessionData } = await supabase.auth.getSession();
-  const accessToken = sessionData?.session?.access_token;
+  const { data: sessionData } = await supabase.auth.getSession()
+  const accessToken = sessionData?.session?.access_token
 
-  let triggerJson: any = null;
+  let triggerJson: any = null
   try {
     const res = await fetch(urls.dailyChatMessage, {
       method: 'POST',
@@ -861,25 +861,25 @@ export async function runOutreach(
       },
       body: JSON.stringify({ project_id: rule.project_id, trigger: 'manual' }),
       keepalive: true,
-    });
+    })
 
-    try { triggerJson = await res.json(); } catch { triggerJson = null; }
+    try { triggerJson = await res.json() } catch { triggerJson = null }
 
     if (!res.ok) {
-      clearTimeout(timer);
+      clearTimeout(timer)
       return {
         result: { trigger: { status: res.status, body: triggerJson } },
         feedback: `❌ daily-chat-message failed (${res.status}).`,
-      };
+      }
     }
   } catch (e: any) {
-    clearTimeout(timer);
+    clearTimeout(timer)
     if (e?.name === 'AbortError') {
-      return { result: { trigger: 'timeout-local' }, feedback: '⏳ Processing in the background…' };
+      return { result: { trigger: 'timeout-local' }, feedback: '⏳ Processing in the background…' }
     }
-    return { result: null, feedback: `❌ ${e?.message || String(e)}` };
+    return { result: null, feedback: `❌ ${e?.message || String(e)}` }
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timer)
   }
 
   const { data: msgRows, error: msgErr } = await supabase
@@ -888,25 +888,25 @@ export async function runOutreach(
     .eq('project_id', rule.project_id)
     .eq('role', 'assistant')
     .order('timestamp', { ascending: false })
-    .limit(1);
+    .limit(1)
 
   if (msgErr || !msgRows?.length) {
     return {
       result: { trigger: triggerJson, deliver: null },
       feedback: '✅ Triggered. (No new message fetched yet.)',
-    };
+    }
   }
 
-  const latest = msgRows[0];
-  const text: string = (latest?.message || '').trim() || rule.template || 'New outreach message';
+  const latest = msgRows[0]
+  const text: string = (latest?.message || '').trim() || rule.template || 'New outreach message'
 
-  const wantsTelegram = rule.channels?.telegram ?? true;
-  const wantsEmail = rule.channels?.email ?? false;
+  const wantsTelegram = rule.channels?.telegram ?? true
+  const wantsEmail = rule.channels?.email ?? false
 
-  const result: any = { trigger: triggerJson };
+  const result: any = { trigger: triggerJson }
 
   if (wantsTelegram) {
-    const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id);
+    const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id)
     if (chatId) {
       const res = await fetch(urls.sendTelegram, {
         method: 'POST',
@@ -922,19 +922,19 @@ export async function runOutreach(
           subject: '🔔 Outreach Message',
           text,
         }),
-      });
-      const tgOut = await res.json().catch(() => ({}));
-      result.telegram = tgOut;
+      })
+      const tgOut = await res.json().catch(() => ({}))
+      result.telegram = tgOut
       if (!res.ok) {
-        return { result, feedback: `❌ Telegram send failed (${res.status}).` };
+        return { result, feedback: `❌ Telegram send failed (${res.status}).` }
       }
     } else {
-      result.telegram = { skipped: 'no verified chat_id' };
+      result.telegram = { skipped: 'no verified chat_id' }
     }
   }
 
   if (wantsEmail) {
-    const to = getFirstProjectEmail();
+    const to = getFirstProjectEmail()
     if (to) {
       const res = await fetch(urls.sendEmail, {
         method: 'POST',
@@ -948,22 +948,22 @@ export async function runOutreach(
           subject: '🔔 Outreach Message',
           message: text,
         }),
-      });
-      const emailOut = await res.json().catch(() => ({}));
-      result.email = emailOut;
+      })
+      const emailOut = await res.json().catch(() => ({}))
+      result.email = emailOut
       if (!res.ok) {
-        return { result, feedback: `❌ Email send failed (${res.status}).` };
+        return { result, feedback: `❌ Email send failed (${res.status}).` }
       }
     } else {
-      result.email = { skipped: 'no project email saved' };
+      result.email = { skipped: 'no project email saved' }
     }
   }
 
   if (!wantsTelegram && !wantsEmail && !(rule.channels?.inapp ?? false)) {
-    return { result, feedback: 'ℹ️ Triggered, but no delivery channel selected.' };
+    return { result, feedback: 'ℹ️ Triggered, but no delivery channel selected.' }
   }
 
-  return { result, feedback: '✅ Message sent.' };
+  return { result, feedback: '✅ Message sent.' }
 }
 
 export async function runGeneric(
@@ -974,14 +974,13 @@ export async function runGeneric(
   getFirstProjectEmail: () => string | null,
   opts?: { manual?: boolean }
 ): Promise<{ result: any; feedback: string }> {
-  await assertManualRunAllowed(supabase, rule.project_id, opts);
-  // keep the original premium-type guard
-  await assertPremiumForType(supabase, rule.project_id, rule.type);
+  await assertManualRunAllowed(supabase, rule.project_id, opts)
+  await assertPremiumForType(supabase, rule.project_id, rule.type)
 
-  const wantsTelegram = rule.channels?.telegram ?? true;
-  const wantsEmail = rule.channels?.email ?? false;
-  const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id);
-  const text = (rule.template && rule.template.trim()) || rule.name;
+  const wantsTelegram = rule.channels?.telegram ?? true
+  const wantsEmail = rule.channels?.email ?? false
+  const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id)
+  const text = (rule.template && rule.template.trim()) || rule.name
 
   const makeSendPayload = (subject: string, textMsg: string) => ({
     id: `${rule.id}:${Date.now()}`,
@@ -992,45 +991,44 @@ export async function runGeneric(
     skipConnectMessage: true,
     subject,
     text: textMsg,
-    message: textMsg, // legacy
-    chat_id: chatId, // legacy
-    telegram_chat_id: chatId, // legacy
-  });
+    message: textMsg,
+    chat_id: chatId,
+    telegram_chat_id: chatId,
+  })
 
-  const result: any = {};
+  const result: any = {}
 
   if (wantsTelegram && chatId) {
     const res = await fetch(urls.sendTelegram, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
       body: JSON.stringify(makeSendPayload(`🔔 ${rule.name}`, text)),
-    });
-    const data = await res.json().catch(() => ({}));
-    result.telegram = data;
-    if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+    })
+    const data = await res.json().catch(() => ({}))
+    result.telegram = data
+    if (!res.ok) throw new Error(data?.error || data?.message || `HTTP ${res.status}`)
   }
 
   if (wantsEmail) {
-    const to = getFirstProjectEmail();
+    const to = getFirstProjectEmail()
     if (!to) {
-      return { result, feedback: 'ℹ️ Ran, but Email selected and no address saved (Functions → APIs).' };
+      return { result, feedback: 'ℹ️ Ran, but Email selected and no address saved (Functions → APIs).' }
     }
     const res = await fetch(urls.sendEmail, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
       body: JSON.stringify({ to, subject: `🔔 ${rule.name}`, message: text }),
-    });
-    const email = await res.json().catch(() => ({}));
-    result.email = email;
-    if (!res.ok) throw new Error(email?.error || email?.message || `HTTP ${res.status}`);
+    })
+    const email = await res.json().catch(() => ({}))
+    result.email = email
+    if (!res.ok) throw new Error(email?.error || email?.message || `HTTP ${res.status}`)
   }
 
   if (!wantsTelegram && !wantsEmail && !(rule.channels?.inapp ?? false)) {
-    return { result, feedback: 'ℹ️ Ran, but no delivery channel selected.' };
+    return { result, feedback: 'ℹ️ Ran, but no delivery channel selected.' }
   }
-  return { result, feedback: '✅ Triggered.' };
+  return { result, feedback: '✅ Triggered.' }
 }
-
 
 // keep all the named exports already present
 const _default = {
@@ -1046,7 +1044,6 @@ const _default = {
   runRelevantDiscussion,
   runThoughts,
   runUsageFrequency,
-     
   runOutreach,
   runGeneric,
   runCalendarDigest,

@@ -6,7 +6,7 @@ import DashboardTasks from '@/components/ui/Tasks';
 import dynamic from 'next/dynamic';
 
 // ✅ Shared XP utils
-import { getXPProgress } from '@/lib/XP';
+import { getXPProgress, LEVELS } from '@/lib/XP';
 
 const FunctionsPanel = dynamic(
   () => import('@/components/functions/FunctionsPanel').then((m) => m.default),
@@ -22,6 +22,9 @@ type ThoughtRow = {
   content: string | null;
   created_at: string;
 };
+
+type TitlesMap = Record<number, string>;
+const defaultTitlesMap: TitlesMap = Object.fromEntries(LEVELS.map(l => [l.level, l.title])) as TitlesMap;
 
 const PANEL_W = 'w-[320px]';
 
@@ -64,11 +67,14 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
   const [latestThought, setLatestThought] = useState<string | null>(null);
   const [loadingThought, setLoadingThought] = useState<boolean>(true);
 
-  // XP progress (from shared lib)
+  // Custom level titles for this project
+  const [titles, setTitles] = useState<TitlesMap>(defaultTitlesMap);
+
+  // XP progress (shared lib) — we'll override titles using `titles` map
   const [prog, setProg] = useState({
     level: 1,
-    title: 'Junior Assistant',
-    nextTitle: 'Associate Assistant',
+    title: defaultTitlesMap[1],
+    nextTitle: defaultTitlesMap[2],
     pct: 0,
     remaining: 100,
     current: 0,
@@ -111,7 +117,43 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     }
   }, [projectId]);
 
-  // ⚡ XP progress (poll lightly)
+  // 🔤 Load custom level titles for this project
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+
+    async function loadTitles() {
+      try {
+        const { data, error } = await supabase
+          .from('level_titles')
+          .select('level,title')
+          .eq('project_id', projectId);
+
+        if (cancelled) return;
+
+        if (error) {
+          // Table might not exist yet; keep defaults
+          setTitles(defaultTitlesMap);
+          return;
+        }
+
+        const merged: TitlesMap = { ...defaultTitlesMap };
+        (data ?? []).forEach((row: any) => {
+          if (row?.level && row?.title) merged[row.level] = String(row.title);
+        });
+        setTitles(merged);
+      } catch {
+        if (!cancelled) setTitles(defaultTitlesMap);
+      }
+    }
+
+    loadTitles();
+    // Re-check occasionally in case another tab changes titles
+    const id = setInterval(loadTitles, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [projectId]);
+
+  // ⚡ XP progress — override titles using the loaded map
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
@@ -119,7 +161,13 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     async function loadXP() {
       try {
         const p = await getXPProgress(projectId);
-        if (!cancelled && p) setProg(p);
+        if (cancelled || !p) return;
+
+        const curTitle = titles[p.level] ?? defaultTitlesMap[p.level] ?? `Level ${p.level}`;
+        const nextLvl = Math.min(p.level + 1, LEVELS.length);
+        const nextTitle = titles[nextLvl] ?? defaultTitlesMap[nextLvl] ?? `Level ${nextLvl}`;
+
+        setProg({ ...p, title: curTitle, nextTitle });
       } catch (e) {
         console.error('XP sidebar load error', e);
       }
@@ -127,17 +175,14 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
 
     loadXP();
     const id = setInterval(loadXP, 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [projectId]);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [projectId, titles]); // <= re-run when titles change
 
   const thoughtText =
     latestThought ??
     (loadingThought ? 'Loading Zeta’s latest thought…' : 'No thoughts yet. Generate one to kick things off.');
 
-  const maxed = prog.remaining === 0 && prog.level >= 10;
+  const maxed = prog.remaining === 0 && prog.level >= LEVELS.length;
 
   return (
     <div className="flex flex-col items-center pt-[230px] gap-4 pr-1">
@@ -177,16 +222,16 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
 
       {/* 🧠 Zeta’s Thoughts */}
       <div className={`${PANEL_W} shrink-0 bg-indigo-100 text-indigo-900 px-4 py-3 rounded-2xl shadow border border-indigo-300 text-sm`}>
-        <p className="font-bold mb-2">🧠 Zeta’s Thoughts</p>
+        <p className="font-bold mb-2">💭 Zeta’s Thoughts</p>
         <p className="text-sm whitespace-pre-wrap">{thoughtText}</p>
       </div>
 
       {/* 📝 Daily Tasks */}
-<div className={`${PANEL_W} flex-1 self-stretch min-h-0`}>
-  <div className="h-full bg-yellow-50 border border-yellow-200 rounded-2xl p-3 shadow overflow-auto">
-    <DashboardTasks projectId={projectId} />
-  </div>
-</div>
+      <div className={`${PANEL_W} flex-1 self-stretch min-h-0`}>
+        <div className="h-full bg-yellow-50 border border-yellow-200 rounded-2xl p-3 shadow overflow-auto">
+          <DashboardTasks projectId={projectId} />
+        </div>
+      </div>
 
       {/* (Optional) Functions panel or other modules */}
       {/* <FunctionsPanel projectId={projectId} /> */}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import React, { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -16,36 +16,29 @@ type LogRow = {
   created_at: string;
 };
 
-/* ---------- Helpers (same semantics as your LogsPanel) ---------- */
+/* ---------- Helpers ---------- */
 const EVENT_UI: Record<string, { icon: string; border: string }> = {
   'task.create': { icon: '🆕', border: 'border-lime-400' },
   'task.edit': { icon: '✏️', border: 'border-yellow-400' },
   'task.confirm': { icon: '📌', border: 'border-orange-400' },
   'task.complete': { icon: '✅', border: 'border-green-400' },
   'task.verify': { icon: '🧪', border: 'border-amber-400' },
-  // files
   'file.upload': { icon: '📎', border: 'border-emerald-400' },
   'file.convert': { icon: '🔁', border: 'border-teal-400' },
   'file.generate': { icon: '🗂️', border: 'border-cyan-400' },
-  // discussions
   'discussion.start': { icon: '💬', border: 'border-cyan-400' },
-  // integrations
   'api.connect': { icon: '🔌', border: 'border-fuchsia-400' },
   'notification.send': { icon: '📣', border: 'border-pink-400' },
-  // calendar
   'calendar.event': { icon: '🗓️', border: 'border-sky-400' },
   'calendar.reminder': { icon: '⏰', border: 'border-sky-400' },
   'calendar.note': { icon: '📝', border: 'border-sky-400' },
-  // project meta
   'project.vision.update': { icon: '🎯', border: 'border-indigo-400' },
   'project.goals.short.update': { icon: '🎯', border: 'border-indigo-400' },
   'project.goals.long.update': { icon: '🏁', border: 'border-indigo-400' },
-  // zeta thinking/ops
   'zeta.thought': { icon: '🤔', border: 'border-violet-400' },
   'zeta.outreach': { icon: '📨', border: 'border-violet-400' },
-  // misc
   'functions.build.start': { icon: '🧩', border: 'border-pink-400' },
-  'memory.insight': { icon: '🧠', border: 'border-violet-400' },
+  'memory.insight': { icon: '🗂️', border: 'border-violet-400' },
 };
 
 function fallbackMessage(row: LogRow) {
@@ -89,44 +82,69 @@ function timeAgo(ts?: string | null) {
   return `${days}d ago`;
 }
 
-/* ---------- helper to choose newest across MF + logs ---------- */
+/* ---------- newest timestamp helper (prevents stale overwrite) ---------- */
+function newestTs(...vals: Array<string | null | undefined>) {
+  const ms = vals.map(v => (v ? Date.parse(v) : NaN)).filter(n => Number.isFinite(n)) as number[];
+  if (!ms.length) return null;
+  return new Date(Math.max(...ms)).toISOString();
+}
+
+/* ---------- pick newest across MF + logs ---------- */
 type BadgeKind = 'NOTIFICATION' | 'THOUGHT' | 'MESSAGE';
-function chooseMostRecentMessage(opts: {
-  mf: any | null; // mainframe_info row (or null)
-  logTimes: Record<string, string | null>; // event -> ISO timestamp
+
+function chooseLatestAny(opts: {
+  mf: any | null;
+  logs: Array<{ event: string; details?: any; message?: string | null; created_at: string }>;
 }): { text: string | null; kind: BadgeKind | null; at: string | null } {
   const mf = opts.mf ?? {};
+  const candidates: Array<{ text: string; at: string | null; kind: BadgeKind }> = [];
 
-  const notifText    = (mf.latest_notification ?? mf.latest_notificaiton ?? null) as string | null;
-  const thoughtText  = (mf.latest_thought ?? null) as string | null;
-  const outreachText = (mf.latest_outreach_chat ?? null) as string | null;
+  // Prefer the authoritative snapshot in mainframe_info (with timestamps)
+  if (mf.latest_outreach_chat && mf.latest_outreach_chat_at) {
+    candidates.push({ text: String(mf.latest_outreach_chat), at: String(mf.latest_outreach_chat_at), kind: 'MESSAGE' });
+  }
+  if (mf.latest_thought && mf.latest_thought_at) {
+    candidates.push({ text: String(mf.latest_thought), at: String(mf.latest_thought_at), kind: 'THOUGHT' });
+  }
+  if (mf.latest_notification && mf.latest_notification_at) {
+    candidates.push({ text: String(mf.latest_notification), at: String(mf.latest_notification_at), kind: 'NOTIFICATION' });
+  }
 
-  const notifAt   = (mf.latest_notification_at   ?? opts.logTimes['notification.send'] ?? null) as string | null;
-  const thoughtAt = (mf.latest_thought_at        ?? opts.logTimes['zeta.thought']      ?? null) as string | null;
-  const outreAt   = (mf.latest_outreach_chat_at  ?? opts.logTimes['zeta.outreach']     ?? null) as string | null;
+  // Fallback to recent logs (kept for resilience)
+  for (const r of opts.logs ?? []) {
+    let kind: BadgeKind | null = null;
+    if (r.event === 'zeta.outreach') kind = 'MESSAGE';
+    else if (r.event === 'zeta.thought') kind = 'THOUGHT';
+    else if (r.event === 'notification.send') kind = 'NOTIFICATION';
+    if (!kind) continue;
 
-  type Cand = { text: string; at?: string | null; kind: BadgeKind };
-  const candidates: Cand[] = [];
-  if (outreachText && outreachText.trim()) candidates.push({ text: outreachText, at: outreAt, kind: 'MESSAGE' });
-  if (thoughtText && thoughtText.trim())   candidates.push({ text: thoughtText,  at: thoughtAt, kind: 'THOUGHT' });
-  if (notifText && notifText.trim())       candidates.push({ text: notifText,    at: notifAt,   kind: 'NOTIFICATION' });
+    const text = (r.details?.summary ?? r.details?.text ?? r.message ?? '').toString().trim();
+    if (!text) continue;
+
+    candidates.push({ text, at: r.created_at ?? null, kind });
+  }
 
   if (candidates.length === 0) return { text: null, kind: null, at: null };
 
-  const withTs = candidates
-    .map(c => ({ ...c, ts: c.at ? Date.parse(c.at) : NaN }))
-    .filter(c => Number.isFinite(c.ts));
+  candidates.sort((a, b) => {
+    const ta = a.at ? Date.parse(a.at) : -Infinity;
+    const tb = b.at ? Date.parse(b.at) : -Infinity;
+    return tb - ta;
+  });
 
-  if (withTs.length > 0) {
-    withTs.sort((a, b) => b.ts - a.ts);
-    return { text: withTs[0].text, kind: withTs[0].kind, at: withTs[0].at ?? null };
-  }
-
-  // If no timestamps at all, prefer outreach > thought > notification
-  const first = candidates[0];
-  return { text: first.text, kind: first.kind, at: first.at ?? null };
+  const top = candidates[0];
+  return { text: top.text, kind: top.kind, at: top.at };
 }
 
+/* ---------- date helpers ---------- */
+function ymd(d = new Date()) {
+  return d.toISOString().slice(0, 10);
+}
+function ymdNDaysAgo(n: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return ymd(d);
+}
 
 export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   const router = useRouter();
@@ -144,9 +162,7 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
     d.setDate(startOfWeek.getDate() + i);
     return d;
   });
-  const [selectedDate, setSelectedDate] = useState<Date>(
-    () => new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  );
+  const [selectedDate, setSelectedDate] = useState<Date>(() => new Date(today.getFullYear(), today.getMonth(), today.getDate()));
 
   /* ---------------------- Logs/Activity state ------------- */
   const [latestLog, setLatestLog] = useState<LogRow | null>(null);
@@ -158,16 +174,15 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   const [isComposing, setIsComposing] = useState(false);
   const [latestNotification, setLatestNotification] = useState<string | null>(null);
   const [latestKind, setLatestKind] = useState<BadgeKind | null>(null);
-  const [latestAt, setLatestAt] = useState<string | null>(null); // ← NEW
+  const [latestAt, setLatestAt] = useState<string | null>(null);
 
-  const DEFAULT_NOTIFICATION =
-    'Hey there! Connect to Telegram in Workspace/APIs, and then start receiving notifications! ';
   const [userReply, setUserReply] = useState('');
   const [sentUserMsg, setSentUserMsg] = useState<string | null>(null);
-  const [assistantFollowup, setAssistantFollowup] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  const [sending] = useState(false);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const userInitials = userEmail?.slice(0, 2).toUpperCase() ?? '??';
@@ -175,13 +190,10 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   /* -------------------- Fetch Memory ---------------------- */
   useEffect(() => {
     async function fetchMemory() {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        console.error('❌ Auth error:', authError);
+      const { data: auth } = await supabase.auth.getUser();
+      const user = auth?.user;
+      if (!user) {
+        console.error('❌ No authed user.');
         setMemory(null);
         setLoading(false);
         return;
@@ -189,45 +201,65 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
 
       try {
         if (tab === 'daily') {
-          const formattedDate = selectedDate.toISOString().split('T')[0];
+          const dateStr = selectedDate.toISOString().split('T')[0];
           const { data, error } = await supabase
             .from('zeta_daily_memory')
             .select('memory')
             .eq('user_id', user.id)
             .eq('project_id', projectId)
-            .eq('date', formattedDate)
+            .eq('date', dateStr)
             .maybeSingle();
+
           if (error) throw error;
           setMemory((data as { memory?: string } | null)?.memory ?? null);
         } else if (tab === 'weekly') {
-          const { data, error } = await supabase
+          const { data: wk, error: wkErr } = await supabase
             .from('zeta_weekly_memory')
-            .select('memory')
+            .select('memory, date')
             .eq('user_id', user.id)
             .eq('project_id', projectId)
             .order('date', { ascending: false })
             .limit(1)
             .maybeSingle();
-          if (error) throw error;
-          setMemory((data as { memory?: string } | null)?.memory ?? null);
+
+          if (wkErr) throw wkErr;
+
+          if (wk?.memory) {
+            setMemory(wk.memory as string);
+          } else {
+            const { data: daily7, error: dErr } = await supabase
+              .from('zeta_daily_memory')
+              .select('date, memory')
+              .eq('user_id', user.id)
+              .eq('project_id', projectId)
+              .gte('date', ymdNDaysAgo(6))
+              .lte('date', ymd())
+              .order('date', { ascending: true });
+
+            if (dErr) throw dErr;
+
+            if (daily7 && daily7.length > 0) {
+              const joined = daily7.map((r: any) => `${r.date}: ${r.memory}`).join('\n');
+              setMemory(joined);
+            } else {
+              setMemory(null);
+            }
+          }
         } else {
-          const fromDate = new Date();
-          fromDate.setDate(fromDate.getDate() - 29);
-          const fromISO = fromDate.toISOString().split('T')[0];
-          const { data, error } = await supabase
-            .from('zeta_current_memory')
-            .select('summary')
+          const { data: mo, error: moErr } = await supabase
+            .from('zeta_monthly_memory')
+            .select('memory, date')
             .eq('user_id', user.id)
             .eq('project_id', projectId)
-            .gte('created_at', fromISO)
-            .order('created_at', { ascending: false })
+            .order('date', { ascending: false })
             .limit(1)
             .maybeSingle();
-          if (error) throw error;
-          setMemory((data as { summary?: string } | null)?.summary ?? null);
+
+          if (moErr) throw moErr;
+          setMemory((mo as { memory?: string } | null)?.memory ?? null);
         }
-      } catch (err) {
-        console.error('❌ Supabase fetch error:', err);
+      } catch (err: any) {
+        console.error('❌ Supabase fetch error:', err?.message ?? err);
         setMemory(null);
       } finally {
         setLoading(false);
@@ -235,19 +267,21 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
     }
 
     if (projectId) void fetchMemory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, tab, selectedDate]);
 
   /* -------------------- Logs + Activity fetchers ---------- */
   async function refreshLatestLog(pid: string) {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('system_logs')
       .select('id,project_id,actor,event,message,details,created_at')
       .eq('project_id', pid)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
       .limit(1)
       .maybeSingle();
-    if (!error) setLatestLog((data as LogRow) ?? null);
+
+    const row = (data as LogRow) ?? null;
+    setLatestLog(row);
+    if (row?.created_at) setZetaLastActive(prev => newestTs(prev, row.created_at));
   }
 
   async function refreshActivityAndUnread(pid: string) {
@@ -258,10 +292,10 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       .maybeSingle();
 
     const ula = p?.user_last_active ?? null;
-    const zla = p?.zeta_last_active ?? null;
+    const zlaDb = p?.zeta_last_active ?? null;
 
     setUserLastActive(ula);
-    setZetaLastActive(zla);
+    setZetaLastActive(prev => newestTs(prev, zlaDb, latestLog?.created_at ?? null));
 
     let unread = 0;
     if (ula) {
@@ -291,15 +325,16 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
 
     const t = setInterval(run, 30_000);
 
-    const ch = supabase
+    // ── Realtime: logs (as before)
+    const chLogs = supabase
       .channel(`logs_rhs_${projectId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'system_logs', filter: `project_id=eq.${projectId}` },
-        (payload) => {
+        async (payload) => {
           const row = payload.new as LogRow;
           setLatestLog(row);
-          setZetaLastActive(row.created_at);
+          setZetaLastActive(prev => newestTs(prev, row.created_at));
           if (!userLastActive || row.created_at > userLastActive) {
             setUnreadCount((n) => n + 1);
           }
@@ -307,11 +342,79 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       )
       .subscribe();
 
+    // ── Realtime: custom_notifications → update local "latest" immediately
+    const chNotifications = supabase
+      .channel(`custom_notifications_${projectId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'custom_notifications', filter: `project_id=eq.${projectId}` },
+        async (payload) => {
+          const row = payload.new as any;
+          const text = (row.message || '').toString().trim();
+          if (!text) return;
+          const at = (row.sent_at || row.created_at || new Date().toISOString()).toString();
+          const kind: BadgeKind = row.type === 'outreach' ? 'MESSAGE' : 'NOTIFICATION';
+          // only replace if it’s newer
+          const curTs = latestAt ? Date.parse(latestAt) : -Infinity;
+          const newTs = Date.parse(at);
+          if (newTs > curTs) {
+            setLatestNotification(text);
+            setLatestKind(kind);
+            setLatestAt(at);
+          }
+        }
+      )
+      .subscribe();
+
+    // ── Realtime: thoughts inserts
+    const chThoughts = supabase
+      .channel(`thoughts_${projectId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'thoughts', filter: `project_id=eq.${projectId}` },
+        (payload) => {
+          const row = payload.new as any;
+          const text = (row.content || '').toString().trim();
+          const at = (row.created_at || new Date().toISOString()).toString();
+          if (!text) return;
+          const curTs = latestAt ? Date.parse(latestAt) : -Infinity;
+          const newTs = Date.parse(at);
+          if (newTs > curTs) {
+            setLatestNotification(text);
+            setLatestKind('THOUGHT');
+            setLatestAt(at);
+          }
+        }
+      )
+      .subscribe();
+
+    // ── Realtime: mainframe_info updates (authoritative snapshot)
+    const chMF = supabase
+      .channel(`mf_${projectId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mainframe_info', filter: `project_id=eq.${projectId}` },
+        async (payload) => {
+          const mf = payload.new as any;
+          const { text, kind, at } = chooseLatestAny({ mf, logs: [] });
+          if (text) {
+            setLatestNotification(text);
+            setLatestKind(kind);
+            setLatestAt(at);
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       clearInterval(t);
-      supabase.removeChannel(ch);
+      supabase.removeChannel(chLogs);
+      supabase.removeChannel(chNotifications);
+      supabase.removeChannel(chThoughts);
+      supabase.removeChannel(chMF);
     };
-  }, [projectId, userLastActive]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, userLastActive, latestAt]);
 
   async function markLogsRead() {
     const nowIso = new Date().toISOString();
@@ -320,57 +423,42 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
     setUnreadCount(0);
   }
 
-  /* --------------- Latest Notification (from mainframe_info + logs) ---------- */
+  /* --------------- Latest Notification (MF + logs) ---------- */
   useEffect(() => {
     async function fetchFromMainframe() {
-      if (!projectId) {
-        setLatestNotification(null);
-        setLatestKind(null);
-        return;
-      }
+      if (!projectId) return;
 
       try {
-        // mainframe row (avoid 42703 by using '*')
         const mfQ = supabase
           .from('mainframe_info')
-          .select('*')
+          .select('latest_notification, latest_notification_at, latest_thought, latest_thought_at, latest_outreach_chat, latest_outreach_chat_at')
           .eq('project_id', projectId)
           .limit(1)
           .maybeSingle<any>();
 
-        // latest times from logs for three events
         const logsQ = supabase
           .from('system_logs')
-          .select('event, created_at')
+          .select('event, message, details, created_at')
           .eq('project_id', projectId)
           .in('event', ['notification.send', 'zeta.thought', 'zeta.outreach'])
-          .order('created_at', { ascending: false })
-          .limit(10);
+          .order('created_at', { ascending: false, nullsFirst: false })
+          .limit(20);
 
         const [mfRes, logsRes] = await Promise.all([mfQ, logsQ]);
 
-        if (mfRes.error) console.error('❌ mainframe_info fetch error:', JSON.stringify(mfRes.error));
-        if (logsRes.error) console.error('❌ system_logs fetch error:', JSON.stringify(logsRes.error));
-
-        const mfRow = mfRes.data ?? null;
-
-        const logTimes: Record<string, string | null> = {
-          'notification.send': null,
-          'zeta.thought': null,
-          'zeta.outreach': null,
-        };
-        (logsRes.data ?? []).forEach((r: any) => {
-          if (!logTimes[r.event]) logTimes[r.event] = r.created_at as string;
+        const { text, kind, at } = chooseLatestAny({
+          mf: mfRes.data ?? null,
+          logs: (logsRes.data as any[]) ?? [],
         });
 
-        const { text, kind, at } = chooseMostRecentMessage({ mf: mfRow, logTimes });
-setLatestNotification(text ?? null);
-setLatestKind(kind ?? null);
-setLatestAt(at ?? null); // ← NEW
+        setLatestNotification(text ?? null);
+        setLatestKind(kind ?? null);
+        setLatestAt(at ?? null);
       } catch (err) {
-        console.error('❌ mainframe_info/logs fetch threw:', err instanceof Error ? err.message : err);
+        console.error('❌ mainframe_info/logs fetch threw:', err);
         setLatestNotification(null);
         setLatestKind(null);
+        setLatestAt(null);
       }
     }
 
@@ -380,69 +468,110 @@ setLatestAt(at ?? null); // ← NEW
   /* --------------- Mini-chat helpers ---------------------- */
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [sentUserMsg, assistantFollowup]);
+  }, [sentUserMsg]);
 
   function handleReplyKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (userReply.trim() && !sending) void sendMiniReply();
+      const trimmed = userReply.trim();
+      if (!trimmed) return;
+      setSentUserMsg(trimmed);
+      setUserReply('');
+      setLocked(true);
     }
   }
 
-  async function sendMiniReply() {
-    if (!userReply.trim() || sending) return;
+  function buildInitialAssistantText(): string {
+    return (latestNotification ?? '').trim();
+  }
 
-    const notification = latestNotification ?? DEFAULT_NOTIFICATION;
-    setSending(true);
+  function buildTitle(from: string, fallback: string): string {
+    const base = (from || fallback || '').replace(/\s+/g, ' ').trim();
+    if (!base) return 'Follow-up';
+    const head = base.length > 64 ? `${base.slice(0, 64)}…` : base;
+    return `Follow-up: ${head}`;
+  }
+
+  async function createDiscussion() {
+    if (!projectId) { setError('Missing projectId'); return; }
+    const userMsg = (sentUserMsg || '').trim();
+    if (!userMsg) { setError('Please type your reply first.'); return; }
+
+    setCreating(true);
+    setStatus('Creating discussion…');
     setError(null);
 
-    const trimmed = userReply.trim();
-    setSentUserMsg(trimmed);
-    setLocked(true);
-    setUserReply('');
+    const initialAssistant = buildInitialAssistantText();
+    const title = buildTitle(initialAssistant, userMsg);
 
     try {
-      const res = await fetch('/api/mini-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId,
-          userEmail,
-          notificationBody: notification,
-          userReply: trimmed,
-        }),
-      });
+      if (initialAssistant) {
+        const res = await fetch('/api/discussion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: String(projectId),
+            title,
+            modelId: 'gpt-4o',
+            initialAssistant,
+            initialUser: userMsg,
+            runOnCreate: true,
+          }),
+        });
 
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || `Mini chat failed: ${res.status}`);
+        const txt = await res.text();
+        let json: any = {};
+        try { json = JSON.parse(txt); } catch {}
+        if (!res.ok) throw new Error(json?.error || txt || `Failed to create discussion (HTTP ${res.status})`);
 
-      setAssistantFollowup(json.followup ?? null);
+        const threadId: string | undefined = json?.threadId;
+        if (!threadId) throw new Error('Discussion created but no threadId returned');
+
+        setStatus('Opening…');
+        router.push(`/dashboard/${projectId}?open=${encodeURIComponent(threadId)}`);
+      } else {
+        const res = await fetch('/api/discussion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: String(projectId), title }),
+        });
+        const txt = await res.text();
+        let json: any = {};
+        try { json = JSON.parse(txt); } catch {}
+        if (!res.ok) throw new Error(json?.error || txt || `Failed to create discussion (HTTP ${res.status})`);
+
+        const threadId: string | undefined = json?.threadId;
+        if (!threadId) throw new Error('Create-only succeeded but no threadId returned');
+
+        const seed = await fetch('/api/discussion-seed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: String(projectId), threadId, userText: userMsg }),
+        });
+        const seedTxt = await seed.text();
+        let seedJson: any = {};
+        try { seedJson = JSON.parse(seedTxt); } catch {}
+        if (!seed.ok) throw new Error(seedJson?.error || seedTxt || `Seed failed (HTTP ${seed.status})`);
+
+        setStatus('Opening…');
+        router.push(`/dashboard/${projectId}?open=${encodeURIComponent(threadId)}`);
+      }
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to send reply.');
+      setError(e?.message ?? 'Failed to create discussion.');
       setLocked(false);
       setSentUserMsg(null);
-      setUserReply(trimmed);
     } finally {
-      setSending(false);
+      setCreating(false);
+      setTimeout(() => setStatus(null), 1200);
     }
-  }
-
-  const seed = useMemo(() => {
-    const n = latestNotification ?? DEFAULT_NOTIFICATION;
-    const u = sentUserMsg ? `\n\nUser reply:\n${sentUserMsg}` : '';
-    const a = assistantFollowup ? `\n\nZeta follow-up:\n${assistantFollowup}` : '';
-    return `Seeded from dashboard mini-convo.\n\nNotification:\n${n}${u}${a}`;
-  }, [latestNotification, sentUserMsg, assistantFollowup]);
-
-  function continueDiscussion() {
-    router.push(`/dashboard/${projectId}/discussion/new?seed=${encodeURIComponent(seed)}`);
   }
 
   /* ------------------------- UI --------------------------- */
+  const zetaDisplayTs = newestTs(zetaLastActive, latestLog?.created_at ?? null);
+
   return (
     <div className="h-full w-full flex flex-col bg-indigo-50/60 text-indigo-900 overflow-hidden">
-      {/* Sticky header: title + tab selector */}
       <header className="sticky top-0 z-20 border-b border-indigo-200/60 bg-indigo-50/80 backdrop-blur supports-[backdrop-filter]:bg-indigo-50/60">
         <div className="px-6 pt-4 pb-3">
           <div className="flex items-center justify-between">
@@ -465,7 +594,6 @@ setLatestAt(at ?? null); // ← NEW
         </div>
       </header>
 
-      {/* Scrollable content: memory body + logs + notifications/mini-chat */}
       <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-6">
         {tab === 'daily' && (
           <DailyPicker weekDates={weekDates} selectedDate={selectedDate} onPick={(d) => setSelectedDate(d)} />
@@ -485,7 +613,7 @@ setLatestAt(at ?? null); // ← NEW
         {/* Logs */}
         <section>
           <div className="flex items-center justify-between mb-1">
-            <h3 className="font-bold text-base flex items-center gap-2">🗒️ Logs</h3>
+            <h3 className="font-bold text-base flex items-center gap-2">🗂️ Logs</h3>
             <div className="flex items-center gap-2">
               <span className="bg-red-500 text-white text-xs rounded-full px-2 py-0.5">({unreadCount})</span>
               <button onClick={markLogsRead} className="text-xs text-indigo-700 hover:underline">
@@ -497,7 +625,7 @@ setLatestAt(at ?? null); // ← NEW
           <div className="text-[11px] text-slate-600 mb-2">
             Zeta was last active:{' '}
             <span className="font-medium text-slate-700">
-              {zetaLastActive ? `${timeAgo(zetaLastActive)} · ${new Date(zetaLastActive).toLocaleString()}` : '—'}
+              {zetaDisplayTs ? `${timeAgo(zetaDisplayTs)} · ${new Date(zetaDisplayTs).toLocaleString()}` : '—'}
             </span>
           </div>
 
@@ -537,23 +665,23 @@ setLatestAt(at ?? null); // ← NEW
               <img src="/zeta-avatar.jpg" alt="Zeta avatar" className="w-8 h-8 rounded-full object-cover" />
               <div className="bg-white text-indigo-900 rounded-xl px-4 py-2 shadow-sm text-xs w-full border border-indigo-100">
                 <p className="font-medium mb-1 flex items-center gap-2">
-  <span>Zeta:</span>
-  {latestKind && (
-    <span
-      className={`uppercase tracking-wide rounded-full px-2 py-[2px] text-[10px] font-bold
-      ${latestKind === 'MESSAGE' ? 'bg-blue-100 text-blue-700 border border-blue-200'
-        : latestKind === 'THOUGHT' ? 'bg-violet-100 text-violet-700 border border-violet-200'
-        : 'bg-amber-100 text-amber-700 border border-amber-200'}`}
-    >
-      {latestKind}
-    </span>
-  )}
-  <span className="text-[10px] text-slate-500 ml-1">
-    {latestAt ? `${timeAgo(latestAt) }` : '—'}
-  </span>
-</p>
+                  <span>Zeta:</span>
+                  {latestKind && (
+                    <span
+                      className={`uppercase tracking-wide rounded-full px-2 py-[2px] text-[10px] font-bold
+                      ${latestKind === 'MESSAGE' ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                        : latestKind === 'THOUGHT' ? 'bg-violet-100 text-violet-700 border border-violet-200'
+                        : 'bg-amber-100 text-amber-700 border border-amber-200'}`}
+                    >
+                      {latestKind}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-slate-500 ml-1">
+                    {latestAt ? `${timeAgo(latestAt)}` : '—'}
+                  </span>
+                </p>
                 <p className="leading-snug whitespace-pre-wrap">
-                  {latestNotification ?? DEFAULT_NOTIFICATION}
+                  {latestNotification ?? '—'}
                 </p>
               </div>
             </div>
@@ -568,18 +696,7 @@ setLatestAt(at ?? null); // ← NEW
               </div>
             )}
 
-            {/* Zeta follow-up */}
-            {assistantFollowup && (
-              <div className="flex items-start gap-3 mt-3">
-                <img src="/zeta-avatar.jpg" alt="Zeta" className="w-6 h-6 rounded-full object-cover mt-0.5" />
-                <div className="bg-white border border-blue-200 rounded-xl px-3 py-2 shadow-sm text-xs max-w-[90%]">
-                  <div className="font-semibold text-blue-800 mb-0.5">Zeta</div>
-                  <div className="text-slate-800 whitespace-pre-wrap">{assistantFollowup}</div>
-                </div>
-              </div>
-            )}
-
-            {/* Composer — only BEFORE first send */}
+            {/* Composer (before first send) */}
             {!locked && (
               <div className="flex items-start gap-3 mt-4">
                 <div className="w-8 h-8 rounded-full bg-indigo-200 text-indigo-800 font-bold text-xs flex items-center justify-center border">
@@ -599,11 +716,17 @@ setLatestAt(at ?? null); // ← NEW
                   />
                   <div className="mt-2">
                     <button
-                      onClick={sendMiniReply}
-                      disabled={!userReply.trim() || sending}
+                      onClick={() => {
+                        const trimmed = userReply.trim();
+                        if (!trimmed) return;
+                        setSentUserMsg(trimmed);
+                        setUserReply('');
+                        setLocked(true);
+                      }}
+                      disabled={!userReply.trim()}
                       className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-700 disabled:opacity-50"
                     >
-                      {sending ? 'Sending…' : 'Send'}
+                      Send
                     </button>
                   </div>
 
@@ -616,15 +739,17 @@ setLatestAt(at ?? null); // ← NEW
               </div>
             )}
 
-            {/* After first send — hide composer and show only Continue */}
+            {/* After first send — Create Discussion */}
             {locked && (
-              <div className="mt-4 flex justify-center">
+              <div className="mt-4 flex flex-col items-center gap-2">
                 <button
-                  onClick={continueDiscussion}
-                  className="px-4 py-2 rounded-lg bg-amber-500 text-white text-xs md:text-sm hover:bg-amber-600"
+                  onClick={createDiscussion}
+                  disabled={creating}
+                  className="px-4 py-2 rounded-lg bg-amber-500 text-white text-xs md:text-sm hover:bg-amber-600 disabled:opacity-60"
                 >
-                  Continue discussion →
+                  {creating ? 'Creating…' : 'Create discussion'}
                 </button>
+                {status && <div className="text-[11px] text-slate-600">{status}</div>}
               </div>
             )}
 

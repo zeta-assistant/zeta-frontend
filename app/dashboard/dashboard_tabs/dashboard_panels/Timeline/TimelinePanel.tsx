@@ -5,10 +5,9 @@ import { supabase } from '@/lib/supabaseClient';
 import {
   computeXP,
   levelProgress,
-  levelTitle,
   LEVELS,
   type MetricCounts as XPMetrics,
-  getXPCounts,        // fallback
+  getXPCounts, // fallback
 } from '@/lib/XP';
 
 type Props = { projectId: string };
@@ -35,9 +34,9 @@ const ZERO: XPMetrics = {
   goals_achieved: 0,
   outreach_messages: 0,
   zeta_thoughts: 0,
-  tasks_zeta_created: 0,    // fallback if live count not available
-  tasks_user_complete: 0,   // fallback
-  tasks_zeta_complete: 0,   // fallback
+  tasks_zeta_created: 0,
+  tasks_user_complete: 0,
+  tasks_zeta_complete: 0,
   events_past: 0,
   functions_built: 0,
 };
@@ -46,7 +45,11 @@ const ZERO: XPMetrics = {
 function parseSupabaseTS(ts?: string | null): Date | null {
   if (!ts) return null;
   const hasTZ = /[zZ]|[+\-]\d{2}:\d{2}$/.test(ts);
-  try { return new Date(hasTZ ? ts : `${ts}Z`); } catch { return null; }
+  try {
+    return new Date(hasTZ ? ts : `${ts}Z`);
+  } catch {
+    return null;
+  }
 }
 
 // Fun confidence label
@@ -99,6 +102,9 @@ const ConfidenceGauge: React.FC<{ level: number; maxLevel: number; className?: s
 };
 /* ---------------------------------------------------------- */
 
+type TitlesMap = Record<number, string>;
+const defaultTitlesMap: TitlesMap = Object.fromEntries(LEVELS.map(l => [l.level, l.title])) as TitlesMap;
+
 const TimelinePanel: React.FC<Props> = ({ projectId }) => {
   const [loading, setLoading] = useState(true);
   const [projectCreatedAt, setProjectCreatedAt] = useState<string>('');
@@ -107,8 +113,8 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
   const [counts, setCounts] = useState<XPMetrics>(ZERO);
   const [prog, setProg] = useState<XPProgress>({
     level: 1,
-    title: 'Junior Assistant',
-    nextTitle: 'Associate Assistant',
+    title: defaultTitlesMap[1],
+    nextTitle: defaultTitlesMap[2],
     pct: 0,
     remaining: 100,
     current: 0,
@@ -121,13 +127,22 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
   const [zetaTasksCompleted, setZetaTasksCompleted] = useState<number | null>(null);
   const [userTasksCompleted, setUserTasksCompleted] = useState<number | null>(null);
 
+  // Customisable titles
+  const [titles, setTitles] = useState<TitlesMap>(defaultTitlesMap);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<TitlesMap>(defaultTitlesMap);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  const getTitle = (lvl: number) => titles[lvl] ?? defaultTitlesMap[lvl] ?? `Level ${lvl}`;
+
   function computeProgressFromCounts(c: Partial<XPMetrics>): XPProgress {
     const cFull = { ...ZERO, ...c };
     const total = computeXP(cFull);
     const lp = levelProgress(total);
     const isMax = lp.level >= lp.maxLevel && lp.pct === 100;
-    const title = levelTitle(lp.level);
-    const nextTitle = isMax ? title : levelTitle(Math.min(lp.level + 1, LEVELS.length));
+    const title = getTitle(lp.level);
+    const nextTitle = isMax ? title : getTitle(Math.min(lp.level + 1, LEVELS.length));
     return {
       level: lp.level,
       title,
@@ -140,6 +155,7 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
     };
   }
 
+  // Load project created_at + titles + XP counters
   useEffect(() => {
     if (!projectId) return;
     let mounted = true;
@@ -147,6 +163,7 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
     (async () => {
       setLoading(true);
       setErr(null);
+      setSaveMsg(null);
       try {
         // Project created_at
         const { data: proj, error: pErr } = await supabase
@@ -158,12 +175,29 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
         if (!mounted) return;
         setProjectCreatedAt(proj?.created_at ?? '');
 
+        // Load custom titles (if any)
+        const { data: rows } = await supabase
+          .from('level_titles')
+          .select('level,title')
+          .eq('project_id', projectId);
+
+        if (mounted) {
+          const merged = { ...defaultTitlesMap };
+          (rows ?? []).forEach((r: any) => {
+            if (r?.level && r?.title) merged[r.level] = String(r.title);
+          });
+          setTitles(merged);
+          setDraft(merged);
+        }
+
         // RPC / fallback metrics
         let serverCounts: Partial<XPMetrics> | null = null;
         try {
           const { data, error } = await supabase.rpc('fetch_xp_counts', { p_project_id: projectId });
           if (!error && data) serverCounts = typeof data === 'string' ? JSON.parse(data) : data;
-        } catch { serverCounts = null; }
+        } catch {
+          serverCounts = null;
+        }
 
         const c: Partial<XPMetrics> = serverCounts ?? (await getXPCounts(projectId));
         if (!mounted) return;
@@ -204,8 +238,16 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
       }
     })();
 
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [projectId]);
+
+  // Recompute progress whenever titles or counts change
+  useEffect(() => {
+    setProg(prev => computeProgressFromCounts(counts));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titles, counts]);
 
   // Duration breakdown
   const { months, weeks, days, hours, startDate } = useMemo(() => {
@@ -217,7 +259,9 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
     let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
     const mAnchor = new Date(start);
     mAnchor.setMonth(start.getMonth() + months);
-    if (mAnchor > end) { months -= 1; mAnchor.setMonth(mAnchor.getMonth() - 1); }
+    if (mAnchor > end) {
+      months -= 1; mAnchor.setMonth(mAnchor.getMonth() - 1);
+    }
     let ms = end.getTime() - mAnchor.getTime();
     const weeks = Math.floor(ms / (7 * 86_400_000)); ms -= weeks * 7 * 86_400_000;
     const days  = Math.floor(ms / 86_400_000);       ms -= days  * 86_400_000;
@@ -225,8 +269,6 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
 
     return { months, weeks, days, hours, startDate: start };
   }, [projectCreatedAt]);
-
-  const maxed = prog.level >= MAX_LEVEL && prog.remaining === 0;
 
   const RowSection: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
     <div className="rounded-2xl border border-blue-700 bg-blue-950/50 p-3">
@@ -246,6 +288,50 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
       <div className="text-lg font-semibold">{value}</div>
     </div>
   );
+
+  async function saveTitles() {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const toDelete: number[] = [];
+      const upserts: { project_id: string; level: number; title: string }[] = [];
+
+      for (let lvl = 1; lvl <= MAX_LEVEL; lvl++) {
+        const text = (draft[lvl] ?? '').trim();
+        if (!text || text === defaultTitlesMap[lvl]) {
+          toDelete.push(lvl);
+        } else {
+          upserts.push({ project_id: projectId, level: lvl, title: text });
+        }
+      }
+
+      if (toDelete.length) {
+        await supabase.from('level_titles')
+          .delete()
+          .eq('project_id', projectId)
+          .in('level', toDelete);
+      }
+
+      if (upserts.length) {
+        await supabase
+          .from('level_titles')
+          .upsert(upserts, { onConflict: 'project_id,level' });
+      }
+
+      setTitles({ ...defaultTitlesMap, ...draft });
+      setEditing(false);
+      setSaveMsg('Saved custom level names.');
+    } catch (e: any) {
+      setSaveMsg(e?.message || 'Failed to save.');
+    } finally {
+      setSaving(false);
+      setProg(prev => computeProgressFromCounts(counts));
+    }
+  }
+
+  function resetToDefaultsInEditor() {
+    setDraft({ ...defaultTitlesMap });
+  }
 
   return (
     <div className="p-3 md:p-4 lg:p-6 pb-10 text-purple-100">
@@ -300,15 +386,48 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
         {/* XP / Level */}
         <div className="rounded-2xl border border-blue-700 bg-blue-950/50 p-3">
           <div className="flex items-center justify-between mb-1">
-            <div className="text-sm font-semibold">Zeta XP ⚡</div>
-            <div className="px-2 py-0.5 rounded-full border border-purple-400/60 text-[11px] font-semibold">
-              LEVEL {prog.level}
+            {/* Make the title a button too */}
+            <button
+              type="button"
+              onClick={() => { setDraft(titles); setEditing(true); }}
+              className="text-sm font-semibold hover:underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-purple-400/40 rounded"
+              title="Edit level names"
+            >
+              Zeta XP ⚡
+            </button>
+
+            <div className="flex items-center gap-2">
+              {/* Text button (≥sm) */}
+              <button
+                onClick={() => { setDraft(titles); setEditing(true); }}
+                className="hidden sm:inline-flex text-[11px] px-2 py-1 rounded-md border border-purple-400/60 hover:border-purple-300/80 hover:bg-purple-300/10 transition whitespace-nowrap"
+                title="Edit level names"
+              >
+                Edit Level Names
+              </button>
+
+              {/* Pencil icon (xs) */}
+              <button
+                onClick={() => { setDraft(titles); setEditing(true); }}
+                className="inline-flex sm:hidden p-1 rounded-md border border-purple-400/60 hover:bg-purple-300/10"
+                aria-label="Edit level names"
+                title="Edit level names"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" stroke="currentColor" strokeWidth="1.5"/>
+                </svg>
+              </button>
+
+              <div className="px-2 py-0.5 rounded-full border border-purple-400/60 text-[11px] font-semibold">
+                LEVEL {prog.level}
+              </div>
             </div>
           </div>
 
           <div className="text-[13px] text-blue-100/90 mb-1">
             <span className="font-medium">{prog.title}</span>
-            {!(prog.level >= MAX_LEVEL && prog.remaining === 0) && (
+            {(prog.level < MAX_LEVEL || prog.remaining > 0) && (
               <>
                 <span className="mx-2">→</span>
                 <span className="opacity-80">Next:</span> {prog.nextTitle}
@@ -345,6 +464,12 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
       {err && (
         <div className="mb-3 rounded-md border border-red-400 bg-red-900/40 p-3 text-sm text-red-200">
           {err}
+        </div>
+      )}
+
+      {!!saveMsg && (
+        <div className="mb-3 rounded-md border border-blue-400 bg-blue-900/40 p-3 text-xs text-blue-100">
+          {saveMsg}
         </div>
       )}
 
@@ -387,6 +512,73 @@ const TimelinePanel: React.FC<Props> = ({ projectId }) => {
       </div>
 
       {loading && <div className="mt-3 text-xs text-purple-300/70">Loading…</div>}
+
+      {/* ─────────── Edit Modal ─────────── */}
+      {editing && (
+        <div className="fixed inset-0 z-50 grid place-items-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setEditing(false)} />
+          <div className="relative w-[min(720px,92vw)] max-h-[85vh] overflow-auto rounded-2xl border border-purple-400/30 bg-gradient-to-b from-blue-950 to-blue-900 p-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold text-purple-100">Edit Zeta Level Names</div>
+              <button
+                onClick={() => setEditing(false)}
+                className="text-xs px-2 py-1 rounded-md border border-blue-400/50 hover:bg-blue-400/10"
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="text-[12px] text-purple-200/80 mb-3">
+              Customise what each level is called for this project. Leave a field blank (or set to default)
+              to use the default title.
+            </p>
+
+            <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+              {Array.from({ length: MAX_LEVEL }, (_, i) => i + 1).map((lvl) => (
+                <label key={lvl} className="flex flex-col gap-1 rounded-lg border border-blue-700 bg-blue-950/60 p-2">
+                  <span className="text-[11px] text-purple-300/90">
+                    Level {lvl}
+                    <span className="opacity-60"> · default: “{defaultTitlesMap[lvl]}”</span>
+                  </span>
+                  <input
+                    value={draft[lvl] ?? ''}
+                    onChange={(e) => setDraft((d) => ({ ...d, [lvl]: e.target.value }))}
+                    placeholder={defaultTitlesMap[lvl]}
+                    className="rounded-md bg-blue-900/60 border border-blue-700 px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-purple-400/40"
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between mt-4">
+              <button
+                onClick={resetToDefaultsInEditor}
+                className="text-[12px] px-2 py-1 rounded-md border border-blue-400/60 hover:bg-blue-400/10"
+                title="Reset editor fields to defaults"
+              >
+                Reset to defaults
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={saving}
+                  onClick={() => setEditing(false)}
+                  className="text-[12px] px-3 py-1 rounded-md border border-blue-400/60 hover:bg-blue-400/10 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={saving}
+                  onClick={saveTitles}
+                  className="text-[12px] px-3 py-1 rounded-md border border-purple-400/80 bg-purple-500/10 hover:bg-purple-500/20 disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ───────── End Modal ───────── */}
     </div>
   );
 };

@@ -56,6 +56,15 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
     setLoading(false);
   }
 
+  // add after refreshList():
+useEffect(() => {
+  const open = (new URLSearchParams(window.location.search)).get('open');
+  if (!open || discussions.length === 0) return;
+  const d = discussions.find(x => x.thread_id === open);
+  if (d) setSelected(d);
+}, [discussions]);
+
+
   useEffect(() => { void refreshList(); }, [projectId]);
 
   useEffect(() => {
@@ -72,11 +81,14 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
   }, [projectId]);
 
   /* ------------------------- helpers --------------------------- */
-  async function createDiscussionRow(title: string): Promise<string | null> {
+  async function createDiscussionRow(payload: {
+    title: string;
+    initialAssistant?: string;
+    initialUser?: string;
+  }): Promise<string | null> {
     setStatus('Creating discussion…');
     setError(null);
 
-    // Guard: max 20
     if (discussions.length >= MAX_DISCUSSIONS) {
       setStatus(null);
       setError(`Limit reached: you can have up to ${MAX_DISCUSSIONS} discussions per project.`);
@@ -86,7 +98,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
     const res = await fetch('/api/discussion', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, projectId, modelId: 'gpt-4o', fileId: null }),
+      body: JSON.stringify({ projectId, modelId: 'gpt-4o', ...payload }),
     });
 
     let json: any = {};
@@ -99,24 +111,15 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
       return null;
     }
 
-    const openaiThreadId = json?.threadId as string | undefined;
-    if (!openaiThreadId) {
+    const threadId = json?.threadId as string | undefined;
+    if (!threadId) {
       setError('Discussion created but no threadId returned.');
       setStatus(null);
       return null;
     }
 
     setStatus('Discussion created.');
-    return openaiThreadId;
-  }
-
-  async function postViaChatboard(message: string) {
-    setStatus('Posting initial message…');
-    await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, message, modelId: 'gpt-4o', verbosity: 'short' }),
-    });
+    return threadId;
   }
 
   async function deleteDiscussion(threadId: string) {
@@ -128,24 +131,18 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
     setError(null);
 
     try {
-      // Delete messages first (fast and safe)
       await supabase.from('discussion_messages').delete().eq('thread_id', threadId);
-
-      // Delete from discussions
       await supabase
         .from('discussions')
         .delete()
         .eq('project_id', projectId as string)
         .eq('thread_id', threadId);
-
-      // (Optional) clean up threads row if you store it per-discussion
       await supabase
         .from('threads')
         .delete()
         .or(`openai_thread_id.eq.${threadId},thread_id.eq.${threadId}`)
         .eq('project_id', projectId as string);
 
-      // Update UI
       if (selected?.thread_id === threadId) setSelected(null);
       await refreshList();
       setStatus('Discussion deleted.');
@@ -167,15 +164,27 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
         setBootHandled(true);
         return;
       }
+
       setCreating(true);
       try {
-        const title = 'Follow-up from Notification';
-        const _thread = await createDiscussionRow(title);
-        if (_thread) {
-          await postViaChatboard('Discussion created from notification.');
-          await postViaChatboard(seed);
+        // seed is JSON: { notification, firstUser, title }
+        let parsed: { notification?: string; firstUser?: string; title?: string } = {};
+        try { parsed = JSON.parse(seed); } catch {}
+
+        const notif = (parsed.notification || '').trim();
+        const firstUser = (parsed.firstUser || '').trim();
+        const title = (parsed.title || 'Follow-up').trim();
+
+        const threadId = await createDiscussionRow({
+          title,
+          initialAssistant: notif || undefined, // FIRST outgoing message from Zeta
+          initialUser: firstUser || undefined,  // Your mini-chat reply
+        });
+
+        if (threadId) {
           await refreshList();
-          setSelected({ thread_id: _thread, title, last_updated: new Date().toISOString() });
+          setSelected({ thread_id: threadId, title, last_updated: new Date().toISOString() });
+          await loadMessages(threadId);
         }
       } finally {
         setCreating(false);
@@ -329,10 +338,8 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
                     setError(`Limit reached: you can have up to ${MAX_DISCUSSIONS} discussions per project.`);
                     return;
                   }
-                  const threadId = await createDiscussionRow('New Discussion');
+                  const threadId = await createDiscussionRow({ title: 'New Discussion' });
                   if (threadId) {
-                    await postViaChatboard('Discussion created.');
-                    await postViaChatboard('Please greet me naturally and ask what I’d like to talk about.');
                     await refreshList();
                     setSelected({ thread_id: threadId, title: 'New Discussion', last_updated: new Date().toISOString() });
                     await loadMessages(threadId);
@@ -414,9 +421,11 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
               </div>
             ) : (
               <>
+                {/* Title chip */}
                 <div className="border-b border-blue-700/60 px-4 py-3 text-center font-semibold text-white">
                   {selected.title || 'Discussion'}
                 </div>
+
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {msgLoading ? (
                     <div className="space-y-2 animate-pulse">
@@ -449,6 +458,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
                     </>
                   )}
                 </div>
+
                 <div className="border-t border-blue-700/60 px-4 py-3">
                   <div className="flex gap-2">
                     <input

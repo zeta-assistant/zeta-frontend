@@ -132,6 +132,15 @@ export async function syncOnboardingStatus(projectId: string): Promise<Onboardin
 }
 
 export async function shouldUseOnboarding(projectId: string): Promise<boolean> {
+  // NEW: prefer the flag if present
+  const { data: mf } = await supabaseAdmin
+    .from('mainframe_info')
+    .select('onboarding_complete')
+    .eq('project_id', projectId)
+    .maybeSingle();
+
+  if (mf?.onboarding_complete === true) return false;
+
   const status = await syncOnboardingStatus(projectId);
   return status < 4;
 }
