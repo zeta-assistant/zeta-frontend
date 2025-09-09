@@ -83,66 +83,35 @@ export default function ProjectsPage() {
   };
 
   const handleDelete = async (projectId: string) => {
-    const confirmed = confirm('Are you sure you want to delete this project? This action cannot be undone.');
-    if (!confirmed || !userId) return;
+  const confirmed = confirm('Are you sure you want to delete this project? This action cannot be undone.');
+  if (!confirmed || !userId) return;
 
-    setLoading(true);
-    console.log('🗑 Attempting to delete project:', projectId);
+  setLoading(true);
+  try {
+    // ... your assistant deletion first (unchanged) ...
 
-    try {
-      const { data: project, error: fetchError } = await supabase
-        .from('user_projects')
-        .select('assistant_id')
-        .eq('id', projectId)
-        .eq('user_id', userId)
-        .single();
+    const res = await fetch('/api/delete-project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, userId }),
+    });
 
-      if (fetchError) {
-        console.error('❌ Failed to fetch assistant_id:', fetchError.message);
-        alert('Failed to fetch project info.');
-        setLoading(false);
-        return;
-      }
-
-      const assistantId = (project as any)?.assistant_id;
-
-      if (assistantId) {
-        const res = await fetch('/api/delete-assistant', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId, assistantId }),
-        });
-
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.warn('⚠️ Assistant may not have been deleted:', errorText);
-        } else {
-          console.log('✅ Assistant deleted successfully');
-        }
-      }
-
-      const { error: deleteError } = await supabase
-        .from('user_projects')
-        .delete()
-        .eq('id', projectId)
-        .eq('user_id', userId);
-
-      if (deleteError) {
-        console.error('❌ Failed to delete project:', deleteError.message);
-        alert('Failed to delete project.');
-      } else {
-        console.log('✅ Project deleted from Supabase');
-        setProjects((prev) => prev.filter((proj) => proj.id !== projectId));
-        // 🔧 update usage counters locally
-        setUsed((u) => Math.max(0, u - 1));
-      }
-    } catch (err) {
-      console.error('❌ Unexpected deletion error:', err);
-      alert('Unexpected error during deletion.');
+    const json = await res.json();
+    if (!res.ok) {
+      console.error('❌ Failed to delete project:', json?.error || res.statusText);
+      alert(`Failed to delete project: ${json?.error || res.statusText}`);
+    } else {
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      setUsed((u) => Math.max(0, u - 1));
     }
-
+  } catch (err) {
+    console.error('❌ Unexpected deletion error:', err);
+    alert('Unexpected error during deletion.');
+  } finally {
     setLoading(false);
-  };
+  }
+};
+
 
   const remaining = Math.max(0, limit - used);
 
