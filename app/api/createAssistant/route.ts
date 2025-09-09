@@ -47,10 +47,10 @@ For every user message, consider whether to update any of:
 
 If appropriate, call \`propose_autonomy\` ONCE with a minimal, high-confidence plan.
 Avoid duplicates (prefer updates if an equivalent item already exists).
-Use ISO 8601 and Australia/Brisbane timezone.
+
 Keep proposals concise—only include fields you are confident about.`;
 
-export function baseSelfKnowledgeJSON() {
+ function baseSelfKnowledgeJSON() {
   return {
     layout: {
       visual_overview: {
@@ -206,7 +206,7 @@ export async function POST(req: Request) {
         function: {
           name: 'propose_autonomy',
           description:
-            'Propose structured updates derived from the last user message. You may also delete items (goals, tasks, calendar, files). Avoid duplicates. Use ISO8601 + Australia/Brisbane.',
+            'Propose structured updates derived from the last user message. You may also delete items (goals, tasks, calendar, files). Avoid duplicates.',
           parameters: {
             type: 'object',
             properties: {
