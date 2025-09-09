@@ -140,15 +140,23 @@ export default function ZetaSetup() {
 
       if (insertError) throw insertError;
       const projectId = projectData.id;
-      // right after: const projectId = projectData.id;
+      const isoNow = new Date().toISOString();
+const today = isoNow.slice(0, 10); // YYYY-MM-DD for a DATE column
+
 await supabase
   .from('mainframe_info')
-  .upsert({
-    project_id: projectId,
-    personality_traits: traits,
-    preferred_user_name: preferredUserName || null,
-  }, { onConflict: 'project_id' });
-
+  .upsert(
+    {
+      id: projectId,                 // <- use id as the PK to match the rest of your app
+      project_id: projectId,         // keep if this column exists in your schema
+      preferred_user_name: preferredUserName || null,
+      personality_traits: traits,
+      current_date: today,           // <- REQUIRED: satisfies NOT NULL on DATE column
+      updated_at: isoNow,            // optional
+      created_at: isoNow,            // optional (ignored on conflict)
+    },
+    { onConflict: 'id' }             // <- conflict target should be 'id'
+  );
 
       // Create assistant
       const res = await fetch('/api/createAssistant', {
