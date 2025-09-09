@@ -140,27 +140,46 @@ export default function ZetaSetup() {
       if (insertError) throw insertError;
 
       const projectId = projectData.id;
-      const isoNow = new Date().toISOString();
-      const today = isoNow.slice(0, 10); // YYYY-MM-DD for DATE
 
-      // ✔ current_time expects TIMESTAMPTZ — give it a full ISO timestamp
+      // timestamps: ISO for timestamptz; YYYY-MM-DD for DATE
+      const isoNow = new Date().toISOString();
+      const today = isoNow.slice(0, 10);
+
+      // Insert without project_id first to avoid FK race
       const { error: mfErr } = await supabase
         .from('mainframe_info')
         .upsert(
           {
-            id: projectId,                 // use id as the PK to match the rest of your app
-            project_id: projectId,         // keep if this column exists in your schema
+            id: projectId,                       // PK = user_projects.id
+            // project_id: projectId,             // omitted initially (FK can race)
             preferred_user_name: preferredUserName || null,
             personality_traits: traits,
-            current_date: today,           // DATE NOT NULL
-            current_time: isoNow,          // TIMESTAMPTZ NOT NULL
-            updated_at: isoNow,            // optional
-            created_at: isoNow,            // optional (ignored on conflict)
+            current_date: today,                 // DATE NOT NULL
+            current_time: isoNow,                // TIMESTAMPTZ NOT NULL
+            updated_at: isoNow,
+            created_at: isoNow,
           },
-          { onConflict: 'id' }             // conflict target is 'id'
+          { onConflict: 'id' }
         );
 
       if (mfErr) throw mfErr;
+
+      // Try to backfill project_id right away; ignore if it fails
+      const { data: projExists } = await supabase
+        .from('user_projects')
+        .select('id')
+        .eq('id', projectId)
+        .maybeSingle();
+
+      if (projExists) {
+        await supabase
+          .from('mainframe_info')
+          .update({ project_id: projectId })
+          .eq('id', projectId)
+          .then(({ error }) => {
+            if (error) console.warn('[mainframe_info project_id backfill skipped]', error.message);
+          });
+      }
 
       // Create assistant
       const res = await fetch('/api/createAssistant', {
