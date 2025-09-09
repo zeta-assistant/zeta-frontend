@@ -20,11 +20,11 @@ interface ChatTabProps {
   chatHidden: boolean;
   setChatHidden: React.Dispatch<React.SetStateAction<boolean>>;
   messages: any[];
-  loading: boolean;
+  loading?: boolean;
   input: string;
   setInput: (text: string) => void;
   handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-  sendMessage: (opts?: { attachments?: Uploaded[]; verbosity?: Verbosity }) => void;
+  sendMessage: (opts?: { attachments?: Uploaded[]; verbosity?: Verbosity }) => Promise<void>;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   fontSize: 'sm' | 'base' | 'lg';
   setFontSize: React.Dispatch<React.SetStateAction<'sm' | 'base' | 'lg'>>;
@@ -87,12 +87,12 @@ function toDateOrNow(mOrTs: any): Date {
   return normalizeToDate(rawTs(mOrTs)) ?? new Date();
 }
 
-/* ---------- text normalization for dedupe ---------- */
+/* ---------- text normalization ---------- */
 function normText(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
 }
 
-/* ---------- TZ helpers (robust 'today' detection) ---------- */
+/* ---------- TZ helpers ---------- */
 function ymdInTZ(d: Date, tz: string): { y: number; m: number; day: number } {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
@@ -117,22 +117,33 @@ const isUserish = (msg: any) =>
   msg?.role === 'user' ||
   (msg?.role === 'system' && typeof getMsgContent(msg) === 'string' && getMsgContent(msg).startsWith('📎 Files attached'));
 
-/* ============ NEW: lightweight emoji keyboard ============ */
+/* ============ Emoji ============ */
 const EMOJIS = [
   '😀','😅','😂','😊','😍','🤔','😴','😎','🙌','👏','👍','🔥','💯','✨','⚡','🚀',
   '🧠','📌','✅','❗','❓','📎','📝','📈','📊','⏱️','🧪','🔧','🛠️','🧰','🧵','🔁'
 ];
-function insertAtCursor(inputEl: HTMLInputElement, value: string, setInput: (s: string) => void) {
-  const start = inputEl.selectionStart ?? inputEl.value.length;
-  const end = inputEl.selectionEnd ?? inputEl.value.length;
-  const newVal = inputEl.value.slice(0, start) + value + inputEl.value.slice(end);
-  const newCaret = start + value.length;
-  setInput(newVal);
-  // restore caret
-  requestAnimationFrame(() => {
-    inputEl.focus();
-    inputEl.setSelectionRange(newCaret, newCaret);
-  });
+
+/* ---------- Stable anti-bounce scroller (no bottom padding) ---------- */
+const StableScroller = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  (p, ref) => (
+    <div
+      {...p}
+      ref={ref}
+      style={{
+        ...(p.style || {}),
+        overscrollBehavior: 'contain',
+        WebkitOverflowScrolling: 'auto',
+        touchAction: 'pan-y',
+        scrollbarGutter: 'stable', // stops layout jump when bar appears
+      }}
+    />
+  )
+);
+StableScroller.displayName = 'StableScroller';
+
+/* ---------- Footer spacer so last bubble isn't hidden ---------- */
+function FooterSpacer() {
+  return <div style={{ height: 96 }} />;
 }
 
 /* ========================================================= */
@@ -141,7 +152,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   const {
     activeMainTab, chatView, setChatView, chatHidden, setChatHidden,
     messages: messagesProp, loading, input, setInput, handleKeyDown, sendMessage,
-    scrollRef, fontSize, setFontSize, projectId, onRefresh,
+    scrollRef, fontSize, setFontSize, projectId, onRefresh, refreshing,
   } = props;
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -162,7 +173,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   /* ---------- Local optimistic + realtime live ---------- */
   const [optimistic, setOptimistic] = useState<any[]>([]);
   const [live, setLive] = useState<any[]>([]);
-  const [userInputs, setUserInputs] = useState<any[]>([]); // mirror of user_input_log
+  const [userInputs, setUserInputs] = useState<any[]>([]);
 
   // Realtime: zeta_conversation_log
   useEffect(() => {
@@ -296,7 +307,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     setOptimistic((prev) =>
       prev.filter((o) => {
         const oRole = o.role ?? 'user';
-        const oText = normText(getMsgContent(o));
+               const oText = normText(getMsgContent(o));
         const oTime = toDateOrNow(o).getTime();
         const within = (m: any) =>
           (m?.role ?? 'assistant') === oRole &&
@@ -313,7 +324,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     );
   }, [messagesProp, live, userInputs]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ---------- Combine feeds (strict de-dupe + stable sort) ---------- */
+  /* ---------- Combine feeds ---------- */
   const combined = useMemo(() => {
     const base = (Array.isArray(messagesProp) ? messagesProp : []).map((m) => ({ ...m, source: 'base' as const }));
     const merged = [...base, ...outreach, ...live, ...userInputs, ...optimistic];
@@ -322,11 +333,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     const byId = new Map<string, number>();
 
     const sourcePriority: Record<string, number> = {
-      live: 4,
-      base: 3,
-      user_input_log: 2,
-      outreach: 1,
-      optimistic: 0,
+      live: 4, base: 3, user_input_log: 2, outreach: 1, optimistic: 0,
     };
     const roleRank = (r?: string) => (r === 'user' ? 0 : r === 'assistant' ? 1 : 2);
 
@@ -395,7 +402,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     return out;
   }, [messagesProp, outreach, live, userInputs, optimistic]);
 
-  /* ---------- attachments (new + from library) ---------- */
+  /* ---------- attachments ---------- */
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [library, setLibrary] = useState<Array<{ id: string; file_name: string; file_url: string; created_at?: string }>>([]);
@@ -416,16 +423,11 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
       .eq('project_id', projectId)
       .order('created_at', { ascending: false })
       .limit(200);
-    if (!error && Array.isArray(data)) {
-      setLibrary(data as any);
-    }
+    if (!error && Array.isArray(data)) setLibrary(data as any);
     setLibraryLoading(false);
   };
 
-  useEffect(() => {
-    if (libraryOpen) void refreshLibrary();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [libraryOpen]);
+  useEffect(() => { if (libraryOpen) void refreshLibrary(); }, [libraryOpen]); // eslint-disable-line
 
   const filteredLibrary = useMemo(() => {
     const q = libraryQuery.trim().toLowerCase();
@@ -463,6 +465,24 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     }
   };
 
+  /* ---------- LOCAL LOADING STATE ---------- */
+  const [uiLoading, setUiLoading] = useState(false);
+  const lastSendAtRef = useRef<number | null>(null);
+  const uiLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!uiLoading || !lastSendAtRef.current) return;
+    const lastAssistant = [...combined].reverse().find(m => m.role === 'assistant');
+    const ts = lastAssistant ? toDateOrNow(lastAssistant).getTime() : 0;
+    if (ts && ts >= (lastSendAtRef.current - 1000)) {
+      setUiLoading(false);
+      lastSendAtRef.current = null;
+      if (uiLoadingTimerRef.current) { clearTimeout(uiLoadingTimerRef.current); uiLoadingTimerRef.current = null; }
+    }
+  }, [combined, uiLoading]);
+
+  const isLoading = Boolean(loading || refreshing || uiLoading);
+
   /* ---------- input / send ---------- */
   const [isAtBottom, setIsAtBottom] = useState(true);
   const pendingScrollAfterSendRef = useRef(false);
@@ -496,12 +516,26 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
     pendingScrollAfterSendRef.current = true;
 
-    const allAttachments = [...selectedDocs, ...uploaded];
-    await sendMessage(allAttachments.length ? { attachments: allAttachments, verbosity } : { verbosity });
+    // Start local loading + timeout failsafe
+    setUiLoading(true);
+    lastSendAtRef.current = Date.now();
+    if (uiLoadingTimerRef.current) clearTimeout(uiLoadingTimerRef.current);
+    uiLoadingTimerRef.current = setTimeout(() => {
+      setUiLoading(false);
+      lastSendAtRef.current = null;
+    }, 45000);
 
-    setSelectedDocs([]);
-    setInput('');
-    onRefresh?.();
+    try {
+      const allAttachments = [...selectedDocs, ...uploaded];
+      await sendMessage(allAttachments.length ? { attachments: allAttachments, verbosity } : { verbosity });
+      setSelectedDocs([]);
+      setInput('');
+      await onRefresh?.();
+    } catch {
+      setUiLoading(false);
+      lastSendAtRef.current = null;
+      if (uiLoadingTimerRef.current) { clearTimeout(uiLoadingTimerRef.current); uiLoadingTimerRef.current = null; }
+    }
   };
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -525,22 +559,32 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     return todayList.length ? todayList : combined.slice(-200);
   }, [chatView, pinnedMessages, combined, projectTZ, now.getTime()]);
 
+  /* ---------- Derived rows (messages + typing) ---------- */
+  const rows = useMemo(() => {
+    return isLoading ? [...displayedMessages, { __type: 'typing' as const }] : displayedMessages;
+  }, [displayedMessages, isLoading]);
+
   /* ---------- follow-to-bottom behavior ---------- */
   useEffect(() => {
     if (!virtuosoRef.current) return;
-    if (displayedMessages.length === 0) return;
+    if (rows.length === 0) return;
 
     if (isAtBottom || pendingScrollAfterSendRef.current) {
       pendingScrollAfterSendRef.current = false;
-      virtuosoRef.current.scrollToIndex({ index: displayedMessages.length - 1, behavior: isAtBottom ? 'smooth' : 'auto' });
+      virtuosoRef.current.scrollToIndex({ index: rows.length - 1, behavior: isAtBottom ? 'auto' : 'auto' });
     }
-  }, [displayedMessages.length, isAtBottom]);
+  }, [rows.length, isAtBottom]);
+
+  useEffect(() => {
+    if (!virtuosoRef.current || !isLoading || !isAtBottom) return;
+    virtuosoRef.current.scrollToIndex({ index: rows.length - 1, behavior: 'auto' });
+  }, [isLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (activeMainTab !== 'chat') return null;
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Tabs + Inline Controls */}
+      {/* Tabs + Controls */}
       <div className="flex justify-between items-center px-6 pt-3">
         <div className="flex items-center gap-2">
           {(['all', 'today', 'pinned'] as const).map((view) => (
@@ -604,24 +648,39 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
             <Virtuoso
               ref={virtuosoRef}
               style={{ height: '100%' }}
-              totalCount={displayedMessages.length}
-              followOutput={isAtBottom ? 'smooth' : false}
+              totalCount={rows.length}
+              followOutput={isAtBottom ? 'auto' : false}   // no “zip”
               atBottomThreshold={120}
               increaseViewportBy={{ top: 120, bottom: 240 }}
               overscan={120}
-              atBottomStateChange={(atBottom) => setIsAtBottom(atBottom)}
-              components={{
-                Footer: () => (
-                  <div style={{ height: 24 }}>
-                    {!outreachLoaded && <div className="text-xs text-slate-400 px-2">Loading outreach…</div>}
-                  </div>
-                ),
+              atBottomStateChange={setIsAtBottom}
+              components={{ Scroller: StableScroller, Footer: FooterSpacer }}
+              computeItemKey={(index) => {
+                const r = (rows as any[])[index];
+                if (r?.__type === 'typing') return 'typing-row';
+                const m = r;
+                const key =
+                  m?.id ??
+                  `${(normalizeToDate(rawTs(m)) ?? new Date()).getTime()}|${m?.role ?? 'norole'}|${index}|${normText(getMsgContent(m)).slice(0, 32)}`;
+                return key;
               }}
               itemContent={(index) => {
-                const msg = displayedMessages[index];
+                const r = (rows as any[])[index];
+
+                // Typing row
+                if (r?.__type === 'typing') {
+                  return (
+                    <div className="mb-5 md:mb-6">
+                      <TypingBubble />
+                    </div>
+                  );
+                }
+
+                // Normal message
+                const msg = r;
                 const contentRaw = getMsgContent(msg);
                 const latestAssistantIndex = [...displayedMessages].reverse().findIndex((m) => m.role === 'assistant' && getMsgContent(m));
-                const isLatestAssistant = index === displayedMessages.length - 1 - latestAssistantIndex;
+                const isLatestAssistant = index === rows.length - 1 - latestAssistantIndex - (isLoading ? 1 : 0);
 
                 if (isLatestAssistant && msg.role === 'assistant' && contentRaw) {
                   const formatted = formatMathMarkdown(contentRaw);
@@ -634,12 +693,8 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
                   ? 'ml-auto bg-gradient-to-br from-blue-200 to-blue-100 border-blue-300 text-blue-900'
                   : 'bg-gradient-to-br from-yellow-300 to-yellow-100 border-yellow-400 text-slate-900';
 
-                const safeKey =
-                  msg?.id ??
-                  `${(normalizeToDate(rawTs(msg)) ?? new Date()).getTime()}|${msg?.role ?? 'norole'}|${index}|${normText(getMsgContent(msg)).slice(0, 32)}`;
-
                 return (
-                  <div key={safeKey} className="mb-5 md:mb-6">
+                  <div className="mb-5 md:mb-6">
                     <div className={`${bubbleCommon} ${bubbleByRole} ${textScale(fontSize)} p-4 pb-6`}>
                       <button
                         onClick={() => togglePinMessage(msg)}
@@ -672,12 +727,6 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
           </div>
         )}
 
-        {loading && !chatHidden && (
-          <div className="max-w-[85%] px-4 py-3 rounded-2xl text-sm bg-blue-800 text-white animate-pulse mt-2">
-            Zeta is thinking...
-          </div>
-        )}
-
         <div ref={scrollRef} />
       </div>
 
@@ -689,13 +738,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
             {selectedDocs.map((d) => (
               <span key={d.file_url} className="text-xs bg-blue-700 text-white/90 px-2 py-1 rounded-lg flex items-center gap-2">
                 <span className="truncate max-w-[220px]">{d.file_name}</span>
-                <button
-                  onClick={() => removeSelectedDoc(d.file_url)}
-                  className="px-1 rounded hover:bg-blue-600"
-                  title="Remove"
-                >
-                  ✖
-                </button>
+                <button onClick={() => removeSelectedDoc(d.file_url)} className="px-1 rounded hover:bg-blue-600" title="Remove">✖</button>
               </span>
             ))}
           </div>
@@ -703,34 +746,13 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
         <div className="flex items-center gap-2 relative">
           {/* Attach from library */}
-          <button
-            onClick={() => setLibraryOpen(true)}
-            className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm"
-            title="Attach files"
-          >
-            📎
-          </button>
+          <button onClick={() => setLibraryOpen(true)} className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm" title="Attach files">📎</button>
 
-          {/* Upload new (optional) */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm"
-            title="Upload new file"
-          >
-            ⬆️
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              setAttachedFiles((prev) => [...prev, ...files]);
-            }}
-            className="hidden"
-          />
+          {/* Upload new */}
+          <button onClick={() => fileInputRef.current?.click()} className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm" title="Upload new file">⬆️</button>
+          <input ref={fileInputRef} type="file" multiple onChange={(e) => setAttachedFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])])} className="hidden" />
 
-          {/* Emoji keyboard */}
+          {/* Emoji */}
           <EmojiButton inputRef={inputRef} setInput={setInput} />
 
           <input
@@ -753,20 +775,15 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
           </button>
         </div>
 
-        {/* Show pending local uploads (not yet in library) */}
         {attachedFiles.length > 0 && (
-          <div className="mt-2 text-xs text-blue-100">
-            Pending upload: {attachedFiles.map((f) => f.name).join(', ')}
-          </div>
+          <div className="mt-2 text-xs text-blue-100">Pending upload: {attachedFiles.map((f) => f.name).join(', ')}</div>
         )}
       </div>
 
       {/* Library modal */}
       {libraryOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* backdrop */}
           <div className="absolute inset-0 bg-black/50" onClick={() => setLibraryOpen(false)} />
-          {/* panel */}
           <div className="relative bg-blue-950 border border-blue-700 rounded-2xl shadow-2xl w-[min(780px,92vw)] max-h-[80vh] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-blue-800">
               <div className="text-white font-semibold">Attach files from Library</div>
@@ -781,12 +798,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
                   placeholder="Search files…"
                   className="flex-1 bg-blue-900/60 text-blue-100 border border-blue-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <button
-                  onClick={() => { setLibraryQuery(''); refreshLibrary(); }}
-                  className="text-sm bg-blue-800 text-white px-3 py-2 rounded-lg border border-blue-700 hover:bg-blue-700"
-                >
-                  Refresh
-                </button>
+                <button onClick={() => { setLibraryQuery(''); refreshLibrary(); }} className="text-sm bg-blue-800 text-white px-3 py-2 rounded-lg border border-blue-700 hover:bg-blue-700">Refresh</button>
               </div>
 
               <div className="overflow-auto max-h-[48vh] rounded-lg border border-blue-800">
@@ -827,28 +839,15 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
                 )}
               </div>
 
-              {/* Selected summary + actions */}
               <div className="mt-3 flex items-center justify-between">
                 <div className="flex flex-wrap gap-2">
                   {selectedDocs.map((d) => (
-                    <span key={d.file_url} className="text-[11px] bg-blue-800 text-blue-100 px-2 py-1 rounded-md">
-                      {d.file_name}
-                    </span>
+                    <span key={d.file_url} className="text-[11px] bg-blue-800 text-blue-100 px-2 py-1 rounded-md">{d.file_name}</span>
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setSelectedDocs([])}
-                    className="text-sm px-3 py-2 rounded-lg bg-blue-900 border border-blue-700 text-blue-200 hover:bg-blue-800"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    onClick={() => setLibraryOpen(false)}
-                    className="text-sm px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                  >
-                    Done
-                  </button>
+                  <button onClick={() => setSelectedDocs([])} className="text-sm px-3 py-2 rounded-lg bg-blue-900 border border-blue-700 text-blue-200 hover:bg-blue-800">Clear</button>
+                  <button onClick={() => setLibraryOpen(false)} className="text-sm px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Done</button>
                 </div>
               </div>
             </div>
@@ -859,7 +858,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   );
 };
 
-/* ---------- Small Emoji Button/Panel component ---------- */
+/* ---------- Emoji Button ---------- */
 function EmojiButton({
   inputRef,
   setInput,
@@ -880,17 +879,15 @@ function EmojiButton({
     return () => document.removeEventListener('click', onDocClick);
   }, []);
 
-  // Decide alignment (avoid clipping) using viewport space
   useEffect(() => {
     if (!open) return;
     const wrap = btnWrapRef.current;
     if (!wrap) return;
 
     const WRAP_MARGIN = 8;
-    const PANEL_W = 224; // w-56
-    const r = wrap.getBoundingClientRect(); // wrapper around the button
+    const PANEL_W = 224;
+    const r = wrap.getBoundingClientRect();
 
-    // If centering would clip left or right, snap
     const centerLeft = r.left + r.width / 2 - PANEL_W / 2;
     const centerRight = centerLeft + PANEL_W;
 
@@ -954,7 +951,40 @@ function EmojiButton({
   );
 }
 
+/* ---------- Typing bubble (animated …) ---------- */
+function TypingBubble() {
+  return (
+    <div className="mb-1">
+      <div className="relative max-w-[85%] break-words shadow-md rounded-2xl border transition bg-gradient-to-br from-yellow-300 to-yellow-100 border-yellow-400 text-slate-900 p-4 pb-6">
+        <div className="flex items-center gap-2 text-[15px]">
+          <span className="font-medium">Zeta is thinking</span>
+          <span className="inline-flex items-end gap-1 ml-1 h-[1em]">
+            <span className="typing-dot" style={{ animationDelay: '0ms' }} />
+            <span className="typing-dot" style={{ animationDelay: '120ms' }} />
+            <span className="typing-dot" style={{ animationDelay: '240ms' }} />
+          </span>
+        </div>
+        <div className="absolute bottom-2 right-2 text-[10px] text-gray-500 select-none">…</div>
 
-
+        <style jsx>{`
+          .typing-dot {
+            width: 0.375rem;
+            height: 0.375rem;
+            border-radius: 9999px;
+            background: rgba(51, 65, 85, 0.7);
+            display: inline-block;
+            animation: zeta-bounce-dot 1s ease-in-out infinite;
+            transform-origin: center;
+          }
+          @keyframes zeta-bounce-dot {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.7; }
+            40%           { transform: translateY(-6px); opacity: 1; }
+          }
+          @media (prefers-reduced-motion: reduce) { .typing-dot { animation: none; } }
+        `}</style>
+      </div>
+    </div>
+  );
+}
 
 export default ChatTab;
