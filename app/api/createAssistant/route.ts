@@ -50,7 +50,7 @@ Avoid duplicates (prefer updates if an equivalent item already exists).
 
 Keep proposals concise—only include fields you are confident about.`;
 
- function baseSelfKnowledgeJSON() {
+function baseSelfKnowledgeJSON() {
   return {
     layout: {
       visual_overview: {
@@ -368,9 +368,20 @@ export async function POST(req: Request) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 6) Ensure mainframe_info row exists & set preferred name
+    // 6) Ensure mainframe_info row exists & set required fields (✅ sets current_date)
     {
-      const now = new Date().toISOString();
+      const isoNow = new Date().toISOString();
+      const today = isoNow.slice(0, 10); // YYYY-MM-DD
+
+      const payload = {
+        id: projectId,                                // PK
+        project_id: projectId,                        // keep if your table has it
+        preferred_user_name: preferredNameToSave || null,
+        personality_traits: cleanTraits ?? [],
+        current_date: today,                          // ✅ satisfies NOT NULL
+        updated_at: isoNow,
+      };
+
       const { data: mfiRow } = await supabaseAdmin
         .from('mainframe_info')
         .select('id')
@@ -378,18 +389,13 @@ export async function POST(req: Request) {
         .maybeSingle();
 
       if (mfiRow?.id) {
-        await supabaseAdmin
-          .from('mainframe_info')
-          .update({ preferred_user_name: preferredNameToSave, updated_at: now })
-          .eq('id', projectId);
+        await supabaseAdmin.from('mainframe_info').update(payload).eq('id', projectId);
       } else {
-        await supabaseAdmin
-          .from('mainframe_info')
-          .insert({ id: projectId, preferred_user_name: preferredNameToSave, created_at: now });
+        await supabaseAdmin.from('mainframe_info').insert({ ...payload, created_at: isoNow });
       }
     }
 
-    // 7) Seed goals (best-effort; matches your columns)
+    // 7) Seed goals (best-effort)
     {
       const { error } = await supabaseAdmin.from('goals').insert([
         { project_id: projectId, goal_type: 'short_term', description: 'Create a couple short-term goals for Zeta to help you with!' },
@@ -398,7 +404,7 @@ export async function POST(req: Request) {
       if (error) console.warn('seed goals warning:', error.message);
     }
 
-    // 8) Seed default tasks into task_items (best-effort; matches your columns)
+    // 8) Seed default tasks (best-effort)
     {
       const { data: existing, error: fetchErr } = await supabaseAdmin
         .from('task_items')
