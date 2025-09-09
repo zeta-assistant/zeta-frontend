@@ -31,7 +31,7 @@ const BASE_TRAITS: string[] = [
 
 export default function ZetaSetup() {
   const router = useRouter();
-  const user = useUser();
+  const userFromHook = useUser(); // may be undefined on first render
 
   const [preferredUserName, setPreferredUserName] = useState('');
   const [projectName, setProjectName] = useState('');
@@ -56,10 +56,15 @@ export default function ZetaSetup() {
   useEffect(() => {
     (async () => {
       try {
+        const uid = userFromHook?.id || '';
+        if (!uid) {
+          setPlan('free');
+          return;
+        }
         const { data, error } = await supabase
           .from('user_projects')
           .select('is_premium, plan')
-          .eq('user_id', user?.id || '')
+          .eq('user_id', uid)
           .limit(1);
         if (!error && data && data.length) {
           setPlan(normalizePlanRow(data[0]));
@@ -70,7 +75,7 @@ export default function ZetaSetup() {
         setPlan('free');
       }
     })();
-  }, [user?.id]);
+  }, [userFromHook?.id]);
 
   const ALL_TRAITS = useMemo(() => [...BASE_TRAITS, ...customTraits], [customTraits]);
 
@@ -101,12 +106,29 @@ export default function ZetaSetup() {
   };
 
   const handleSubmit = async () => {
-    if (!projectName || !assistantType || !user || !modelId) {
+    if (!projectName || !assistantType || !modelId) {
       alert('Missing required fields');
       return;
     }
     setLoading(true);
     try {
+      // ✅ Always fetch the *live* user from auth right now
+      const { data: authUser, error: authErr } = await supabase.auth.getUser();
+      if (authErr) {
+        console.error('[auth.getUser error]', authErr);
+        throw new Error('Not authenticated');
+      }
+      const liveUserId = authUser.user?.id;
+      console.log('[env]', {
+        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        liveUserId,
+        hookUserId: userFromHook?.id,
+      });
+      if (!liveUserId) {
+        alert('You must be signed in to create a project.');
+        return;
+      }
+
       const personalityLine = traits.length ? `Zeta’s personality: ${traits.join(', ')}.` : '';
       const cadenceLine = `Initiative cadence: ${initiativeCadence}.`;
       const mergedSystemInstructions = [personalityLine, cadenceLine, systemInstructions]
@@ -115,14 +137,13 @@ export default function ZetaSetup() {
 
       // Gate non-OpenAI if not premium
       const safeModelId = isPremium ? modelId : 'gpt-4o';
-
       const visionToSave: string | null = null;
 
-      // 1) Create the project
+      // 👉 Insert with the *live* user id
       const { data: projectData, error: insertError } = await supabase
         .from('user_projects')
         .insert([{
-          user_id: user.id,
+          user_id: liveUserId,                  // <— this must exist in your users/auth.users table
           name: projectName,
           vision: visionToSave,
           preferred_user_name: preferredUserName || null,
@@ -138,41 +159,24 @@ export default function ZetaSetup() {
         .select()
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('[user_projects insert error]', insertError);
+        // Helpful hint for the classic ENV mismatch case
+        if (insertError.code === '23503') {
+          throw new Error(
+            `User ${liveUserId} not found in users/auth.users. ` +
+            `Check you are logged in and NEXT_PUBLIC_SUPABASE_URL points to the same project as your auth session.`
+          );
+        }
+        throw insertError;
+      }
 
       const projectId = projectData.id;
 
-      // 2) Try to create mainframe_info (but don't block UX if FK shenanigans happen)
-      const isoNow = new Date().toISOString(); // TIMESTAMPTZ-friendly
-      const today  = isoNow.slice(0, 10);      // YYYY-MM-DD
+      // Skip mainframe_info for now to avoid its FK while you stabilize
+      // (Re-enable later once the FK path is sorted out)
 
-      const mfPayload: any = {
-        id: projectId,                       // PK = user_projects.id
-        // If your DB tries to set project_id via trigger/default, it may override this.
-        // We'll set it explicitly; if FK still fires due to a trigger, we swallow it below.
-        project_id: projectId,
-        preferred_user_name: preferredUserName || null,
-        personality_traits: traits,
-        current_date: today,
-        current_time: isoNow,
-        updated_at: isoNow,
-        created_at: isoNow,
-      };
-
-      const mfRes = await supabase
-        .from('mainframe_info')
-        .upsert(mfPayload, { onConflict: 'id' });
-
-      if (mfRes.error) {
-        // Swallow FK violations so the setup can proceed
-        if (mfRes.error.code === '23503') {
-          console.warn('[mainframe_info] FK violation ignored at setup:', mfRes.error.message);
-        } else {
-          console.warn('[mainframe_info] non-FK error ignored at setup:', mfRes.error);
-        }
-      }
-
-      // 3) Create assistant
+      // Create assistant
       const res = await fetch('/api/createAssistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -193,12 +197,15 @@ export default function ZetaSetup() {
       });
 
       const assistantRes = await res.json();
-      if (!res.ok) throw new Error(assistantRes.error || 'Failed to create assistant');
+      if (!res.ok) {
+        console.error('[createAssistant error body]', assistantRes);
+        throw new Error(assistantRes.error || 'Failed to create assistant');
+      }
 
       router.push(`/dashboard/${projectId}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('❌ Zeta Setup Error:', err);
-      alert('Something went wrong. See console for details.');
+      alert(`Something went wrong: ${err?.message || err}`);
     } finally {
       setLoading(false);
     }
@@ -212,7 +219,13 @@ export default function ZetaSetup() {
 
       <div className="w-full max-w-6xl">
         <div className="flex items-center justify-center gap-3 mb-2">
-          <Image src="/zeta-letterlogo.png" alt="Zeta Logo" width={72} height={72} />
+          <Image
+            src="/zeta-letterlogo.png"
+            alt="Zeta Logo"
+            width={72}
+            height={72}
+            style={{ height: 'auto' }}
+          />
         </div>
         <div className="text-center mb-4">
           <h1 className="text-2xl font-bold leading-tight text-indigo-900">Zeta Build Setup</h1>
@@ -279,9 +292,7 @@ export default function ZetaSetup() {
                     <option value="mistral-7b" disabled={!isPremium}>Mistral 7B</option>
                     <option value="deepseek-chat" disabled={!isPremium}>DeepSeek Chat</option>
                     <option value="phi-2" disabled={!isPremium}>Phi-2</option>
-                    <option value="__custom" disabled>
-                      🚧 Use custom model
-                    </option>
+                    <option value="__custom" disabled>🚧 Use custom model</option>
                   </select>
                   {!isPremium && (
                     <p className="mt-1 text-[11px] text-indigo-900/70">
@@ -337,6 +348,7 @@ export default function ZetaSetup() {
                     alt="Zeta being productive"
                     width={260}
                     height={110}
+                    style={{ width: 'auto' }}
                     sizes="(max-width: 768px) 70vw, 260px"
                     className="mx-auto rounded-lg shadow-sm"
                     priority={false}
@@ -431,7 +443,7 @@ export default function ZetaSetup() {
           <div className="mt-5">
             <Button
               onClick={handleSubmit}
-              disabled={!projectName || !assistantType || !user || loading}
+              disabled={!projectName || !assistantType || loading}
               className="w-full h-10"
             >
               {loading ? 'Setting Up...' : 'Finish Setup'}
