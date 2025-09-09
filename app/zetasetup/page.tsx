@@ -29,21 +29,6 @@ const BASE_TRAITS: string[] = [
   'minimalist','thorough',
 ];
 
-// —— local date/time helper (uses the user's device time) ——
-function nowLocal() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const MM = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const HH = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
-  return {
-    ymd: `${yyyy}-${MM}-${dd}`,   // YYYY-MM-DD
-    hms: `${HH}:${mm}:${ss}`,     // HH:MM:SS
-  };
-}
-
 export default function ZetaSetup() {
   const router = useRouter();
   const user = useUser();
@@ -146,8 +131,8 @@ export default function ZetaSetup() {
           system_instructions: mergedSystemInstructions,
           model_id: safeModelId,
           personality_traits: traits,
-          initiative_cadence: initiativeCadence,
-          plan: plan === 'loading' ? 'free' : plan,
+          initiative_cadence: initiativeCadence, // ← save cadence
+          plan: plan === 'loading' ? 'free' : plan, // store current plan snapshot
         }])
         .select()
         .single();
@@ -156,22 +141,23 @@ export default function ZetaSetup() {
 
       const projectId = projectData.id;
       const isoNow = new Date().toISOString();
-      const { ymd: today, hms: localTime } = nowLocal(); // <-- device local time
+      const today = isoNow.slice(0, 10); // YYYY-MM-DD for DATE
 
+      // ✔ current_time expects TIMESTAMPTZ — give it a full ISO timestamp
       const { error: mfErr } = await supabase
         .from('mainframe_info')
         .upsert(
           {
-            id: projectId,                 // use id as PK to match the rest of your app
+            id: projectId,                 // use id as the PK to match the rest of your app
             project_id: projectId,         // keep if this column exists in your schema
             preferred_user_name: preferredUserName || null,
             personality_traits: traits,
-            current_date: today,           // DATE column
-            current_time: localTime,       // <-- REQUIRED: satisfies NOT NULL on TIME/TEXT column
-            updated_at: isoNow,
-            created_at: isoNow,
+            current_date: today,           // DATE NOT NULL
+            current_time: isoNow,          // TIMESTAMPTZ NOT NULL
+            updated_at: isoNow,            // optional
+            created_at: isoNow,            // optional (ignored on conflict)
           },
-          { onConflict: 'id' }
+          { onConflict: 'id' }             // conflict target is 'id'
         );
 
       if (mfErr) throw mfErr;
@@ -435,7 +421,7 @@ export default function ZetaSetup() {
           <div className="mt-5">
             <Button
               onClick={handleSubmit}
-              disabled={!projectName || !assistantType || loading}
+              disabled={!projectName || !assistantType || !user || loading}
               className="w-full h-10"
             >
               {loading ? 'Setting Up...' : 'Finish Setup'}
