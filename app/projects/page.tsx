@@ -1,10 +1,10 @@
-// app/projects/page.tsx  (your file, edited parts marked 🔧)
+// app/projects/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { getPlanAndUsage } from '@/lib/plan'; // 🔧 add
+import { getPlanAndUsage } from '@/lib/plan';
 
 type Project = {
   id: string;
@@ -15,6 +15,7 @@ type Project = {
   type: string;
   onboarding_complete: boolean;
   system_instructions: string | null;
+  assistant_id?: string | null;
 };
 
 export default function ProjectsPage() {
@@ -24,14 +25,17 @@ export default function ProjectsPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 🔧 new plan/usage state
-  const [plan, setPlan] = useState<'free'|'premium'>('free');
+  // plan/usage state
+  const [plan, setPlan] = useState<'free' | 'premium'>('free');
   const [limit, setLimit] = useState<number>(3);
   const [used, setUsed] = useState<number>(0);
 
   useEffect(() => {
     const fetchProjects = async () => {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
       if (sessionError || !session?.user) {
         router.push('/login');
         return;
@@ -41,7 +45,6 @@ export default function ProjectsPage() {
       setUserEmail(session.user.email ?? null);
       setUserId(uid);
 
-      // 🔧 plan usage
       const usage = await getPlanAndUsage();
       setPlan(usage.plan);
       setLimit(usage.limit);
@@ -53,7 +56,7 @@ export default function ProjectsPage() {
         .eq('user_id', uid)
         .order('created_at', { ascending: false });
 
-      if (!error && data) setProjects(data);
+      if (!error && data) setProjects(data as Project[]);
       setLoading(false);
     };
 
@@ -64,7 +67,6 @@ export default function ProjectsPage() {
     router.push(`/dashboard/${project.id}`);
   };
 
-  // 🔧 Pre-check and route to onboarding (no triggers!)
   const createNewProject = async () => {
     if (used >= limit) {
       alert(
@@ -83,35 +85,62 @@ export default function ProjectsPage() {
   };
 
   const handleDelete = async (projectId: string) => {
-  const confirmed = confirm('Are you sure you want to delete this project? This action cannot be undone.');
-  if (!confirmed || !userId) return;
+    const confirmed = confirm(
+      'Are you sure you want to delete this project? This action cannot be undone.'
+    );
+    if (!confirmed || !userId) return;
 
-  setLoading(true);
-  try {
-    // ... your assistant deletion first (unchanged) ...
+    setLoading(true);
+    try {
+      // fetch assistant id (best-effort)
+      const { data: projRow } = await supabase
+        .from('user_projects')
+        .select('assistant_id')
+        .eq('id', projectId)
+        .eq('user_id', userId)
+        .single();
 
-    const res = await fetch('/api/delete-project', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, userId }),
-    });
+      const assistantId = (projRow as { assistant_id?: string | null } | null)?.assistant_id;
 
-    const json = await res.json();
-    if (!res.ok) {
-      console.error('❌ Failed to delete project:', json?.error || res.statusText);
-      alert(`Failed to delete project: ${json?.error || res.statusText}`);
-    } else {
-      setProjects((prev) => prev.filter((p) => p.id !== projectId));
-      setUsed((u) => Math.max(0, u - 1));
+      // delete assistant first (best-effort)
+      if (assistantId) {
+        try {
+          const ares = await fetch('/api/delete-assistant', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId, assistantId }),
+          });
+          if (!ares.ok) {
+            const txt = await ares.text();
+            console.warn('Assistant deletion warning:', txt);
+          }
+        } catch (e) {
+          console.warn('Assistant deletion request failed:', e);
+        }
+      }
+
+      // server-side deletion via service role (bypasses RLS)
+      const res = await fetch('/api/delete-project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, userId }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        console.error('❌ Failed to delete project:', result?.error || res.statusText);
+        alert(`Failed to delete project: ${result?.error || res.statusText}`);
+      } else {
+        setProjects((prev) => prev.filter((p) => p.id !== projectId));
+        setUsed((u) => Math.max(0, u - 1));
+      }
+    } catch (err) {
+      console.error('❌ Unexpected deletion error:', err);
+      alert('Unexpected error during deletion.');
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error('❌ Unexpected deletion error:', err);
-    alert('Unexpected error during deletion.');
-  } finally {
-    setLoading(false);
-  }
-};
-
+  };
 
   const remaining = Math.max(0, limit - used);
 
@@ -126,8 +155,17 @@ export default function ProjectsPage() {
               👤 <span className="font-medium">{userEmail}</span>
             </p>
             <div className="text-xs text-gray-500">
-              Plan: <span className={plan==='premium' ? 'text-amber-600 font-semibold' : 'text-slate-700 font-semibold'}>{plan}</span>
-              {' '}• Projects {used}/{limit}
+              Plan:{' '}
+              <span
+                className={
+                  plan === 'premium'
+                    ? 'text-amber-600 font-semibold'
+                    : 'text-slate-700 font-semibold'
+                }
+              >
+                {plan}
+              </span>{' '}
+              • Projects {used}/{limit}
             </div>
             <button onClick={handleLogout} className="text-xs text-red-500 hover:underline mt-1">
               Log Out
@@ -142,12 +180,16 @@ export default function ProjectsPage() {
           <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 px-3 py-2 text-sm">
             You’ve reached your {plan === 'premium' ? 'Premium' : 'Free'} project limit ({limit}).
             {plan === 'free' && (
-              <> Upgrade to <span className="font-semibold">Premium</span> for up to 10 projects.</>
+              <>
+                {' '}
+                Upgrade to <span className="font-semibold">Premium</span> for up to 10 projects.
+              </>
             )}
           </div>
         ) : (
           <div className="rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 px-3 py-2 text-sm">
-            You have <span className="font-semibold">{remaining}</span> project slot{remaining===1?'':'s'} remaining.
+            You have <span className="font-semibold">{remaining}</span> project
+            {remaining === 1 ? '' : 's'} remaining.
           </div>
         )}
       </div>
@@ -159,10 +201,15 @@ export default function ProjectsPage() {
         <div className="flex flex-col items-center gap-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl">
             {projects.map((project) => (
-              <div key={project.id} className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition">
+              <div
+                key={project.id}
+                className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition"
+              >
                 <h2 className="text-xl font-bold mb-1">{project.name}</h2>
                 <p className="text-sm text-gray-600 mb-1">⚡ Type: {project.type}</p>
-                {project.description && <p className="text-sm text-gray-500 italic mb-1">{project.description}</p>}
+                {project.description && (
+                  <p className="text-sm text-gray-500 italic mb-1">{project.description}</p>
+                )}
                 {project.system_instructions && (
                   <p className="text-xs text-gray-400 mb-1">🛠 {project.system_instructions}</p>
                 )}
@@ -196,13 +243,18 @@ export default function ProjectsPage() {
           <button
             onClick={createNewProject}
             disabled={remaining === 0}
-            className={`mt-2 px-6 py-4 rounded-full text-lg transition
-              ${remaining === 0
+            className={`mt-2 px-6 py-4 rounded-full text-lg transition ${
+              remaining === 0
                 ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                : 'bg-black text-white hover:bg-gray-800'}`}
-            title={remaining === 0
-              ? (plan === 'premium' ? 'Premium limit reached (10)' : 'Free limit reached (3). Upgrade for more.')
-              : 'Create a new project'}
+                : 'bg-black text-white hover:bg-gray-800'
+            }`}
+            title={
+              remaining === 0
+                ? plan === 'premium'
+                  ? 'Premium limit reached (10)'
+                  : 'Free limit reached (3). Upgrade for more.'
+                : 'Create a new project'
+            }
           >
             ➕ Create New Project
           </button>
