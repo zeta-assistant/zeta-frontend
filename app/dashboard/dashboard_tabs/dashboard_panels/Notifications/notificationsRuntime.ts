@@ -99,17 +99,27 @@ export const BUILT_INS: Array<{
    URL helpers
 ─────────────────────────────────────────────────────────── */
 
-export function buildUrls(sbUrl: string) {
+// notificationsRuntime.ts
+
+export function buildUrls(projectId: string, sbUrl?: string) {
+  // Prefer explicit arg, fallback to env var
+  const base = sbUrl ?? process.env.NEXT_PUBLIC_SUPABASE_URL!;
   return {
-    relevantdiscussion: `${sbUrl}/functions/v1/relevantdiscussion`,
-    emitThoughts: `${sbUrl}/functions/v1/emit-thoughts`,
-    sendTelegram: `${sbUrl}/functions/v1/send-telegram-message`,
-    sendEmail: `${sbUrl}/functions/v1/send-email-message`,
-    dailyChatMessage: `${sbUrl}/functions/v1/daily-chat-message`,
-    calendarDigest: `${sbUrl}/functions/v1/calendar-digest`,
-    // Note: no armJob URL here; arming is via RPC security definer on the DB.
-  }
+    // existing single-purpose functions
+    relevantdiscussion: `${base}/functions/v1/relevantdiscussion`,
+    emitThoughts:        `${base}/functions/v1/emit-thoughts`,
+    sendTelegram:        `${base}/functions/v1/send-telegram-message`,
+    sendEmail:           `${base}/functions/v1/send-email-message`,
+    dailyChatMessage:    `${base}/functions/v1/daily-chat-message`,
+    calendarDigest:      `${base}/functions/v1/calendar-digest`,
+
+    // ✅ new endpoint for re-arming a rule
+    rearmNotification:   `${base}/functions/v1/notifications-rules?op=rearm&project_id=${projectId}`,
+  } as const;
 }
+
+// (optional) export a type if you want strong typing elsewhere
+export type UrlMap = ReturnType<typeof buildUrls>;
 
 /* ──────────────────────────────────────────────────────────
    Errors
