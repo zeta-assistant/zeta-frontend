@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import Image from 'next/image';
 
 import { getPlanFromUser, PLAN_LIMIT, type Plan } from '@/lib/plan';
-import ZetaPremiumMark, { PlanTag } from '@/components/ui/ZetaPremiumMark';
+import { PlanTag } from '@/components/ui/ZetaPremiumMark';
 
 const DEFAULT_AVATAR_SRC = '/user-faceless.svg';
 
@@ -233,7 +233,7 @@ export default function SettingsPageFree() {
 
   return (
     <div className="min-h-screen bg-[#0b1226]">
-      {/* HERO — darker blue gradient */}
+      {/* HERO — removed ZetaPremiumMark so no "Free" caption under logo */}
       <div className="relative border-b border-white/10 bg-gradient-to-b from-indigo-950 via-indigo-900 to-indigo-800">
         <div
           className="absolute inset-0 pointer-events-none"
@@ -243,8 +243,16 @@ export default function SettingsPageFree() {
           }}
         />
         <div className="relative max-w-5xl mx-auto px-6 py-8 flex items-center gap-6 text-white">
-          {/* shared ZetaPremiumMark (with base avatar override) */}
-          <ZetaPremiumMark plan={plan} size={104} srcFree="/pantheon.png" srcPremium="/zeta-premium.png" />
+          <div className="shrink-0">
+            <Image
+              src="/pantheon.png"
+              alt="Pantheon"
+              width={104}
+              height={104}
+              className="rounded-xl border border-white/10"
+              priority
+            />
+          </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <h1 className="text-3xl font-bold text-white">User Settings</h1>
@@ -406,10 +414,13 @@ What would you like Zeta to help you automate or accelerate?`}
 
         {/* Premium (full width below) */}
         <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div className="flex-1">
               <h2 className="text-lg font-semibold">Why go Premium?</h2>
-              <p className="text-sm text-gray-600 mt-1">Unlock higher capacity and power features that level up your workflow.</p>
+              <p className="text-sm text-gray-600 mt-1">
+                Go from <strong>{PLAN_LIMIT.free} projects (Free)</strong> to <strong>{PLAN_LIMIT.premium} projects (Premium)</strong> and unlock power features.
+              </p>
+              <ProjectMeter freeMax={PLAN_LIMIT.free} premiumMax={PLAN_LIMIT.premium} />
             </div>
             <div className="flex items-center gap-3">
               <Image src="/zeta-premium.png" alt="Zeta Premium" width={56} height={56} className="rounded-xl" />
@@ -417,13 +428,19 @@ What would you like Zeta to help you automate or accelerate?`}
             </div>
           </div>
 
-          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 text-sm">
-            <Benefit icon="⚡" title="Capacity Boost" desc={`Increase project limit from ${PLAN_LIMIT.free} → ${PLAN_LIMIT.premium}.`} />
-            <Benefit icon="🧪" title="Early Access" desc="Try new features & betas first." />
-            <Benefit icon="🎧" title="Priority Support" desc="Jump to the front of the queue." />
-            <Benefit icon="🔌" title="Advanced Automations" desc="Extra integrations & API slots." />
+          {/* Benefits — updated copy */}
+          <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4 text-sm">
+            <Benefit icon="📁" title="More Projects" desc={`From ${PLAN_LIMIT.free} → ${PLAN_LIMIT.premium} total projects.`} />
+            <Benefit icon="💎" title="Premium Features" desc="Access advanced automations, integrations & tools." />
+            <Benefit icon="🧪" title="First Access" desc="New & beta features roll out to Premium first." />
+            <Benefit icon="🎧" title="Priority Support" desc="Faster responses & issue triage." />
+            <Benefit icon="🎨" title="Deeper Customization" desc="More control over agent style & behavior." />
+            <Benefit icon="⚡" title="Higher Limits" desc="Bigger file sizes, more actions, richer history." />
+            <Benefit icon="🔔" title="Smarter Notifications" desc="Advanced scheduling & multi-channel delivery." />
+            <Benefit icon="🔌" title="More Integrations" desc="Extra API slots & channels as they ship." />
           </ul>
 
+          {/* Comparison — succinct */}
           <div className="mt-6 overflow-hidden rounded-xl border border-gray-200">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-700">
@@ -435,10 +452,10 @@ What would you like Zeta to help you automate or accelerate?`}
               </thead>
               <tbody>
                 <Row label="Projects" free={`${PLAN_LIMIT.free}`} pro={`${PLAN_LIMIT.premium}`} />
-                <Row label="New feature access" free="Standard" pro="Early access" />
-                <Row label="Support queue" free="Standard" pro="Priority" />
-                <Row label="Automations & integrations" free="Basic" pro="Advanced + more channels" />
-                <Row label="Theme & avatar" free="Standard" pro="Premium avatar & themes" />
+                <Row label="Feature access" free="Core features" pro="Premium features unlocked" />
+                <Row label="New & beta features" free="Later" pro="First access" />
+                <Row label="Support" free="Standard" pro="Priority" />
+                <Row label="Agent customization" free="Basic" pro="Advanced styles & controls" />
               </tbody>
             </table>
           </div>
@@ -461,7 +478,8 @@ What would you like Zeta to help you automate or accelerate?`}
   );
 }
 
-/* helpers */
+/* ───────────────── helpers ───────────────── */
+
 function PlanPrice({ plan }: { plan: Plan }) {
   const isPremium = plan === 'premium';
   return (
@@ -502,5 +520,53 @@ function Row({ label, free, pro }: { label: string; free: string; pro: string })
       <td className="p-3 text-center text-gray-700">{free}</td>
       <td className="p-3 text-center font-semibold text-amber-700">{pro}</td>
     </tr>
+  );
+}
+
+function ProjectMeter({ freeMax, premiumMax }: { freeMax: number; premiumMax: number }) {
+  // simple horizontal dots visual showing 3 vs 10
+  const dots = Array.from({ length: premiumMax }, (_, i) => i);
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+        <span>Free: {freeMax} projects</span>
+        <span>Premium: {premiumMax} projects</span>
+      </div>
+      <div className="flex items-center gap-2">
+        {/* Free bar */}
+        <div className="flex-1">
+          <div className="flex gap-1">
+            {dots.map((_, i) => (
+              <span
+                key={`free-${i}`}
+                className={[
+                  'inline-block h-2 w-2 rounded-full',
+                  i < freeMax ? 'bg-blue-600' : 'bg-gray-200',
+                ].join(' ')}
+                aria-hidden
+              />
+            ))}
+          </div>
+          <div className="mt-1 text-[11px] text-gray-500">Free capacity</div>
+        </div>
+        {/* Arrow */}
+        <div className="shrink-0 text-gray-400 text-lg" aria-hidden>
+          ➜
+        </div>
+        {/* Premium bar */}
+        <div className="flex-1">
+          <div className="flex gap-1">
+            {dots.map((_, i) => (
+              <span
+                key={`pro-${i}`}
+                className="inline-block h-2 w-2 rounded-full bg-amber-500"
+                aria-hidden
+              />
+            ))}
+          </div>
+          <div className="mt-1 text-[11px] text-gray-500">Premium capacity</div>
+        </div>
+      </div>
+    </div>
   );
 }
