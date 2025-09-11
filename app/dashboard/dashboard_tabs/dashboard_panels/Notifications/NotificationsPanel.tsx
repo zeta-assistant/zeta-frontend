@@ -110,7 +110,7 @@ function parseSendTimeHHMM(ruleTime: string | null | undefined): { h: number; m:
   const raw = String(ruleTime ?? '00:00').trim();
   const [hStr, mStr] = raw.split(':');
   const h = Math.max(0, Math.min(23, Number(hStr || 0)));
-  const m = Math.max(0, Math.min(59, Number((mStr || '0').slice(0, 2)))); // ignore seconds in UI
+  const m = Math.max(0, Math.min(59, Number((mStr || '0').slice(0, 2))));
   return { h, m };
 }
 function isWeekday(idx: number) { return idx >= 1 && idx <= 5; }
@@ -154,11 +154,10 @@ export default function NotificationsPanel({ projectId }: Props) {
   // live ticking for countdowns
   const [nowTs, setNowTs] = useState<number>(Date.now());
   useEffect(() => {
-  // ⏸️ avoid re-renders that close the time picker
-  if (editingId) return
-  const id = setInterval(() => setNowTs(Date.now()), 1000)
-  return () => clearInterval(id)
-}, [editingId])
+    if (editingId) return;
+    const id = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [editingId]);
 
   // slow tick to refresh header clock lines
   const [, setTick] = useState(0);
@@ -169,7 +168,7 @@ export default function NotificationsPanel({ projectId }: Props) {
 
   const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
   const SB_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
-  const URLS = buildUrls(SB_URL);
+  const URLS = buildUrls(projectId, SB_URL);
 
   /* ---------- data ---------- */
   const fetchRules = useCallback(async () => {
@@ -229,12 +228,12 @@ export default function NotificationsPanel({ projectId }: Props) {
 
   // refresh job next-run whenever rules change, and every 60s thereafter
   useEffect(() => {
-  if (!rules.length) return
-  fetchNextRuns()
-  if (editingId) return // ⏸️ don't refresh while editing
-  const id = setInterval(() => fetchNextRuns(), 60_000)
-  return () => clearInterval(id)
-}, [rules, fetchNextRuns, editingId])
+    if (!rules.length) return;
+    fetchNextRuns();
+    if (editingId) return;
+    const id = setInterval(() => fetchNextRuns(), 60_000);
+    return () => clearInterval(id);
+  }, [rules, fetchNextRuns, editingId]);
 
   const byType = useMemo(() => {
     const m = new Map<RuleType, Rule>();
@@ -249,7 +248,6 @@ export default function NotificationsPanel({ projectId }: Props) {
 
   const getFirstProjectEmail = () => emailState.list[0] || null;
 
-  // human relative formatter
   function fmtCountdown(ms: number): string {
     if (ms <= 0) return 'due now';
     const s = Math.floor(ms / 1000);
@@ -263,9 +261,7 @@ export default function NotificationsPanel({ projectId }: Props) {
     return `in ${sec}s`;
   }
 
-  // get live next-run text for a rule (or null if hidden)
   function getNextRunDisplay(rule: Rule): { rel: string; local: string } | null {
-    // hide if disabled or premium-locked
     if (!rule.is_enabled) return null;
     if (PREMIUM_TYPES.includes(rule.type as any) && !isPremium) return null;
 
@@ -292,7 +288,6 @@ export default function NotificationsPanel({ projectId }: Props) {
     if (!res.ok) { console.error(res.error); setFeedback(`❌ ${res.message || 'Failed to activate'}`); return null; }
     setFeedback(res.message || '✅ Done');
     await fetchRules();
-    // refresh jobs for the (possibly new) rule
     if (res.rule) fetchNextRuns([res.rule.id]);
     return res.rule ?? null;
   }
@@ -324,7 +319,6 @@ export default function NotificationsPanel({ projectId }: Props) {
       return `${hh}:${mm}:00`;
     };
 
-    // Free plan coerces to daily.
     const coercedFreq: Frequency =
       (!isPremium ? 'daily' : ((editState.frequency as Frequency) ?? 'daily'));
 
@@ -342,17 +336,17 @@ export default function NotificationsPanel({ projectId }: Props) {
     const { error } = await supabase.from('notification_rules').update(payload).eq('id', editingId);
     if (error) { console.error('Failed to update:', error); setFeedback('❌ Update failed'); return; }
     setFeedback('✅ Saved');
-try {
-  await fetch(URLS.rearmNotification, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-    body: JSON.stringify({ rule_id: editingId }),
-  });
-} catch {}
-cancelEdit();
-fetchRules();
-fetchNextRuns([editingId]);
 
+    try {
+      await fetch(URLS.rearmNotification, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        body: JSON.stringify({ rule_id: editingId }),
+      });
+    } catch {}
+    cancelEdit();
+    fetchRules();
+    fetchNextRuns([editingId]);
   };
 
   /* ---------- run/test ---------- */
@@ -400,7 +394,7 @@ fetchNextRuns([editingId]);
     } finally {
       refreshTelegramState();
       refreshEmailState();
-      fetchNextRuns([rule.id]); // refresh countdown after any run
+      fetchNextRuns([rule.id]);
     }
   };
 
@@ -647,9 +641,8 @@ fetchNextRuns([editingId]);
     const disableSendTest = telegramSelected && !tgState.connected;
 
     const isGated = PREMIUM_TYPES.includes(t.type) && !isPremium;
-    const runLocked = premiumLocked; // Run Now is premium-only
+    const runLocked = premiumLocked;
 
-    // live "next run" badge
     const nextInfo = rule ? getNextRunDisplay(rule) : null;
 
     const CardBody = (
@@ -672,7 +665,6 @@ fetchNextRuns([editingId]);
               : 'Not configured yet'}
           </div>
 
-          {/* Live next-run line */}
           {rule && !isGated && rule.is_enabled && (
             <div className="text-xs text-slate-600 mt-1">
               {nextInfo
@@ -780,10 +772,6 @@ fetchNextRuns([editingId]);
           ) : (
             <span className="text-xs sm:text-sm inline-flex items-center gap-2 bg-slate-600/90 text-white px-3 py-1 rounded-full">✉️ No email saved</span>
           )}
-
-          <span className={`text-xs sm:text-sm inline-flex items-center gap-2 px-3 py-1 rounded-full ${isPremium ? 'bg-indigo-500/90 text-white' : 'bg-slate-700/70 text-white'}`}>
-            {isPremium ? 'Premium' : 'Free'}
-          </span>
         </div>
       </div>
 

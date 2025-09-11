@@ -192,7 +192,7 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
           {/* Left: "Zeta XP ⚡" with title badge right next to it */}
           <div className="flex items-center gap-2">
             <div className="text-sm font-medium text-purple-100">
-              Zeta XP <span aria-hidden>⚡</span>
+              Zeta Build <span aria-hidden>⚡</span>
             </div>
             <span className="px-2 py-0.5 rounded-full border border-blue-500/60 text-[11px] font-semibold text-blue-100 bg-blue-900/40">
               {prog.title}

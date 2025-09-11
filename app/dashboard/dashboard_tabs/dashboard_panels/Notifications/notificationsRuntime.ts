@@ -114,7 +114,7 @@ export function buildUrls(projectId: string, sbUrl?: string) {
     calendarDigest:      `${base}/functions/v1/calendar-digest`,
 
     // ✅ new endpoint for re-arming a rule
-    rearmNotification:   `${base}/functions/v1/notifications-rules?op=rearm&project_id=${projectId}`,
+    rearmNotification:   `${base}/functions/v1/notification-rules`,
   } as const;
 }
 
@@ -641,7 +641,7 @@ export async function runRelevantDiscussion(
         body: JSON.stringify({ to, subject: `🔔 ${rule.name}`, message: emailText }),
       })
       const emailOut = await emailRes.json().catch(() => ({}))
-      if (!emailRes.ok) throw new Error(emailOut?.error || (emailOut as any)?.message || `HTTP ${emailRes.status}`)
+      if (!res.ok) throw new Error(emailOut?.error || (emailOut as any)?.message || `HTTP ${res.status}`)
       return { result: { relevantdiscussion: data, email: emailOut }, feedback: '✅ Triggered.' }
     }
     return {
