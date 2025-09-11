@@ -104,13 +104,16 @@ async function safeCount(
 
 /* ===================== Aggregate counts ===================== */
 export async function getXPCounts(projectId: string): Promise<Partial<MetricCounts>> {
-  // Conversation
-  const user_messages = await safeCount('zeta_conversation_log', (q) =>
-    q.eq('project_id', projectId).in('actor', ['user', 'User'])
-  );
-  const zeta_messages = await safeCount('zeta_conversation_log', (q) =>
-    q.eq('project_id', projectId).in('actor', ['assistant', 'zeta', 'Zeta'])
-  );
+// Conversation  ✅ FIXED SOURCES
+const user_messages = await safeCount('user_input_log', (q) =>
+  q.eq('project_id', projectId).eq('author', 'user')
+);
+
+// If you also log some assistant replies with actor='assistant' you can OR that in,
+// but the reliable signal is role='assistant' on zeta_conversation_log.
+const zeta_messages = await safeCount('zeta_conversation_log', (q) =>
+  q.eq('project_id', projectId).eq('role', 'assistant')
+);
 
   // Thoughts
   const zeta_thoughts =
