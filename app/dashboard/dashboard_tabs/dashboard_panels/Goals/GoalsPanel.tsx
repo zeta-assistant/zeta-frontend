@@ -3,6 +3,7 @@
 import React, { JSX, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import dayjs from 'dayjs';
+import ProjectHoursModal from './ProjectHoursModal';
 
 type Goal = {
   id: string;
@@ -16,9 +17,7 @@ const MAX_LONG = 3;
 const VISION_MIN = 1;
 const VISION_MAX = 50;
 
-/** ─────────────────────────────────────────────────────────
- * Auto-resizing textarea (no scrollbar, no resize handle)
- * ───────────────────────────────────────────────────────── */
+/** Auto-resizing textarea (no scrollbar, no resize handle) */
 function AutoTextarea({
   value,
   onChange,
@@ -48,7 +47,6 @@ function AutoTextarea({
   }, [value]);
 
   useEffect(() => {
-    // initial mount
     resize();
   }, []);
 
@@ -59,17 +57,11 @@ function AutoTextarea({
       placeholder={placeholder}
       onChange={(e) => {
         onChange(e);
-        // next tick to allow value to update
         requestAnimationFrame(resize);
       }}
       rows={minRows}
       disabled={disabled}
-      className={[
-        // kill resize handle + scrollbars
-        'resize-none overflow-hidden',
-        // preserve your styling
-        className,
-      ].join(' ')}
+      className={['resize-none overflow-hidden', className].join(' ')}
       style={{ height: 'auto' }}
     />
   );
@@ -107,6 +99,9 @@ export default function GoalsPanel({
     text: string;
     url: string | null;
   } | null>(null);
+
+  // Hours modal
+  const [hoursOpen, setHoursOpen] = useState(false);
 
   const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -219,7 +214,7 @@ export default function GoalsPanel({
         await fetchVision(projectId);
         await fetchGoalsForDisplay(projectId);
       } catch (err) {
-        console.error('❌ Failed to load goals/vision:', err);
+        console.error('❌ Failed to load goals/vision:', JSON.stringify(err ?? {}, null, 2));
       } finally {
         setLoading(false);
       }
@@ -230,12 +225,12 @@ export default function GoalsPanel({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'goals', filter: `project_id=eq.${projectId}` },
-        () => fetchGoalsForDisplay(projectId)
+        () => fetchGoalsForDisplay(projectId),
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'user_projects', filter: `id=eq.${projectId}` },
-        () => fetchVision(projectId)
+        () => fetchVision(projectId),
       )
       .subscribe();
 
@@ -264,7 +259,7 @@ export default function GoalsPanel({
       if (error) throw error;
       setVisionEditing(false);
     } catch (e) {
-      console.error(e);
+      console.error('saveVision error:', JSON.stringify(e ?? {}, null, 2));
       alert('Error saving vision.');
     } finally {
       setVisionSaving(false);
@@ -313,7 +308,7 @@ export default function GoalsPanel({
       alert('Goals saved!');
       await fetchGoalsForDisplay(projectId);
     } catch (e) {
-      console.error(e);
+      console.error('saveGoals error:', JSON.stringify(e ?? {}, null, 2));
       alert('Error saving goals');
     } finally {
       setSavingGoals(false);
@@ -335,7 +330,7 @@ export default function GoalsPanel({
       if (type === 'short') setShortTermGoals((p) => p.filter((g) => g.id !== goalId));
       else setLongTermGoals((p) => p.filter((g) => g.id !== goalId));
     } catch (e) {
-      console.error('❌ deleteGoal error:', e);
+      console.error('❌ deleteGoal error:', JSON.stringify(e ?? {}, null, 2));
       alert('Failed to delete goal.');
     }
   }
@@ -372,7 +367,7 @@ export default function GoalsPanel({
       slots.push(
         <li
           key={goal.id}
-          className="flex justify-between items-start bg-blue-900/20 border border-blue-700 rounded-md px-3 py-2"
+          className="flex justify-between items-start bg-indigo-900/20 border border-indigo-600 rounded-md px-3 py-2"
         >
           <AutoTextarea
             value={goal.description}
@@ -398,7 +393,7 @@ export default function GoalsPanel({
       slots.push(
         <li
           key={tempId}
-          className="flex justify-between items-start bg-blue-900/10 border border-dashed border-blue-700 rounded-md px-3 py-2"
+          className="flex justify-between items-start bg-indigo-900/10 border border-dashed border-indigo-600 rounded-md px-3 py-2"
         >
           <AutoTextarea
             value=""
@@ -436,11 +431,8 @@ export default function GoalsPanel({
   const trimmedLen = (vision ?? '').trim().length;
   const overLimit = trimmedLen > VISION_MAX;
 
-  // --- Helpers used by portfolio generation ---
-
-  // Ensure a tracker row exists for a goal; return tracker object
+  // ---------- Report helpers ----------
   async function ensureTracker(goalId: string): Promise<{ id: string; created_at: string; completed_at: string | null }> {
-    // Try fetch
     const { data, error } = await supabase
       .from('goal_trackers')
       .select('id, created_at, completed_at')
@@ -448,11 +440,15 @@ export default function GoalsPanel({
       .eq('goal_id', goalId)
       .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') throw error; // unexpected error
+    if (error && (error as any).code !== 'PGRST116') throw error;
+    if ((data as any)?.id) {
+      return {
+        id: (data as any).id,
+        created_at: (data as any).created_at,
+        completed_at: ((data as any).completed_at ?? null),
+      };
+    }
 
-    if (data?.id) return { id: data.id, created_at: data.created_at as string, completed_at: (data.completed_at as string | null) ?? null };
-
-    // Insert if missing
     const ins = await supabase
       .from('goal_trackers')
       .insert({ project_id: projectId, goal_id: goalId, status: 'active' })
@@ -467,12 +463,10 @@ export default function GoalsPanel({
     };
   }
 
-  // Aggregate usage from daily_feature_usage_checker for a date window
   async function aggregateUsage(startISO: string, endISO: string) {
-    // Pull daily rows in range
     const { data, error } = await supabase
       .from('daily_feature_usage_checker')
-      .select('usage_date, sys_events_total, user_inputs_total, top_events, feature_counts')
+      .select('usage_date, sys_events_total, user_inputs_total, feature_counts')
       .eq('project_id', projectId)
       .gte('usage_date', dayjs(startISO).format('YYYY-MM-DD'))
       .lte('usage_date', dayjs(endISO).format('YYYY-MM-DD'))
@@ -480,28 +474,26 @@ export default function GoalsPanel({
 
     if (error) throw error;
 
-    // Aggregate totals
     const byEvent: Record<string, number> = {};
     let eventsTotal = 0;
     let userInputsTotal = 0;
     const activeDates = new Set<string>();
 
     for (const r of data ?? []) {
-      const sys = Number(r.sys_events_total || 0);
-      const usr = Number(r.user_inputs_total || 0);
+      const sys = Number((r as any).sys_events_total || 0);
+      const usr = Number((r as any).user_inputs_total || 0);
       eventsTotal += sys;
       userInputsTotal += usr;
-      if (sys || usr) activeDates.add(r.usage_date as string);
+      if (sys || usr) activeDates.add((r as any).usage_date as string);
 
-      // feature_counts is expected as jsonb like {"calendar":1,"chat":2}
       try {
-        const fc = typeof r.feature_counts === 'string' ? JSON.parse(r.feature_counts) : (r.feature_counts || {});
+        const fc = typeof (r as any).feature_counts === 'string'
+          ? JSON.parse((r as any).feature_counts)
+          : ((r as any).feature_counts || {});
         for (const k of Object.keys(fc)) {
           byEvent[k] = (byEvent[k] || 0) + Number(fc[k] || 0);
         }
-      } catch {
-        // ignore bad json
-      }
+      } catch {}
     }
 
     const daysActive = dayjs(endISO).diff(dayjs(startISO), 'day') + 1;
@@ -516,7 +508,6 @@ export default function GoalsPanel({
     };
   }
 
-  // --- Report (Portfolio) generation + preview modal opening ---
   async function generateAndSavePortfolio() {
     setReportSaving(true);
 
@@ -552,12 +543,10 @@ export default function GoalsPanel({
           md.push(`- ${g.description}`);
           if (g.created_at) md.push(`  - _Created: ${dayjs(g.created_at).format('MMM D, YYYY h:mm A')}_`);
 
-          // Ensure tracker and compute stats (using daily_feature_usage_checker)
           try {
             const tr = await ensureTracker(g.id);
             const startISO = tr.created_at;
             const endISO = tr.completed_at ?? now.toISOString();
-
             const stats = await aggregateUsage(startISO, endISO);
 
             md.push(`  - **Usage window:** ${stats.start_date} → ${stats.end_date}`);
@@ -586,7 +575,6 @@ export default function GoalsPanel({
 
       const fileText = md.join('\n');
 
-      // Save to storage + DB so it appears in Files → Generated
       const BUCKET = 'project-docs';
       const fileName = `${sanitize(`goal-portfolio-${now.format('YYYY-MM-DD_HH.mm')}`)}.md`;
       const storagePath = `${projectId}/generated/${fileName}`;
@@ -594,7 +582,7 @@ export default function GoalsPanel({
       const up = await supabase.storage.from(BUCKET).upload(
         storagePath,
         new Blob([fileText], { type: 'text/markdown' }),
-        { cacheControl: '3600', upsert: false, contentType: 'text/markdown' }
+        { cacheControl: '3600', upsert: false, contentType: 'text/markdown' },
       );
       if (up.error) throw up.error;
 
@@ -608,7 +596,6 @@ export default function GoalsPanel({
       });
       if (ins.error) throw ins.error;
 
-      // Reset selector modal + open preview
       setReportOpen(false);
       setSelectedShortIds(new Set());
       setSelectedLongIds(new Set());
@@ -617,7 +604,7 @@ export default function GoalsPanel({
 
       setPortfolioPreview({ title: fileName, text: fileText, url: pub });
     } catch (e: any) {
-      console.error('Portfolio generation failed:', e);
+      console.error('Portfolio generation failed:', JSON.stringify(e ?? {}, null, 2));
       alert(`Failed to generate portfolio: ${e?.message ?? e}`);
     } finally {
       setReportSaving(false);
@@ -626,51 +613,64 @@ export default function GoalsPanel({
 
   return (
     <div className={`text-${fontSize} text-white`}>
-      {/* Vision */}
-      <div className="p-5">
-        <h3 className="text-base font-semibold text-white mb-2">🧭 Project Vision</h3>
-        {!visionEditing ? (
-          <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4 flex justify-between items-start shadow">
-            <p className="max-w-[90%] leading-relaxed">{vision || 'No vision set yet.'}</p>
-            <button
-              title="Edit Vision"
-              onClick={() => setVisionEditing(true)}
-              className="text-amber-300 hover:text-amber-400 text-xl"
-            >
-              ✏️
-            </button>
-          </div>
-        ) : (
-          <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4">
-            <AutoTextarea
-              value={vision}
-              onChange={(e) => setVision(e.target.value)}
-              minRows={3}
-              disabled={visionSaving}
-              placeholder="Describe the project vision..."
-              className={`w-full p-2 rounded-md bg-blue-900/40 border ${overLimit ? 'border-red-500' : 'border-blue-700'} text-white placeholder:text-white/60`}
-            />
-            <div className="mt-1 flex items-center justify-between">
-              <span className={`text-xs ${overLimit ? 'text-red-400' : 'text-white/70'}`}>
-                {trimmedLen}/{VISION_MAX}
-              </span>
-              <button
-                onClick={saveVision}
-                disabled={visionSaving || trimmedLen < VISION_MIN}
-                className={`px-4 py-1 rounded text-white ${
-                  visionSaving || trimmedLen < VISION_MIN
-                    ? 'bg-blue-700/40 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-500'
-                }`}
-              >
-                {visionSaving ? 'Saving...' : 'Save Vision'}
-              </button>
+      {/* TOP: Vision stretched across; Project Hours button next to pencil */}
+      <div className="px-5 pb-6">
+        <section>
+          <h3 className="text-base font-semibold text-white mb-2">🧭 Project Vision</h3>
+          {!visionEditing ? (
+            <div className="bg-indigo-900/30 border border-indigo-600 rounded-lg p-4 flex justify-between items-start shadow">
+              <p className="max-w-[90%] leading-relaxed">{vision || 'No vision set yet.'}</p>
+              <div className="flex items-center gap-2">
+                <button
+                  title="Project Hours"
+                  onClick={() => setHoursOpen(true)}
+                  className="text-xs px-3 py-1 rounded border border-sky-600 bg-sky-700 hover:bg-sky-600 text-white"
+                >
+                  Project Hours
+                </button>
+                <button
+                  title="Edit Vision"
+                  onClick={() => setVisionEditing(true)}
+                  className="text-amber-300 hover:text-amber-400 text-xl"
+                >
+                  ✏️
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="bg-indigo-900/30 border border-indigo-600 rounded-lg p-4">
+              <AutoTextarea
+                value={vision}
+                onChange={(e) => setVision(e.target.value)}
+                minRows={3}
+                disabled={visionSaving}
+                placeholder="Describe the project vision..."
+                className={`w-full p-2 rounded-md bg-indigo-900/40 border ${
+                  overLimit ? 'border-red-500' : 'border-indigo-600'
+                } text-white placeholder:text-white/60`}
+              />
+              <div className="mt-1 flex items-center justify-between">
+                <span className={`text-xs ${overLimit ? 'text-red-400' : 'text-white/70'}`}>
+                  {trimmedLen}/{VISION_MAX}
+                </span>
+                <button
+                  onClick={saveVision}
+                  disabled={visionSaving || trimmedLen < VISION_MIN}
+                  className={`px-4 py-1 rounded text-white ${
+                    visionSaving || trimmedLen < VISION_MIN
+                      ? 'bg-indigo-700/40 cursor-not-allowed'
+                      : 'bg-sky-600 hover:bg-sky-500'
+                  }`}
+                >
+                  {visionSaving ? 'Saving...' : 'Save Vision'}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
       </div>
 
-      {/* Two-column goals layout */}
+      {/* Goals grid */}
       <div className="px-5 pb-24 grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* Short-term Column */}
         <section className="space-y-2">
@@ -684,7 +684,7 @@ export default function GoalsPanel({
             {shortRealVisible.map((goal) => (
               <li
                 key={goal.id}
-                className="flex justify-between items-start bg-blue-900/20 border border-blue-700 rounded-md px-3 py-2"
+                className="flex justify-between items-start bg-indigo-900/20 border border-indigo-600 rounded-md px-3 py-2 shadow-sm"
               >
                 <div className="flex-1">
                   <AutoTextarea
@@ -724,7 +724,7 @@ export default function GoalsPanel({
             ).map((goal) => (
               <li
                 key={goal.id}
-                className="flex justify-between items-start bg-blue-900/20 border border-blue-700 rounded-md px-3 py-2"
+                className="flex justify-between items-start bg-indigo-900/20 border border-indigo-600 rounded-md px-3 py-2 shadow-sm"
               >
                 <div className="flex-1">
                   <AutoTextarea
@@ -753,12 +753,12 @@ export default function GoalsPanel({
       </div>
 
       {/* Sticky action bar */}
-      <div className="sticky bottom-0 z-40 w-full bg-gradient-to-t from-blue-900/80 to-blue-900/0 backdrop-blur px-5 py-3">
+      <div className="sticky bottom-0 z-40 w-full bg-gradient-to-t from-indigo-900/80 to-indigo-900/0 backdrop-blur px-5 py-3">
         <div className="flex flex-wrap gap-3">
           <button
             disabled={savingGoals}
             onClick={saveGoals}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded text-white disabled:opacity-60"
+            className="px-6 py-2 bg-sky-600 hover:bg-sky-500 rounded text-white disabled:opacity-60"
           >
             {savingGoals ? 'Saving Goals...' : 'Save All Goals'}
           </button>
@@ -775,17 +775,19 @@ export default function GoalsPanel({
       {/* Report Modal */}
       {reportOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-blue-950 border border-blue-700 shadow-xl p-4">
+          <div className="w-full max-w-2xl rounded-xl bg-indigo-950 border border-indigo-700 shadow-xl p-4">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-white text-lg font-semibold">Create Portfolio</h4>
-              <button className="text-white/70 hover:text-white" onClick={() => setReportOpen(false)}>✖️</button>
+              <button className="text-white/70 hover:text-white" onClick={() => setReportOpen(false)}>
+                ✖️
+              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Short select */}
               <div>
                 <div className="text-sm text-white/80 mb-1">Completed Short-Term</div>
-                <div className="max-h-[220px] overflow-y-auto rounded border border-blue-700 p-2 bg-blue-900/20">
+                <div className="max-h-[220px] overflow-y-auto rounded border border-indigo-700 p-2 bg-indigo-900/20">
                   {shortTermGoals.length === 0 ? (
                     <div className="text-white/60 text-sm">No short-term goals.</div>
                   ) : (
@@ -819,7 +821,7 @@ export default function GoalsPanel({
               {/* Long select */}
               <div>
                 <div className="text-sm text-white/80 mb-1">Completed Long-Term</div>
-                <div className="max-h-[220px] overflow-y-auto rounded border border-blue-700 p-2 bg-blue-900/20">
+                <div className="max-h-[220px] overflow-y-auto rounded border border-indigo-700 p-2 bg-indigo-900/20">
                   {longTermGoals.length === 0 ? (
                     <div className="text-white/60 text-sm">No long-term goals.</div>
                   ) : (
@@ -855,7 +857,7 @@ export default function GoalsPanel({
               <div className="md:col-span-1">
                 <label className="block text-sm text-white/80 mb-1">Zeta Level</label>
                 <input
-                  className="w-full rounded bg-blue-900/30 border border-blue-700 px-2 py-1 text-white placeholder:text-white/60"
+                  className="w-full rounded bg-indigo-900/30 border border-indigo-700 px-2 py-1 text-white placeholder:text-white/60"
                   placeholder="e.g., Level 2"
                   value={zetaLevel}
                   onChange={(e) => setZetaLevel(e.target.value)}
@@ -864,7 +866,7 @@ export default function GoalsPanel({
               <div className="md:col-span-2">
                 <label className="block text-sm text-white/80 mb-1">Notes (optional)</label>
                 <input
-                  className="w-full rounded bg-blue-900/30 border border-blue-700 px-2 py-1 text-white placeholder:text-white/60"
+                  className="w-full rounded bg-indigo-900/30 border border-indigo-700 px-2 py-1 text-white placeholder:text-white/60"
                   placeholder="Add any extra context…"
                   value={reportNotes}
                   onChange={(e) => setReportNotes(e.target.value)}
@@ -874,7 +876,7 @@ export default function GoalsPanel({
 
             <div className="mt-4 flex items-center justify-end gap-3">
               <button
-                className="px-4 py-2 rounded bg-blue-700 hover:bg-blue-600 text-white"
+                className="px-4 py-2 rounded bg-indigo-700 hover:bg-indigo-600 text-white"
                 onClick={() => setReportOpen(false)}
               >
                 Cancel
@@ -894,11 +896,9 @@ export default function GoalsPanel({
       {/* Portfolio Preview Modal */}
       {portfolioPreview && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="w-full max-w-3xl rounded-xl bg-blue-950 border border-blue-700 shadow-xl p-0 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-blue-700">
-              <div className="text-white font-semibold truncate pr-3">
-                {portfolioPreview.title}
-              </div>
+          <div className="w-full max-w-3xl rounded-xl bg-indigo-950 border border-indigo-700 shadow-xl p-0 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-indigo-700">
+              <div className="text-white font-semibold truncate pr-3">{portfolioPreview.title}</div>
               <div className="flex items-center gap-2">
                 {portfolioPreview.url && (
                   <a
@@ -912,7 +912,7 @@ export default function GoalsPanel({
                 )}
                 <button
                   onClick={() => setPortfolioPreview(null)}
-                  className="text-xs px-2 py-1 rounded border border-blue-600 bg-blue-800 hover:bg-blue-700 text-white"
+                  className="text-xs px-2 py-1 rounded border border-indigo-600 bg-indigo-800 hover:bg-indigo-700 text-white"
                 >
                   Close
                 </button>
@@ -927,6 +927,8 @@ export default function GoalsPanel({
           </div>
         </div>
       )}
+
+      {hoursOpen && <ProjectHoursModal open onClose={() => setHoursOpen(false)} projectId={projectId} />}
     </div>
   );
 }

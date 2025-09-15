@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import DashboardTasks from '@/components/ui/Tasks';
 import dynamic from 'next/dynamic';
@@ -24,42 +24,60 @@ type ThoughtRow = {
 };
 
 type TitlesMap = Record<number, string>;
-const defaultTitlesMap: TitlesMap = Object.fromEntries(LEVELS.map(l => [l.level, l.title])) as TitlesMap;
+const defaultTitlesMap: TitlesMap = Object.fromEntries(
+  LEVELS.map((l) => [l.level, l.title])
+) as TitlesMap;
 
 const PANEL_W = 'w-[320px]';
 
-// ---------- Public function ----------
+/* ──────────────────────────────────────────────────────────
+   Helpers
+─────────────────────────────────────────────────────────── */
+function getFunctionsBase() {
+  // Prefer your configured URL; fall back to anon env if needed.
+  const base =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ??
+    // If you *really* need a hardcoded fallback, put it here:
+    'https://inprydzukperccgtxgvx.supabase.co';
+  return `${base}/functions/v1`;
+}
+
+/** Simple safe alert (avoids crashing SSR) */
+function safeAlert(msg: string) {
+  if (typeof window !== 'undefined') alert(msg);
+}
+
+/* ──────────────────────────────────────────────────────────
+   Public function (call from buttons elsewhere)
+─────────────────────────────────────────────────────────── */
 export async function triggerDailyChatMessage(projectId: string) {
   try {
     const { data: sessionData } = await supabase.auth.getSession();
     const accessToken = sessionData?.session?.access_token;
 
-    const res = await fetch(
-      'https://inprydzukperccgtxgvx.supabase.co/functions/v1/daily-chat-message',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-          ...(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-            ? { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY }
-            : {}),
-        },
-        body: JSON.stringify({ project_id: projectId, trigger: 'manual' }),
-      }
-    );
+    const res = await fetch(`${getFunctionsBase()}/daily-chat-message`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+          ? { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY }
+          : {}),
+      },
+      body: JSON.stringify({ project_id: projectId, trigger: 'manual' }),
+    });
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.error('daily-chat-message failed:', res.status, text);
-      alert('Failed to send message. Check logs.');
+      safeAlert(`Failed to send message (${res.status}). Check logs.`);
       return;
     }
 
-    alert('Zeta will send you a message for this project.');
+    safeAlert('Zeta will send you a message for this project.');
   } catch (err) {
     console.error(err);
-    alert('Something went wrong triggering the message.');
+    safeAlert('Something went wrong triggering the message.');
   }
 }
 
@@ -82,9 +100,14 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     total: 0,
   });
 
-  // 🧠 Latest thought
+  /* ────────────────────────────────────────────────────────
+     Latest thought: realtime + timed refresh (safety)
+  ──────────────────────────────────────────────────────── */
   useEffect(() => {
+    if (!projectId) return;
+
     let cancelled = false;
+    let pollId: number | undefined;
 
     async function fetchLatestThought() {
       setLoadingThought(true);
@@ -96,31 +119,56 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
         .limit(1)
         .maybeSingle<ThoughtRow>();
 
-      if (!cancelled) {
-        if (error) {
-          console.error('Failed to load latest thought:', error);
-          setLatestThought(null);
-        } else {
-          setLatestThought(data?.content ?? null);
-        }
-        setLoadingThought(false);
+      if (cancelled) return;
+
+      if (error) {
+        console.error('Failed to load latest thought:', error);
+        setLatestThought(null);
+      } else {
+        setLatestThought(data?.content ?? null);
       }
+      setLoadingThought(false);
     }
 
-    if (projectId) {
-      fetchLatestThought();
-      const id = setInterval(fetchLatestThought, 60_000);
-      return () => {
-        cancelled = true;
-        clearInterval(id);
-      };
-    }
+    // Initial load + safety poll every 60s
+    fetchLatestThought();
+    pollId = window.setInterval(fetchLatestThought, 60_000);
+
+    // Realtime subscription
+    const channel = supabase
+      .channel(`thoughts-latest-${projectId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'thoughts', filter: `project_id=eq.${projectId}` },
+        () => {
+          // Any insert/update/delete affecting this project's thoughts -> refresh
+          fetchLatestThought();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          // ok
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (pollId) clearInterval(pollId);
+      try {
+        supabase.removeChannel(channel);
+      } catch {
+        /* no-op */
+      }
+    };
   }, [projectId]);
 
-  // 🔤 Load custom level titles for this project
+  /* ────────────────────────────────────────────────────────
+     Load custom level titles (with periodic refresh)
+  ──────────────────────────────────────────────────────── */
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
+    let pollId: number | undefined;
 
     async function loadTitles() {
       try {
@@ -139,7 +187,8 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
 
         const merged: TitlesMap = { ...defaultTitlesMap };
         (data ?? []).forEach((row: any) => {
-          if (row?.level && row?.title) merged[row.level] = String(row.title);
+          const lvl = Number(row?.level);
+          if (Number.isFinite(lvl) && row?.title) merged[lvl] = String(row.title);
         });
         setTitles(merged);
       } catch {
@@ -149,14 +198,35 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
 
     loadTitles();
     // Re-check occasionally in case another tab changes titles
-    const id = setInterval(loadTitles, 60_000);
-    return () => { cancelled = true; clearInterval(id); };
+    pollId = window.setInterval(loadTitles, 60_000);
+
+    // Realtime on title edits (nice-to-have)
+    const channel = supabase
+      .channel(`level-titles-${projectId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'level_titles', filter: `project_id=eq.${projectId}` },
+        () => loadTitles()
+      )
+      .subscribe();
+
+    return () => {
+      if (pollId) clearInterval(pollId);
+      try {
+        supabase.removeChannel(channel);
+      } catch {
+        /* no-op */
+      }
+    };
   }, [projectId]);
 
-  // ⚡ XP progress — override titles using the loaded map
+  /* ────────────────────────────────────────────────────────
+     XP progress — override titles using the loaded map
+  ──────────────────────────────────────────────────────── */
   useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
+    let pollId: number | undefined;
 
     async function loadXP() {
       try {
@@ -174,8 +244,15 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     }
 
     loadXP();
-    const id = setInterval(loadXP, 60_000);
-    return () => { cancelled = true; clearInterval(id); };
+    // Soft poll to keep in sync even without explicit events
+    pollId = window.setInterval(loadXP, 60_000);
+
+    // If you have a relevant log/event table, you can attach realtime here too.
+
+    return () => {
+      cancelled = true;
+      if (pollId) clearInterval(pollId);
+    };
   }, [projectId, titles]); // <= re-run when titles change
 
   const thoughtText =
@@ -183,42 +260,45 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     (loadingThought ? 'Loading Zeta’s latest thought…' : 'No thoughts yet. Generate one to kick things off.');
 
   const maxed = prog.remaining === 0 && prog.level >= LEVELS.length;
+  const pct = Math.min(100, Math.max(0, prog.pct));
 
   return (
     <div className="flex flex-col items-center pt-[230px] gap-4 pr-1">
+      
       {/* ⚡ Zeta XP & Level (compact) */}
-      <div className={`${PANEL_W} shrink-0 bg-blue-950 border border-blue-700 rounded-2xl p-3 shadow`}>
-        <div className="flex items-center justify-between">
-          {/* Left: "Zeta XP ⚡" with title badge right next to it */}
-          <div className="flex items-center gap-2">
-            <div className="text-sm font-medium text-purple-100">
-              Zeta Build <span aria-hidden>⚡</span>
-            </div>
-            <span className="px-2 py-0.5 rounded-full border border-blue-500/60 text-[11px] font-semibold text-blue-100 bg-blue-900/40">
-              {prog.title}
-            </span>
-          </div>
-          {/* Right: Level badge */}
-          <div className="px-2 py-0.5 rounded-full border border-purple-400/60 text-[11px] font-semibold text-purple-100">
-            LEVEL {prog.level}
-          </div>
-        </div>
+<div className={`${PANEL_W} shrink-0 bg-blue-950 border border-blue-700 rounded-2xl p-3 shadow`}>
+  {/* Header row: Zeta name + level badge */}
+  <div className="flex items-center gap-2 mb-1">
+    <div className="text-sm font-medium text-purple-100">Zeta⚡</div>
+    <span className="px-2 py-0.5 rounded-full border border-purple-400/60 text-[10px] font-semibold text-purple-100 whitespace-nowrap">
+      LEVEL {prog.level}
+    </span>
+  </div>
 
-        {/* progress bar */}
-        <div className="mt-2 h-2.5 rounded-full bg-blue-900 overflow-hidden">
-          <div
-            className="h-2.5 bg-gradient-to-r from-amber-300 to-purple-400"
-            style={{ width: `${Math.min(100, Math.max(0, prog.pct))}%` }}
-          />
-        </div>
+  {/* Assistant title */}
+  <div className="mb-2">
+    <span className="inline-block px-2 py-0.5 rounded-full border border-blue-500/60 text-[11px] font-semibold text-blue-100 bg-blue-900/40 whitespace-nowrap">
+      {prog.title}
+    </span>
+  </div>
 
-        {/* helper text */}
-        <div className="mt-1 text-[11px] text-purple-300/80">
-          {maxed
-            ? `Max level reached · Total XP: ${prog.total.toLocaleString()}`
-            : `${prog.current} / ${prog.next} XP · ${prog.remaining} XP to ${prog.nextTitle}`}
-        </div>
-      </div>
+  {/* progress bar */}
+  <div className="h-2.5 rounded-full bg-blue-900 overflow-hidden">
+    <div
+      className="h-2.5 bg-gradient-to-r from-amber-300 to-purple-400"
+      style={{ width: `${Math.min(100, Math.max(0, prog.pct))}%` }}
+    />
+  </div>
+
+  {/* helper text */}
+  <div className="mt-1 text-[11px] text-purple-300/80">
+    {maxed
+      ? `Max level reached · Total XP: ${prog.total.toLocaleString()}`
+      : `${prog.current} / ${prog.next} XP · ${prog.remaining} XP to ${prog.nextTitle}`}
+  </div>
+</div>
+
+
 
       {/* 🧠 Zeta’s Thoughts */}
       <div className={`${PANEL_W} shrink-0 bg-indigo-100 text-indigo-900 px-4 py-3 rounded-2xl shadow border border-indigo-300 text-sm`}>
