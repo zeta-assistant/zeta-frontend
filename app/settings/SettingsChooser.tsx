@@ -1,6 +1,8 @@
+// app/settings/SettingsChooser.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { getPlanFromUser } from '@/lib/plan';
 
@@ -10,6 +12,7 @@ import SettingsPagePremium from './SettingsPagePremium';
 type Choice = 'loading' | 'free' | 'premium';
 
 export default function SettingsChooser() {
+  const router = useRouter();
   const [choice, setChoice] = useState<Choice>('loading');
 
   useEffect(() => {
@@ -19,18 +22,20 @@ export default function SettingsChooser() {
       try {
         const { data, error } = await supabase.auth.getSession();
         const session = data?.session ?? null;
+
+        // Require login
         if (error || !session?.user) {
-          if (alive) setChoice('free');
+          if (!alive) return;
+          router.replace('/login?next=/settings');
           return;
         }
 
         const user = session.user;
 
-        // 1) Check user metadata (legacy / fallback)
+        // 1) Check user metadata (fallback)
         const metaPlan = getPlanFromUser(user);
 
-        // 2) ALSO check DB: any premium project?
-        //    Some schemas use `plan`, others use `type` for this.
+        // 2) Check DB: any premium project?
         const { data: projRows, error: projErr } = await supabase
           .from('user_projects')
           .select('plan, type')
@@ -48,20 +53,20 @@ export default function SettingsChooser() {
 
         if (alive) setChoice(effectivePlan === 'premium' ? 'premium' : 'free');
       } catch {
-        if (alive) setChoice('free');
+        if (alive) router.replace('/login?next=/settings');
       }
     })();
 
     return () => {
       alive = false;
     };
-  }, []);
+  }, [router]);
 
   if (choice === 'loading') {
     return (
-      <div className="min-h-screen bg-[#0b1226] text-white px-6 py-10">
-        <div className="max-w-5xl mx-auto text-white/70">Loading settings…</div>
-      </div>
+      <main className="min-h-screen bg-gradient-to-b from-sky-50 to-indigo-100">
+        <div className="max-w-5xl mx-auto px-6 py-10 text-slate-600">Loading settings…</div>
+      </main>
     );
   }
 

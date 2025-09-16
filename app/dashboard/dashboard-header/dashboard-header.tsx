@@ -117,8 +117,8 @@ export default function DashboardHeader({
             onClick={() => setShowAgentMenu((prev) => !prev)}
           >
             <img
-              src="/zeta-letterlogo.png"
-              alt="Zeta Letter Logo"
+              src="/pantheon.png"
+              alt="Pantheon Logo"
               className="w-8 h-8 rounded-xl shadow-md hover:scale-105 transition-transform"
             />
             <h1 className="text-xl font-semibold whitespace-nowrap hover:underline">
