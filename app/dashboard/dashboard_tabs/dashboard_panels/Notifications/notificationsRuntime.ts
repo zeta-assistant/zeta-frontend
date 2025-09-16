@@ -99,27 +99,26 @@ export const BUILT_INS: Array<{
    URL helpers
 ─────────────────────────────────────────────────────────── */
 
-// notificationsRuntime.ts
-
 export function buildUrls(projectId: string, sbUrl?: string) {
-  // Prefer explicit arg, fallback to env var
-  const base = sbUrl ?? process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  // normalize to avoid double slashes
+  const baseRoot = (sbUrl ?? process.env.NEXT_PUBLIC_SUPABASE_URL!)?.replace(/\/$/, '')
+  const base = `${baseRoot}/functions/v1`
   return {
     // existing single-purpose functions
-    relevantdiscussion: `${base}/functions/v1/relevantdiscussion`,
-    emitThoughts:        `${base}/functions/v1/emit-thoughts`,
-    sendTelegram:        `${base}/functions/v1/send-telegram-message`,
-    sendEmail:           `${base}/functions/v1/send-email-message`,
-    dailyChatMessage:    `${base}/functions/v1/daily-chat-message`,
-    calendarDigest:      `${base}/functions/v1/calendar-digest`,
+    relevantdiscussion: `${base}/relevantdiscussion`,
+    emitThoughts:       `${base}/emit-thoughts`,
+    sendTelegram:       `${base}/send-telegram-message`,
+    sendEmail:          `${base}/send-email-message`,
+    dailyChatMessage:   `${base}/daily-chat-message`,
+    calendarDigest:     `${base}/calendar-digest`,
 
     // ✅ new endpoint for re-arming a rule
-    rearmNotification:   `${base}/functions/v1/notification-rules`,
-  } as const;
+    rearmNotification:  `${base}/notification-rules`,
+  } as const
 }
 
 // (optional) export a type if you want strong typing elsewhere
-export type UrlMap = ReturnType<typeof buildUrls>;
+export type UrlMap = ReturnType<typeof buildUrls>
 
 /* ──────────────────────────────────────────────────────────
    Errors
@@ -207,30 +206,51 @@ export async function fetchRules(
   return { data: (data || []) as Rule[], error }
 }
 
+// Tries project_integrations first, then falls back to notification_providers
 export async function refreshTelegramState(
   supabase: SupabaseClient,
   projectId: string
 ): Promise<TgState> {
   try {
-    const { data, error } = await supabase
+    const pi = await supabase
       .from('project_integrations')
       .select('user_chat_id, is_verified')
       .eq('project_id', projectId)
       .eq('type', 'telegram')
-    if (error) throw toError(error)
 
-    const rows = Array.isArray(data) ? data : []
-    const verified = rows.find((r: any) => r.is_verified && r.user_chat_id)
-    const pending = rows.some((r: any) => !r.is_verified)
-
-    return {
-      connected: Boolean(verified),
-      pending,
-      chatId: verified?.user_chat_id ?? null,
+    if (Array.isArray(pi.data)) {
+      const verified = pi.data.find((r: any) => r.is_verified && r.user_chat_id)
+      const pending = pi.data.some((r: any) => !r.is_verified)
+      if (verified || pending) {
+        return {
+          connected: Boolean(verified),
+          pending,
+          chatId: verified?.user_chat_id ?? null,
+        }
+      }
     }
-  } catch {
-    return { connected: false, pending: false, chatId: null }
-  }
+  } catch {}
+
+  // fallback: notification_providers
+  try {
+    // get a user_id for this project
+    let userId: string | null = null
+    const a = await supabase.from('user_projects').select('user_id').eq('id', projectId).maybeSingle()
+    if (a.data?.user_id) userId = a.data.user_id as string
+    if (!userId) {
+      const b = await supabase.from('user_projects').select('user_id').eq('project_id', projectId).maybeSingle()
+      if (b.data?.user_id) userId = b.data.user_id as string
+    }
+
+    const q = supabase.from('notification_providers').select('telegram_enabled, telegram_chat_id')
+    const { data } = userId ? await q.eq('user_id', userId) : await q.limit(1)
+    const row = data?.[0]
+    const enabled = !!row?.telegram_enabled
+    const chatId = (row?.telegram_chat_id ?? null) as string | null
+    return { connected: !!(enabled && chatId), pending: !!(enabled && !chatId), chatId }
+  } catch {}
+
+  return { connected: false, pending: false, chatId: null }
 }
 
 export async function refreshEmailState(
@@ -238,20 +258,37 @@ export async function refreshEmailState(
   projectId: string
 ): Promise<EmailState> {
   try {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('project_integrations')
       .select('email_address, value, is_verified')
       .eq('project_id', projectId)
       .eq('type', 'email')
-    if (error) throw toError(error)
 
-    const list = (data ?? [])
-      .filter((r: any) => r.is_verified)
-      .map((r: any) => (r.email_address || r.value || '').trim())
-    return { connected: list.length > 0, list: list.filter(Boolean) }
-  } catch {
-    return { connected: false, list: [] }
-  }
+    if (Array.isArray(data) && data.length) {
+      const list = data
+        .filter((r: any) => r.is_verified)
+        .map((r: any) => (r.email_address || r.value || '').trim())
+        .filter(Boolean)
+      if (list.length) return { connected: true, list }
+    }
+  } catch {}
+
+  // fallback: notification_providers
+  try {
+    const np = await supabase
+      .from('notification_providers')
+      .select('email_enabled, emails, email')
+      .limit(1)
+    const row = np.data?.[0] ?? null
+    const list: string[] = Array.isArray(row?.emails)
+      ? row.emails.filter(Boolean)
+      : row?.email
+      ? [String(row.email)]
+      : []
+    return { connected: !!(row && (row.email_enabled || list.length)), list }
+  } catch {}
+
+  return { connected: false, list: [] }
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -425,32 +462,6 @@ function normalizeGoals(raw: any): string[] {
     if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
   } catch {}
   return s.split(/[\n,]/g).map(v => v.trim()).filter(Boolean)
-}
-
-function pickNextStep(goals: string[], level: 'low' | 'mid' | 'high', recentInputs?: any): string {
-  const primary = goals[0] || ''
-  const arr = Array.isArray(recentInputs) ? recentInputs : []
-  const last = arr[0] || arr[arr.length - 1] || null
-  const hint = (() => {
-    if (!last) return ''
-    if (typeof last === 'string') return last.slice(0, 60)
-    if (typeof last === 'object') {
-      const t = (last.text || last.title || last.content || '').toString()
-      return t.slice(0, 60)
-    }
-    return ''
-  })()
-
-  const goalBit = primary ? `on “${primary}”` : 'on one of your goals'
-  const hintBit = hint ? ` (e.g., “${hint}…”)` : ''
-
-  if (level === 'low') {
-    return `Try one quick win ${goalBit}: add a subtask or schedule a 25-minute focus block${hintBit}.`
-  }
-  if (level === 'mid') {
-    return `Great momentum — ship the next unit ${goalBit}: capture 3 concrete TODOs and plan the next session${hintBit}.`
-  }
-  return `You’re leveling up — set a small milestone ${goalBit} for the next 2–3 days and jot 1 learning${hintBit}.`
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -641,7 +652,7 @@ export async function runRelevantDiscussion(
         body: JSON.stringify({ to, subject: `🔔 ${rule.name}`, message: emailText }),
       })
       const emailOut = await emailRes.json().catch(() => ({}))
-      if (!res.ok) throw new Error(emailOut?.error || (emailOut as any)?.message || `HTTP ${res.status}`)
+      if (!emailRes.ok) throw new Error(emailOut?.error || (emailOut as any)?.message || `HTTP ${emailRes.status}`)
       return { result: { relevantdiscussion: data, email: emailOut }, feedback: '✅ Triggered.' }
     }
     return {

@@ -47,6 +47,22 @@ function safeAlert(msg: string) {
   if (typeof window !== 'undefined') alert(msg);
 }
 
+/** Session refresher used by resilient fetch */
+async function refreshSessionIfNeeded() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (!data?.session) {
+      await supabase.auth.refreshSession();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 /* ──────────────────────────────────────────────────────────
    Public function (call from buttons elsewhere)
 ─────────────────────────────────────────────────────────── */
@@ -69,14 +85,14 @@ export async function triggerDailyChatMessage(projectId: string) {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      console.error('daily-chat-message failed:', res.status, text);
+      console.warn('daily-chat-message failed:', res.status, text);
       safeAlert(`Failed to send message (${res.status}). Check logs.`);
       return;
     }
 
     safeAlert('Zeta will send you a message for this project.');
   } catch (err) {
-    console.error(err);
+    console.warn(err);
     safeAlert('Something went wrong triggering the message.');
   }
 }
@@ -101,64 +117,88 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
   });
 
   /* ────────────────────────────────────────────────────────
-     Latest thought: realtime + timed refresh (safety)
+     Latest thought: realtime + timed refresh (resilient)
   ──────────────────────────────────────────────────────── */
   useEffect(() => {
     if (!projectId) return;
 
     let cancelled = false;
     let pollId: number | undefined;
+    let currentAbort: AbortController | null = null;
 
-    async function fetchLatestThought() {
-      setLoadingThought(true);
-      const { data, error } = await supabase
-        .from('thoughts')
-        .select('content, created_at')
-        .eq('project_id', projectId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle<ThoughtRow>();
-
+    const fetchLatestThought = async (attempt = 1): Promise<void> => {
       if (cancelled) return;
+      // cancel any inflight from prior tick
+      try { currentAbort?.abort(); } catch {}
+      currentAbort = new AbortController();
 
-      if (error) {
-        console.error('Failed to load latest thought:', error);
+      await refreshSessionIfNeeded();
+
+      try {
+        setLoadingThought(true);
+        const { data, error } = await supabase
+          .from('thoughts')
+          .select('content, created_at')
+          .eq('project_id', projectId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle<ThoughtRow>();
+
+        if (cancelled) return;
+
+        if (error) {
+          // Non-fatal: warn instead of error so Next dev overlay stays quiet.
+          console.warn('Latest thought fetch warn:', error);
+          setLatestThought(null);
+
+          // light retry for transient hiccups
+          if (attempt === 1) {
+            await sleep(800);
+            return fetchLatestThought(2);
+          }
+        } else {
+          // `data` can be null when there are no rows — that's fine.
+          setLatestThought(data?.content ?? null);
+        }
+      } catch (e: any) {
+        if (cancelled) return;
+        if (e?.name !== 'AbortError') {
+          console.warn('Latest thought fetch exception:', e?.message || e);
+          if (attempt === 1) {
+            await sleep(800);
+            return fetchLatestThought(2);
+          }
+        }
         setLatestThought(null);
-      } else {
-        setLatestThought(data?.content ?? null);
+      } finally {
+        if (!cancelled) setLoadingThought(false);
       }
-      setLoadingThought(false);
-    }
+    };
 
     // Initial load + safety poll every 60s
     fetchLatestThought();
     pollId = window.setInterval(fetchLatestThought, 60_000);
 
-    // Realtime subscription
+    // Realtime subscription (auto refresh on any change for this project)
     const channel = supabase
       .channel(`thoughts-latest-${projectId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'thoughts', filter: `project_id=eq.${projectId}` },
-        () => {
-          // Any insert/update/delete affecting this project's thoughts -> refresh
-          fetchLatestThought();
-        }
+        () => fetchLatestThought()
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          // ok
+        if (status === 'SUBSCRIBED') fetchLatestThought();
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Realtime channel issue, will auto-retry:', status);
         }
       });
 
     return () => {
       cancelled = true;
       if (pollId) clearInterval(pollId);
-      try {
-        supabase.removeChannel(channel);
-      } catch {
-        /* no-op */
-      }
+      try { supabase.removeChannel(channel); } catch {}
+      try { currentAbort?.abort(); } catch {}
     };
   }, [projectId]);
 
@@ -239,7 +279,7 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
 
         setProg({ ...p, title: curTitle, nextTitle });
       } catch (e) {
-        console.error('XP sidebar load error', e);
+        console.warn('XP sidebar load warn', e);
       }
     }
 
@@ -264,41 +304,38 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
 
   return (
     <div className="flex flex-col items-center pt-[230px] gap-4 pr-1">
-      
       {/* ⚡ Zeta XP & Level (compact) */}
-<div className={`${PANEL_W} shrink-0 bg-blue-950 border border-blue-700 rounded-2xl p-3 shadow`}>
-  {/* Header row: Zeta name + level badge */}
-  <div className="flex items-center gap-2 mb-1">
-    <div className="text-sm font-medium text-purple-100">Zeta⚡</div>
-    <span className="px-2 py-0.5 rounded-full border border-purple-400/60 text-[10px] font-semibold text-purple-100 whitespace-nowrap">
-      LEVEL {prog.level}
-    </span>
-  </div>
+      <div className={`${PANEL_W} shrink-0 bg-blue-950 border border-blue-700 rounded-2xl p-3 shadow`}>
+        {/* Header row: Zeta name + level badge */}
+        <div className="flex items-center gap-2 mb-1">
+          <div className="text-sm font-medium text-purple-100">Zeta⚡</div>
+          <span className="px-2 py-0.5 rounded-full border border-purple-400/60 text-[10px] font-semibold text-purple-100 whitespace-nowrap">
+            LEVEL {prog.level}
+          </span>
+        </div>
 
-  {/* Assistant title */}
-  <div className="mb-2">
-    <span className="inline-block px-2 py-0.5 rounded-full border border-blue-500/60 text-[11px] font-semibold text-blue-100 bg-blue-900/40 whitespace-nowrap">
-      {prog.title}
-    </span>
-  </div>
+        {/* Assistant title */}
+        <div className="mb-2">
+          <span className="inline-block px-2 py-0.5 rounded-full border border-blue-500/60 text-[11px] font-semibold text-blue-100 bg-blue-900/40 whitespace-nowrap">
+            {prog.title}
+          </span>
+        </div>
 
-  {/* progress bar */}
-  <div className="h-2.5 rounded-full bg-blue-900 overflow-hidden">
-    <div
-      className="h-2.5 bg-gradient-to-r from-amber-300 to-purple-400"
-      style={{ width: `${Math.min(100, Math.max(0, prog.pct))}%` }}
-    />
-  </div>
+        {/* progress bar */}
+        <div className="h-2.5 rounded-full bg-blue-900 overflow-hidden">
+          <div
+            className="h-2.5 bg-gradient-to-r from-amber-300 to-purple-400"
+            style={{ width: `${Math.min(100, Math.max(0, prog.pct))}%` }}
+          />
+        </div>
 
-  {/* helper text */}
-  <div className="mt-1 text-[11px] text-purple-300/80">
-    {maxed
-      ? `Max level reached · Total XP: ${prog.total.toLocaleString()}`
-      : `${prog.current} / ${prog.next} XP · ${prog.remaining} XP to ${prog.nextTitle}`}
-  </div>
-</div>
-
-
+        {/* helper text */}
+        <div className="mt-1 text-[11px] text-purple-300/80">
+          {maxed
+            ? `Max level reached · Total XP: ${prog.total.toLocaleString()}`
+            : `${prog.current} / ${prog.next} XP · ${prog.remaining} XP to ${prog.nextTitle}`}
+        </div>
+      </div>
 
       {/* 🧠 Zeta’s Thoughts */}
       <div className={`${PANEL_W} shrink-0 bg-indigo-100 text-indigo-900 px-4 py-3 rounded-2xl shadow border border-indigo-300 text-sm`}>

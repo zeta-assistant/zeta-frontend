@@ -116,7 +116,80 @@ function parseSendTimeHHMM(ruleTime: string | null | undefined): { h: number; m:
 function isWeekday(idx: number) { return idx >= 1 && idx <= 5; }
 
 /* ──────────────────────────────────────────────────────────
-   Types for jobs
+   Expected-next calculator (UI-side)
+─────────────────────────────────────────────────────────── */
+function expectedNextFromRule(rule: Rule, timeZone: string, now = new Date()): Date | null {
+  if (!rule?.is_enabled) return null;
+
+  const { h: tgtH, m: tgtM } = parseSendTimeHHMM(rule.send_time);
+  const parts = getTzParts(timeZone);
+  const nowMinutes = parts.hour * 60 + parts.minute;
+  const targetToday = tgtH * 60 + tgtM;
+
+  const addMinutes = (dt: Date, mins: number) => new Date(dt.getTime() + mins * 60_000);
+
+  const minutesUntilNextDaily = () => {
+    if (nowMinutes < targetToday) {
+      return targetToday - nowMinutes;
+    }
+    return 24 * 60 - (nowMinutes - targetToday); // tomorrow
+  };
+
+  switch (rule.frequency) {
+    case 'off':
+      return null;
+
+    case 'hourly': {
+      // next time on the same hour/minute mark
+      const mm = parts.minute;
+      if (mm < tgtM) return addMinutes(now, tgtM - mm);
+      return addMinutes(now, 60 - (mm - tgtM));
+    }
+
+    case 'daily': {
+      return addMinutes(now, minutesUntilNextDaily());
+    }
+
+    case 'weekdays': {
+      // today if it's a weekday and we're before target; otherwise bump to next weekday
+      if (isWeekday(parts.weekday) && nowMinutes < targetToday) {
+        return addMinutes(now, targetToday - nowMinutes);
+      }
+      // find next weekday
+      let days = 1;
+      let idx = (parts.weekday + 1) % 7;
+      while (!isWeekday(idx)) {
+        days += 1;
+        idx = (idx + 1) % 7;
+      }
+      return addMinutes(now, days * 1440 + (targetToday - nowMinutes + 1440) % 1440);
+    }
+
+    case 'weekly': {
+      const targetDow = typeof rule.day_of_week === 'number' ? rule.day_of_week : 1; // Monday default
+      const todayDow = parts.weekday;
+      const deltaDays = (targetDow - todayDow + 7) % 7;
+      if (deltaDays === 0) {
+        // today — choose today if we haven't passed the time, else +7 days
+        if (nowMinutes < targetToday) return addMinutes(now, targetToday - nowMinutes);
+        return addMinutes(now, 7 * 1440 + (targetToday - nowMinutes + 1440) % 1440);
+      }
+      return addMinutes(now, deltaDays * 1440 + (targetToday - nowMinutes + 1440) % 1440);
+    }
+
+    case 'monthly': {
+      // naive: run same day-of-month as "today" at target time. If already passed, add 30 days.
+      if (nowMinutes < targetToday) return addMinutes(now, targetToday - nowMinutes);
+      return addMinutes(now, 30 * 1440 + (targetToday - nowMinutes + 1440) % 1440);
+    }
+
+    default:
+      return addMinutes(now, minutesUntilNextDaily());
+  }
+}
+
+/* ──────────────────────────────────────────────────────────
+   Jobs
 ─────────────────────────────────────────────────────────── */
 type JobRow = { rule_id: string; next_run_at: string | null; status?: string | null };
 
@@ -265,12 +338,25 @@ export default function NotificationsPanel({ projectId }: Props) {
     if (!rule.is_enabled) return null;
     if (PREMIUM_TYPES.includes(rule.type as any) && !isPremium) return null;
 
-    const row = jobMap[rule.id];
-    const iso = row?.next_run_at;
-    if (!iso) return { rel: 'scheduling…', local: '' };
+    const expected = expectedNextFromRule(rule, effectiveTz);
+    const jobIso = jobMap[rule.id]?.next_run_at || null;
 
-    const targetMs = Date.parse(iso);
-    const rel = fmtCountdown(targetMs - nowTs);
+    let showDate: Date | null = null;
+    if (jobIso) {
+      const jobDt = new Date(jobIso);
+      // if job differs from expected by >5 minutes, prefer expected (likely stale job)
+      if (expected && Math.abs(jobDt.getTime() - expected.getTime()) > 5 * 60 * 1000) {
+        showDate = expected;
+      } else {
+        showDate = jobDt;
+      }
+    } else {
+      showDate = expected;
+    }
+
+    if (!showDate) return { rel: 'scheduling…', local: '' };
+
+    const rel = fmtCountdown(showDate.getTime() - nowTs);
     const local = new Intl.DateTimeFormat(undefined, {
       timeZone: effectiveTz,
       month: 'short',
@@ -278,7 +364,7 @@ export default function NotificationsPanel({ projectId }: Props) {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
-    }).format(new Date(targetMs));
+    }).format(showDate);
     return { rel, local };
   }
 
@@ -288,7 +374,21 @@ export default function NotificationsPanel({ projectId }: Props) {
     if (!res.ok) { console.error(res.error); setFeedback(`❌ ${res.message || 'Failed to activate'}`); return null; }
     setFeedback(res.message || '✅ Done');
     await fetchRules();
-    if (res.rule) fetchNextRuns([res.rule.id]);
+    if (res.rule) {
+      // optimistic "next" update
+      const nextLocal = expectedNextFromRule(res.rule as Rule, effectiveTz);
+      if (nextLocal) {
+        setJobMap(prev => ({ ...prev, [res.rule!.id]: { rule_id: res.rule!.id, next_run_at: nextLocal.toISOString(), status: 'scheduled' } }));
+      }
+      try {
+        await fetch(URLS.rearmNotification, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+          body: JSON.stringify({ rule_id: res.rule.id }),
+        });
+      } catch {}
+      fetchNextRuns([res.rule.id]);
+    }
     return res.rule ?? null;
   }
 
@@ -298,7 +398,21 @@ export default function NotificationsPanel({ projectId }: Props) {
     if (!res.ok) { console.error(res.error); setFeedback('❌ Could not update status'); }
     else {
       setFeedback(`✅ ${!rule.is_enabled ? 'Activated' : 'Deactivated'}`);
+      // optimistic: update jobMap if enabling
+      if (!rule.is_enabled) {
+        const nextLocal = expectedNextFromRule({ ...rule, is_enabled: true }, effectiveTz);
+        if (nextLocal) {
+          setJobMap(prev => ({ ...prev, [rule.id]: { rule_id: rule.id, next_run_at: nextLocal.toISOString(), status: 'scheduled' } }));
+        }
+      }
       fetchRules();
+      try {
+        await fetch(URLS.rearmNotification, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+          body: JSON.stringify({ rule_id: rule.id }),
+        });
+      } catch {}
       fetchNextRuns([rule.id]);
     }
   };
@@ -336,6 +450,27 @@ export default function NotificationsPanel({ projectId }: Props) {
     const { error } = await supabase.from('notification_rules').update(payload).eq('id', editingId);
     if (error) { console.error('Failed to update:', error); setFeedback('❌ Update failed'); return; }
     setFeedback('✅ Saved');
+
+    // optimistic "next" update using the edited values
+    const optimisticRule: Rule = {
+      ...(editState as any),
+      id: editingId,
+      type: (editState.type as RuleType) ?? 'custom',
+      frequency: coercedFreq,
+      send_time: payload.send_time!,
+      day_of_week: payload.day_of_week ?? null,
+      is_enabled: payload.is_enabled ?? true,
+      channels: (payload.channels as NotificationChannels) ?? defaultChannels,
+      name: payload.name ?? '',
+      template: payload.template ?? '',
+      project_id: (editState as any).project_id ?? projectId,
+      created_at: (editState as any).created_at ?? '',
+      updated_at: (editState as any).updated_at ?? '',
+    };
+    const nextLocal = expectedNextFromRule(optimisticRule, effectiveTz);
+    if (nextLocal) {
+      setJobMap(prev => ({ ...prev, [editingId]: { rule_id: editingId, next_run_at: nextLocal.toISOString(), status: 'scheduled' } }));
+    }
 
     try {
       await fetch(URLS.rearmNotification, {
@@ -440,7 +575,7 @@ export default function NotificationsPanel({ projectId }: Props) {
       try {
         switch (rule.type) {
           case 'relevant_discussion': await runRelevantDiscussion(supabase, rule, URLS, SB_KEY, getFirstProjectEmail); break;
-          case 'thoughts':            await runThoughts(supabase, rule, URLS, SB_KEY); break;
+        case 'thoughts':            await runThoughts(supabase, rule, URLS, SB_KEY); break;
           case 'usage_frequency':     await runUsageFrequency(supabase, rule, URLS, SB_KEY, getFirstProjectEmail); break;
           case 'outreach':            await runOutreach(supabase, rule, URLS, SB_KEY, getFirstProjectEmail); break;
           case 'calendar': {
