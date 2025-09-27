@@ -72,7 +72,6 @@ export const BUILT_INS: Array<{
     type: 'calendar',
     label: 'Calendar Digest',
     subtitle: ' ',
-    // default is daily
     defaults: { frequency: 'daily', send_time: '07:30', template: 'Today’s events and reminders.' },
   },
   {
@@ -112,7 +111,7 @@ export function buildUrls(projectId: string, sbUrl?: string) {
     dailyChatMessage:   `${base}/daily-chat-message`,
     calendarDigest:     `${base}/calendar-digest`,
 
-    // ✅ new endpoint for re-arming a rule
+    // ✅ endpoint for re-arming a rule
     rearmNotification:  `${base}/notification-rules`,
   } as const
 }
@@ -133,6 +132,23 @@ function toError(err: any): Error {
     err?.code ??
     (typeof err === 'string' ? err : JSON.stringify(err || {}))
   return new Error(String(msg || 'Unknown error'))
+}
+
+/* ──────────────────────────────────────────────────────────
+   Sanitizer (for outreach text)
+─────────────────────────────────────────────────────────── */
+
+function sanitize(text: string): string {
+  let t = (text || '').toString()
+  // remove any leading agent label lines like "> ZetaAI:" or "ZetaAI:"
+  t = t.replace(/^\s*>?\s*ZetaAI:\s*/gmi, '')
+  // remove preferred_user_name/Yogi prefixes at line start
+  t = t.replace(/^\s*(preferred_user_name|{{\s*preferred_user_name\s*}}|Yogi)\s*[:,\-–]\s*/gmi, '')
+  // drop redundant bell header if it’s already in the body
+  t = t.replace(/^\s*🔔\s*[^\n]+\n+/g, '')
+  // collapse 3+ blank lines
+  t = t.replace(/\n{3,}/g, '\n\n')
+  return t.trim()
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -485,7 +501,8 @@ async function assertManualRunAllowed(
   }
 }
 
-/** Calendar digest trigger. Delegates delivery to the edge fn, honoring selected channels. */
+/** Calendar digest trigger. Delegates delivery to the edge fn, honoring selected channels.
+ *  Also suppresses empty digests for manual runs to avoid noisy "no events" pings. */
 export async function runCalendarDigest(
   supabase: any,
   rule: Rule,
@@ -523,6 +540,17 @@ export async function runCalendarDigest(
   }
 
   if (!res.ok) throw new Error(data?.error || data?.message || data?.text || `HTTP ${res.status}`)
+
+  // Manual-run suppression for empty calendars
+  const text: string = (data?.telegram?.text || data?.email?.message || data?.text || '').toString()
+  const hasEvents =
+    data?.eventsCount > 0 ||
+    data?.has_events === true ||
+    (text && !/no upcoming calendar items/i.test(text))
+
+  if (opts?.manual && !hasEvents) {
+    return { result: data, feedback: 'ℹ️ No events — digest suppressed.' }
+  }
 
   let fb = '✅ Calendar digest sent.'
   if (channels.telegram && data?.telegram?.ok === false) fb = '⚠️ Digest ran, Telegram failed.'
@@ -784,6 +812,9 @@ export async function runUsageFrequency(
   const pickNextStepLocal = (goalsList: string[], lvl: 'low'|'mid'|'high', ri?: any[]): string => {
     const primary = goalsList[0] || ''
     const arr = Array.isArray(ri) ? ri : []
+    the: {
+      // fallthrough scope label placeholder
+    }
     const last = arr[0] || arr[arr.length - 1] || null
     const hint = (() => {
       if (!last) return ''
@@ -919,7 +950,11 @@ export async function runOutreach(
   }
 
   const latest = msgRows[0]
-  const text: string = (latest?.message || '').trim() || rule.template || 'New outreach message'
+  const raw: string = (latest?.message || '').trim() || rule.template || 'New outreach message'
+  const text = sanitize(raw)
+  if (!text) {
+    return { result: { trigger: triggerJson }, feedback: 'ℹ️ Outreach suppressed (empty after sanitize).' }
+  }
 
   const wantsTelegram = rule.channels?.telegram ?? true
   const wantsEmail = rule.channels?.email ?? false
