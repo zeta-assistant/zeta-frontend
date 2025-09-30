@@ -895,7 +895,7 @@ export async function runOutreach(
 ): Promise<{ result: any; feedback: string }> {
   await assertManualRunAllowed(supabase, rule.project_id, opts);
 
-  // 1) trigger generator
+  // 1) trigger generator (edge fn) — ask it to produce the line
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 25_000);
 
@@ -928,21 +928,20 @@ export async function runOutreach(
     clearTimeout(timer);
   }
 
-  // 2) pick freshest text (prefer function return, then outreach_chats, then custom_notifications, then zeta_conversation_log)
-  const pickFirstTs = (row: any): string | null => {
-    for (const k of ['sent_at','created_at','inserted_at','updated_at','timestamp','ts','time']) {
-      const v = row?.[k]; if (v && typeof v === 'string') return v;
-    }
-    return null;
-  };
+  // 2) choose freshest text
+  // Prefer the edge fn's returned text if it looks like a real line (not the old placeholder)
+  const looksReal = (s: any) =>
+    typeof s === 'string' &&
+    s.trim().length > 5 &&
+    s.trim().toLowerCase() !== 'assistant text written to logs';
 
   let text: string | null =
-    (triggerJson?.text && String(triggerJson.text)) ||
-    (triggerJson?.message && String(triggerJson.message)) ||
+    (looksReal(triggerJson?.text) && String(triggerJson.text).trim()) ||
+    (looksReal(triggerJson?.message) && String(triggerJson.message).trim()) ||
     null;
 
+  // fallback: outreach_chats latest
   if (!text) {
-    // outreach_chats
     try {
       const { data: oc } = await supabase
         .from('outreach_chats')
@@ -950,37 +949,48 @@ export async function runOutreach(
         .eq('project_id', rule.project_id)
         .order('created_at', { ascending: false })
         .limit(1);
-      if (oc?.[0]?.message) text = String(oc[0].message);
+      const msg = oc?.[0]?.message ? String(oc[0].message).trim() : '';
+      if (looksReal(msg)) text = msg;
     } catch {}
+  }
 
-    // custom_notifications (type=outreach)
-    if (!text) {
-      try {
-        const { data: cn } = await supabase
-          .from('custom_notifications')
-          .select('message, type, sent_at, id')
-          .eq('project_id', rule.project_id)
-          .eq('type', 'outreach')
-          .order('sent_at', { ascending: false })
-          .limit(1);
-        if (cn?.[0]?.message) text = String(cn[0].message);
-      } catch {}
-    }
+  // fallback: custom_notifications (type='outreach')
+  if (!text) {
+    try {
+      const { data: cn } = await supabase
+        .from('custom_notifications')
+        .select('message, type, sent_at, id')
+        .eq('project_id', rule.project_id)
+        .eq('type', 'outreach')
+        .order('sent_at', { ascending: false })
+        .limit(1);
+      const msg = cn?.[0]?.message ? String(cn[0].message).trim() : '';
+      if (looksReal(msg)) text = msg;
+    } catch {}
+  }
 
-    // zeta_conversation_log (assistant)
-    if (!text) {
-      try {
-        const { data: zl } = await supabase
-          .from('zeta_conversation_log')
-          .select('message, role, id, created_at, inserted_at, updated_at, timestamp, ts, time')
-          .eq('project_id', rule.project_id)
-          .eq('role', 'assistant')
-          .order('id', { ascending: false })
-          .limit(50);
-        const row = (zl ?? []).sort((a: any, b: any) => (pickFirstTs(b) || '')!.localeCompare(pickFirstTs(a) || '') )[0];
-        if (row?.message) text = String(row.message);
-      } catch {}
-    }
+  // fallback: zeta_conversation_log latest assistant line (order by id to avoid missing created_at)
+  if (!text) {
+    try {
+      const { data: zl } = await supabase
+        .from('zeta_conversation_log')
+        .select('message, role, id, timestamp, inserted_at, updated_at, time, ts')
+        .eq('project_id', rule.project_id)
+        .eq('role', 'assistant')
+        .order('id', { ascending: false })
+        .limit(50);
+
+      const pickTs = (r: any): string =>
+        String(
+          r?.timestamp || r?.inserted_at || r?.updated_at || r?.time || r?.ts || ''
+        );
+
+      const latest = (zl ?? [])
+        .filter((r: any) => looksReal(r?.message))
+        .sort((a: any, b: any) => pickTs(b).localeCompare(pickTs(a)))[0];
+
+      if (latest?.message) text = String(latest.message).trim();
+    } catch {}
   }
 
   const clean = sanitize(text || '');
@@ -1035,6 +1045,7 @@ export async function runOutreach(
 
   return { result, feedback: '✅ Message sent.' };
 }
+
 
 
 export async function runGeneric(
