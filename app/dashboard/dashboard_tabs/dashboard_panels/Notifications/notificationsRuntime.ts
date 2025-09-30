@@ -893,15 +893,16 @@ export async function runOutreach(
   getFirstProjectEmail: () => string | null,
   opts?: { manual?: boolean }
 ): Promise<{ result: any; feedback: string }> {
-  await assertManualRunAllowed(supabase, rule.project_id, opts)
+  await assertManualRunAllowed(supabase, rule.project_id, opts);
 
-  const ctl = new AbortController()
-  const timer = setTimeout(() => ctl.abort(), 25_000)
+  // 1) trigger generator
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 25_000);
 
-  const { data: sessionData } = await supabase.auth.getSession()
-  const accessToken = sessionData?.session?.access_token
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
 
-  let triggerJson: any = null
+  let triggerJson: any = null;
   try {
     const res = await fetch(urls.dailyChatMessage, {
       method: 'POST',
@@ -911,116 +912,130 @@ export async function runOutreach(
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         apikey: (process?.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY as string) || '',
       },
-      body: JSON.stringify({ project_id: rule.project_id, trigger: 'manual' }),
+      body: JSON.stringify({ project_id: rule.project_id, trigger: opts?.manual ? 'manual' : 'auto' }),
       keepalive: true,
-    })
-
-    try { triggerJson = await res.json() } catch { triggerJson = null }
-
+    });
+    try { triggerJson = await res.json(); } catch { triggerJson = null; }
     if (!res.ok) {
-      clearTimeout(timer)
-      return {
-        result: { trigger: { status: res.status, body: triggerJson } },
-        feedback: `❌ daily-chat-message failed (${res.status}).`,
-      }
+      clearTimeout(timer);
+      return { result: { trigger: { status: res.status, body: triggerJson } }, feedback: `❌ daily-chat-message failed (${res.status}).` };
     }
   } catch (e: any) {
-    clearTimeout(timer)
-    if (e?.name === 'AbortError') {
-      return { result: { trigger: 'timeout-local' }, feedback: '⏳ Processing in the background…' }
-    }
-    return { result: null, feedback: `❌ ${e?.message || String(e)}` }
+    clearTimeout(timer);
+    if (e?.name === 'AbortError') return { result: { trigger: 'timeout-local' }, feedback: '⏳ Processing in the background…' };
+    return { result: null, feedback: `❌ ${e?.message || String(e)}` };
   } finally {
-    clearTimeout(timer)
+    clearTimeout(timer);
   }
 
-  const { data: msgRows, error: msgErr } = await supabase
-    .from('zeta_conversation_log')
-    .select('message,timestamp')
-    .eq('project_id', rule.project_id)
-    .eq('role', 'assistant')
-    .order('timestamp', { ascending: false })
-    .limit(1)
+  // 2) pick freshest text (prefer function return, then outreach_chats, then custom_notifications, then zeta_conversation_log)
+  const pickFirstTs = (row: any): string | null => {
+    for (const k of ['sent_at','created_at','inserted_at','updated_at','timestamp','ts','time']) {
+      const v = row?.[k]; if (v && typeof v === 'string') return v;
+    }
+    return null;
+  };
 
-  if (msgErr || !msgRows?.length) {
-    return {
-      result: { trigger: triggerJson, deliver: null },
-      feedback: '✅ Triggered. (No new message fetched yet.)',
+  let text: string | null =
+    (triggerJson?.text && String(triggerJson.text)) ||
+    (triggerJson?.message && String(triggerJson.message)) ||
+    null;
+
+  if (!text) {
+    // outreach_chats
+    try {
+      const { data: oc } = await supabase
+        .from('outreach_chats')
+        .select('message, created_at, id')
+        .eq('project_id', rule.project_id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (oc?.[0]?.message) text = String(oc[0].message);
+    } catch {}
+
+    // custom_notifications (type=outreach)
+    if (!text) {
+      try {
+        const { data: cn } = await supabase
+          .from('custom_notifications')
+          .select('message, type, sent_at, id')
+          .eq('project_id', rule.project_id)
+          .eq('type', 'outreach')
+          .order('sent_at', { ascending: false })
+          .limit(1);
+        if (cn?.[0]?.message) text = String(cn[0].message);
+      } catch {}
+    }
+
+    // zeta_conversation_log (assistant)
+    if (!text) {
+      try {
+        const { data: zl } = await supabase
+          .from('zeta_conversation_log')
+          .select('message, role, id, created_at, inserted_at, updated_at, timestamp, ts, time')
+          .eq('project_id', rule.project_id)
+          .eq('role', 'assistant')
+          .order('id', { ascending: false })
+          .limit(50);
+        const row = (zl ?? []).sort((a: any, b: any) => (pickFirstTs(b) || '')!.localeCompare(pickFirstTs(a) || '') )[0];
+        if (row?.message) text = String(row.message);
+      } catch {}
     }
   }
 
-  const latest = msgRows[0]
-  const raw: string = (latest?.message || '').trim() || rule.template || 'New outreach message'
-  const text = sanitize(raw)
-  if (!text) {
-    return { result: { trigger: triggerJson }, feedback: 'ℹ️ Outreach suppressed (empty after sanitize).' }
-  }
+  const clean = sanitize(text || '');
+  if (!clean) return { result: { trigger: triggerJson }, feedback: 'ℹ️ Outreach suppressed (no fresh text).' };
 
-  const wantsTelegram = rule.channels?.telegram ?? true
-  const wantsEmail = rule.channels?.email ?? false
-
-  const result: any = { trigger: triggerJson }
+  // 3) deliver
+  const wantsTelegram = rule.channels?.telegram ?? true;
+  const wantsEmail = rule.channels?.email ?? false;
+  const result: any = { trigger: triggerJson };
 
   if (wantsTelegram) {
-    const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id)
+    const chatId = await getVerifiedTelegramChatId(supabase, rule.project_id);
     if (chatId) {
       const res = await fetch(urls.sendTelegram, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: sbKey,
-          Authorization: `Bearer ${sbKey}`,
-        },
+        headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
         body: JSON.stringify({
           id: `outreach_${rule.id}_${Date.now()}`,
           projectId: rule.project_id,
           telegramHandle: chatId,
           subject: '🔔 Outreach Message',
-          text,
+          text: clean,
         }),
-      })
-      const tgOut = await res.json().catch(() => ({}))
-      result.telegram = tgOut
-      if (!res.ok) {
-        return { result, feedback: `❌ Telegram send failed (${res.status}).` }
-      }
+      });
+      const tgOut = await res.json().catch(() => ({}));
+      result.telegram = tgOut;
+      if (!res.ok) return { result, feedback: `❌ Telegram send failed (${res.status}).` };
     } else {
-      result.telegram = { skipped: 'no verified chat_id' }
+      result.telegram = { skipped: 'no verified chat_id' };
     }
   }
 
   if (wantsEmail) {
-    const to = getFirstProjectEmail()
+    const to = getFirstProjectEmail();
     if (to) {
       const res = await fetch(urls.sendEmail, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: sbKey,
-          Authorization: `Bearer ${sbKey}`,
-        },
-        body: JSON.stringify({
-          to,
-          subject: '🔔 Outreach Message',
-          message: text,
-        }),
-      })
-      const emailOut = await res.json().catch(() => ({}))
-      result.email = emailOut
-      if (!res.ok) {
-        return { result, feedback: `❌ Email send failed (${res.status}).` }
-      }
+        headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        body: JSON.stringify({ to, subject: '🔔 Outreach Message', message: clean }),
+      });
+      const emailOut = await res.json().catch(() => ({}));
+      result.email = emailOut;
+      if (!res.ok) return { result, feedback: `❌ Email send failed (${res.status}).` };
     } else {
-      result.email = { skipped: 'no project email saved' }
+      result.email = { skipped: 'no project email saved' };
     }
   }
 
   if (!wantsTelegram && !wantsEmail && !(rule.channels?.inapp ?? false)) {
-    return { result, feedback: 'ℹ️ Triggered, but no delivery channel selected.' }
+    return { result, feedback: 'ℹ️ Triggered, but no delivery channel selected.' };
   }
 
-  return { result, feedback: '✅ Message sent.' }
+  return { result, feedback: '✅ Message sent.' };
 }
+
 
 export async function runGeneric(
   supabase: SupabaseClient,
