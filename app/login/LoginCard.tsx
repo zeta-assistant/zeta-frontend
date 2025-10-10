@@ -2,7 +2,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 function SmartImg({
@@ -24,12 +23,18 @@ function SmartImg({
 }
 
 export default function LoginCard() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
+
+  // forgot-password dialog state
+  const [fpOpen, setFpOpen] = useState(false);
+  const [fpEmail, setFpEmail] = useState('');
+  const [fpMsg, setFpMsg] = useState<string | null>(null);
+  const [fpErr, setFpErr] = useState<string | null>(null);
+  const [fpBusy, setFpBusy] = useState(false);
 
   const handleLogin = async () => {
     setAuthError(null);
@@ -54,6 +59,7 @@ export default function LoginCard() {
     }
 
     try {
+      // ensure project exists (your existing endpoint)
       const userId = session.user.id;
       const res = await fetch('/api/check-or-create-project', {
         method: 'POST',
@@ -70,10 +76,9 @@ export default function LoginCard() {
         return;
       }
 
-      // ✅ Figure out where to go: /? (homepage) or ?next=...
+      // respect ?next=
       const params = new URLSearchParams(window.location.search);
       const next = params.get('next') || '/';
-      // Hard reload so middleware sees fresh cookies
       window.location.assign(next);
     } catch {
       setAuthError('Something went wrong setting up your Zeta project.');
@@ -84,6 +89,26 @@ export default function LoginCard() {
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !loading) handleLogin();
+  };
+
+  const sendResetEmail = async () => {
+    setFpMsg(null);
+    setFpErr(null);
+    setFpBusy(true);
+
+    try {
+      const redirectTo = `${window.location.origin}/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(fpEmail.trim(), { redirectTo });
+      if (error) {
+        setFpErr(error.message);
+      } else {
+        setFpMsg('If an account exists for this email, a reset link has been sent.');
+      }
+    } catch (e: any) {
+      setFpErr(e?.message || 'Failed to send reset email.');
+    } finally {
+      setFpBusy(false);
+    }
   };
 
   return (
@@ -116,7 +141,7 @@ export default function LoginCard() {
         <label className="block text-xs font-medium text-[#0f1b3d]/70 mb-1" htmlFor="password">
           Password
         </label>
-        <div className="relative mb-3">
+        <div className="relative">
           <input
             id="password"
             type={showPw ? 'text' : 'password'}
@@ -137,8 +162,23 @@ export default function LoginCard() {
           </button>
         </div>
 
+        {/* <- Clear, always-visible reset row */}
+        <div className="mt-2 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => { setFpOpen(true); setFpEmail(email || ''); }}
+            className="text-xs text-[#2555ff] hover:underline"
+          >
+            Forgot password?
+          </button>
+          {/* Fallback: takes users to the page they’ll land on after clicking the email link */}
+          <a href="/reset-password" className="text-xs text-[#0f1b3d]/60 hover:underline">
+            I already have a reset link
+          </a>
+        </div>
+
         {authError && (
-          <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
             {authError}
           </div>
         )}
@@ -146,7 +186,7 @@ export default function LoginCard() {
         <button
           onClick={handleLogin}
           disabled={loading}
-          className={`w-full rounded-lg px-4 py-2.5 text-white font-medium transition shadow hover:shadow-md ${
+          className={`mt-3 w-full rounded-lg px-4 py-2.5 text-white font-medium transition shadow hover:shadow-md ${
             loading ? 'bg-[#93a8ff] cursor-not-allowed' : 'bg-[#2555ff] hover:bg-[#1e47d9]'
           }`}
         >
@@ -179,6 +219,53 @@ export default function LoginCard() {
           </a>
         </div>
       </div>
+
+      {/* Simple Forgot Password dialog */}
+      {fpOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg">
+            <h4 className="text-sm font-semibold text-[#0f1b3d]">Reset your password</h4>
+            <p className="text-xs text-[#0f1b3d]/70 mt-1">
+              Enter your email and we’ll send a reset link.
+            </p>
+            <input
+              type="email"
+              value={fpEmail}
+              onChange={(e) => setFpEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="mt-3 w-full border border-[#c6d3ff] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-4 focus:ring-[#2555ff]/20 focus:border-[#2555ff]"
+            />
+            {fpErr && <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{fpErr}</div>}
+            {fpMsg && <div className="mt-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">{fpMsg}</div>}
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setFpOpen(false)}
+                className="flex-1 rounded-lg border border-[#c6d3ff] px-3 py-2 text-sm text-[#0f1b3d]"
+              >
+                Close
+              </button>
+              <button
+                onClick={sendResetEmail}
+                disabled={fpBusy || !fpEmail}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm text-white ${
+                  fpBusy ? 'bg-[#93a8ff] cursor-not-allowed' : 'bg-[#2555ff] hover:bg-[#1e47d9]'
+                }`}
+              >
+                {fpBusy ? 'Sending…' : 'Send link'}
+              </button>
+            </div>
+
+            <p className="mt-3 text-[11px] text-[#0f1b3d]/60">
+              Or go to{' '}
+              <a href="/reset-password" className="text-[#2555ff] hover:underline">
+                /reset-password
+              </a>{' '}
+              after clicking the email link.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
