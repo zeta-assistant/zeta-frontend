@@ -2,7 +2,7 @@
 import { Suspense } from 'react';
 import ResetPasswordClient from './ResetPasswordClient';
 
-export const dynamic = 'force-dynamic'; // avoids static prerendering issues
+export const dynamic = 'force-dynamic';
 
 function Fallback() {
   return (
