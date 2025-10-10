@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@supabase/auth-helpers-react';
 import { supabase } from '@/lib/supabaseClient';
@@ -31,14 +31,13 @@ const BASE_TRAITS: string[] = [
 
 export default function ZetaSetup() {
   const router = useRouter();
-  const userFromHook = useUser(); // may be undefined on first render
+  const userFromHook = useUser();
 
   const [preferredUserName, setPreferredUserName] = useState('');
   const [projectName, setProjectName] = useState('');
   const [assistantType, setAssistantType] = useState<string | null>(null);
   const [systemInstructions, setSystemInstructions] = useState('');
   const [modelId, setModelId] = useState('gpt-4o');
-  const [loading, setLoading] = useState(false);
 
   const [plan, setPlan] = useState<Plan>('loading');
   const isPremium = plan === 'premium' || plan === 'pro';
@@ -48,11 +47,20 @@ export default function ZetaSetup() {
   const [customTraits, setCustomTraits] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
 
-  // Initiative cadence ⇄ notifications frequency
+  // Initiative cadence
   const [initiativeCadence, setInitiativeCadence] =
     useState<'hourly' | 'daily' | 'weekly'>('daily');
 
-  // fetch plan for the current user (or global default “free”)
+  // Loading / transitions
+  const [isPending, startTransition] = useTransition();
+  const [submitting, setSubmitting] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  // fetch plan for the current user
   useEffect(() => {
     (async () => {
       try {
@@ -105,25 +113,43 @@ export default function ZetaSetup() {
     setTraits((prev) => prev.filter((x) => x !== t));
   };
 
+  /**
+   * Fire-and-forget assistant creation so navigation isn't blocked.
+   * keepalive allows the POST to continue during navigation/unload.
+   */
+  const createAssistantInBackground = async (payload: any) => {
+    try {
+      // Give it a short head-start, but don't block the UX.
+      void fetch('/api/createAssistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        
+        keepalive: true,
+        body: JSON.stringify(payload),
+      }).catch((e) => {
+        console.error('[createAssistant bg error]', e);
+      });
+    } catch (e) {
+      console.error('[createAssistant launch error]', e);
+    }
+  };
+
   const handleSubmit = async () => {
+    if (submitting || isPending) return;
     if (!projectName || !assistantType || !modelId) {
       alert('Missing required fields');
       return;
     }
-    setLoading(true);
+    setSubmitting(true);
+
     try {
-      // ✅ Always fetch the *live* user from auth right now
+      // Get the live auth user (don’t rely on hook during SSR/first paint)
       const { data: authUser, error: authErr } = await supabase.auth.getUser();
       if (authErr) {
         console.error('[auth.getUser error]', authErr);
         throw new Error('Not authenticated');
       }
       const liveUserId = authUser.user?.id;
-      console.log('[env]', {
-        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-        liveUserId,
-        hookUserId: userFromHook?.id,
-      });
       if (!liveUserId) {
         alert('You must be signed in to create a project.');
         return;
@@ -139,11 +165,11 @@ export default function ZetaSetup() {
       const safeModelId = isPremium ? modelId : 'gpt-4o';
       const visionToSave: string | null = null;
 
-      // 👉 Insert with the *live* user id
+      // Insert the project first (fast)
       const { data: projectData, error: insertError } = await supabase
         .from('user_projects')
         .insert([{
-          user_id: liveUserId,                  // <— this must exist in your users/auth.users table
+          user_id: liveUserId,
           name: projectName,
           vision: visionToSave,
           preferred_user_name: preferredUserName || null,
@@ -161,7 +187,6 @@ export default function ZetaSetup() {
 
       if (insertError) {
         console.error('[user_projects insert error]', insertError);
-        // Helpful hint for the classic ENV mismatch case
         if (insertError.code === '23503') {
           throw new Error(
             `User ${liveUserId} not found in users/auth.users. ` +
@@ -173,43 +198,35 @@ export default function ZetaSetup() {
 
       const projectId = projectData.id;
 
-      // Skip mainframe_info for now to avoid its FK while you stabilize
-      // (Re-enable later once the FK path is sorted out)
-
-      // Create assistant
-      const res = await fetch('/api/createAssistant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectName,
-          assistantType,
-          systemInstructions: mergedSystemInstructions,
-          projectId,
-          fileUrls: [],
-          privacyLevel: null,
-          modelId: safeModelId,
-          message: 'Hello Zeta, let’s begin.',
-          preferredUserName,
-          vision: visionToSave,
-          personalityTraits: traits,
-          initiativeCadence,
-        }),
+      // Kick off assistant creation in the background (do not await)
+      createAssistantInBackground({
+        projectName,
+        assistantType,
+        systemInstructions: mergedSystemInstructions,
+        projectId,
+        fileUrls: [],
+        privacyLevel: null,
+        modelId: safeModelId,
+        message: 'Hello Zeta, let’s begin.',
+        preferredUserName,
+        vision: visionToSave,
+        personalityTraits: traits,
+        initiativeCadence,
       });
 
-      const assistantRes = await res.json();
-      if (!res.ok) {
-        console.error('[createAssistant error body]', assistantRes);
-        throw new Error(assistantRes.error || 'Failed to create assistant');
-      }
-
-      router.push(`/dashboard/${projectId}`);
+      // Optimistic redirect immediately so the user sees their project right away.
+      startTransition(() => {
+        router.push(`/dashboard/${projectId}?firstSetup=1`);
+      });
     } catch (err: any) {
       console.error('❌ Zeta Setup Error:', err);
       alert(`Something went wrong: ${err?.message || err}`);
     } finally {
-      setLoading(false);
+      if (mounted.current) setSubmitting(false);
     }
   };
+
+  const finishDisabled = submitting || isPending || !projectName || !assistantType;
 
   return (
     <div className="relative min-h-screen text-black flex items-center justify-center px-6 py-10 overflow-hidden
@@ -253,6 +270,7 @@ export default function ZetaSetup() {
                 <label className="text-sm font-medium text-indigo-950">Using Zeta for work or personal?</label>
                 <div className="flex gap-2">
                   <Button
+                    type="button"
                     variant={assistantType === 'Work' ? 'default' : 'outline'}
                     onClick={() => setAssistantType(assistantType === 'Work' ? null : 'Work')}
                     className="flex-1 h-9 text-sm"
@@ -260,6 +278,7 @@ export default function ZetaSetup() {
                     Work
                   </Button>
                   <Button
+                    type="button"
                     variant={assistantType === 'Personal' ? 'default' : 'outline'}
                     onClick={() => setAssistantType(assistantType === 'Personal' ? null : 'Personal')}
                     className="flex-1 h-9 text-sm"
@@ -443,10 +462,10 @@ export default function ZetaSetup() {
           <div className="mt-5">
             <Button
               onClick={handleSubmit}
-              disabled={!projectName || !assistantType || loading}
+              disabled={finishDisabled}
               className="w-full h-10"
             >
-              {loading ? 'Setting Up...' : 'Finish Setup'}
+              {finishDisabled ? 'Setting Up…' : 'Finish Setup'}
             </Button>
           </div>
         </Card>
