@@ -1,23 +1,99 @@
 // app/reset-password/page.tsx
-import { Suspense } from 'react';
-import ResetPasswordClient from './ResetPasswordClient';
+'use client';
 
-export const dynamic = 'force-dynamic';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 
-function Fallback() {
+export default function ResetPasswordPage() {
+  const router = useRouter();
+
+  const [ready, setReady] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    try {
+      const hashParams = new URLSearchParams(
+        typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '') : ''
+      );
+      const searchParams = new URLSearchParams(
+        typeof window !== 'undefined' ? window.location.search : ''
+      );
+      const type = hashParams.get('type') || searchParams.get('type');
+      if (type === 'recovery' || true) setReady(true);
+    } catch {
+      setReady(true);
+    }
+  }, []);
+
+  const updatePassword = async () => {
+    setErr(null); setMsg(null);
+    if (!password || password.length < 8) return setErr('Password must be at least 8 characters.');
+    if (password !== confirm) return setErr('Passwords do not match.');
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      setMsg('Your password has been updated. Redirecting to login…');
+      setTimeout(() => router.push('/login'), 1200);
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to update password.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="min-h-screen grid place-items-center bg-gradient-to-b from-sky-100 to-indigo-100 px-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow p-6 text-sm text-[#0f1b3d]/70">
-        Preparing your session…
+      <div className="w-full max-w-md rounded-2xl bg-white shadow p-6">
+        <h1 className="text-lg font-semibold text-[#0f1b3d]">Set a new password</h1>
+        <p className="text-sm text-[#0f1b3d]/70 mt-1">
+          {ready ? 'Enter a new password for your account.' : 'Preparing your session…'}
+        </p>
+
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="block text-xs text-[#0f1b3d]/70 mb-1">New password</label>
+            <input
+              type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              className="w-full border border-[#c6d3ff] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-4 focus:ring-[#2555ff]/20 focus:border-[#2555ff]"
+              placeholder="••••••••" disabled={!ready}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-[#0f1b3d]/70 mb-1">Confirm password</label>
+            <input
+              type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+              className="w-full border border-[#c6d3ff] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-4 focus:ring-[#2555ff]/20 focus:border-[#2555ff]"
+              placeholder="••••••••" disabled={!ready}
+            />
+          </div>
+
+          {err && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{err}</div>}
+          {msg && <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">{msg}</div>}
+
+          <button
+            onClick={updatePassword}
+            disabled={!ready || busy}
+            className={`w-full rounded-lg px-4 py-2.5 text-white font-medium transition ${
+              !ready || busy ? 'bg-[#93a8ff] cursor-not-allowed' : 'bg-[#2555ff] hover:bg-[#1e47d9]'
+            }`}
+          >
+            {busy ? 'Updating…' : 'Update password'}
+          </button>
+        </div>
+
+        <p className="mt-4 text-center text-xs text-[#0f1b3d]/60">
+          Having trouble? Return to <a href="/login" className="text-[#2555ff] hover:underline">Log in</a>.
+        </p>
       </div>
     </main>
   );
 }
 
-export default function ResetPasswordPage() {
-  return (
-    <Suspense fallback={<Fallback />}>
-      <ResetPasswordClient />
-    </Suspense>
-  );
-}
+/** Module marker for isolatedModules */
+export {};
