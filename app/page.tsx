@@ -1,9 +1,9 @@
-// app/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import Header from '@/components/Header';
 import { supabase } from '@/lib/supabaseClient';
 import { getPlanFromUser, PLAN_LIMIT, type Plan } from '@/lib/plan';
 import { PlanTag } from '@/components/ui/ZetaPremiumMark';
@@ -16,7 +16,9 @@ try {
   const xp = require('@/lib/XP');
   getXPProgress = xp.getXPProgress;
   LEVELS = xp.LEVELS;
-} catch { /* noop */ }
+} catch {
+  /* noop */
+}
 
 /* ========================= Types ========================= */
 
@@ -96,7 +98,9 @@ function getProjectLevel(row: ProjectRowRaw): { levelNum: number; levelTitle: st
         const levelNum = gp?.level ?? gp?.currentLevel ?? gp?.levelNumber ?? 1;
         const title = LEVELS?.find((l) => l.level === levelNum)?.title ?? `Lv ${levelNum}`;
         return { levelNum, levelTitle: title };
-      } catch { /* ignore and fall back */ }
+      } catch {
+        /* ignore and fall back */
+      }
     }
     const lvl = fallbackLevelFromXP(xp);
     return { levelNum: lvl, levelTitle: fallbackTitleFromLevel(lvl) };
@@ -105,7 +109,8 @@ function getProjectLevel(row: ProjectRowRaw): { levelNum: number; levelTitle: st
 }
 
 function normalizeProject(row: ProjectRowRaw): Project {
-  const id = normStr(row.id) || (typeof crypto !== 'undefined' ? crypto.randomUUID() : `tmp_${Date.now()}`);
+  const id =
+    normStr(row.id) || (typeof crypto !== 'undefined' ? crypto.randomUUID() : `tmp_${Date.now()}`);
   const name =
     normStr(row.name) ||
     normStr(row.title) ||
@@ -228,30 +233,18 @@ export default function HomePage() {
           className="absolute inset-0 -z-10"
           style={{
             background:
-              'radial-gradient(1200px 600px at -10% -10%, rgba(59,130,246,0.25), transparent 60%),' + // blue-500 glow TL
-              'radial-gradient(900px 500px at 110% 0%, rgba(79,70,229,0.22), transparent 60%),' +     // indigo-600 glow TR
-              'radial-gradient(800px 500px at 50% 110%, rgba(99,102,241,0.20), transparent 60%),' +   // indigo-500 glow bottom
-              'linear-gradient(to bottom, #eff6ff 0%, #e0e7ff 45%, #eef2ff 100%)'                    // blue-50 -> indigo-50
+              'radial-gradient(1200px 600px at -10% -10%, rgba(59,130,246,0.25), transparent 60%),' +
+              'radial-gradient(900px 500px at 110% 0%, rgba(79,70,229,0.22), transparent 60%),' +
+              'radial-gradient(800px 500px at 50% 110%, rgba(99,102,241,0.20), transparent 60%),' +
+              'linear-gradient(to bottom, #eff6ff 0%, #e0e7ff 45%, #eef2ff 100%)',
           }}
         />
-        {/* Header */}
-        <header className="flex justify-between items-center px-8 py-4">
-          <div className="flex items-center gap-3">
-            <Image src="/pantheon.png" alt="Pantheon Logo" width={48} height={48} priority />
-            <span className="text-xl font-semibold text-gray-800">Pantheon</span>
-          </div>
-          <nav className="flex items-center gap-6">
-            <Link href="/projects" className="text-gray-700 hover:text-indigo-600">Projects</Link>
-            <Link href="/settings" className="text-gray-700 hover:text-indigo-600">Account</Link>
-            <Link href="/support" className="text-gray-700 hover:text-indigo-600">Support</Link>
-            <Link href="/login?next=/" className="px-4 py-1.5 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500">
-              Log in
-            </Link>
-          </nav>
-        </header>
+
+        {/* Responsive Header */}
+        <Header authed={false} />
 
         {/* Hero */}
-        <section className="text-center mt-16">
+        <section className="mx-auto w-full max-w-6xl px-4 mt-10 text-center">
           <h1 className="text-4xl md:text-5xl font-extrabold text-gray-900">
             Pantheon <span className="text-indigo-600">Personal Superintelligence</span>
           </h1>
@@ -262,31 +255,31 @@ export default function HomePage() {
         </section>
 
         {/* Agent tiles (static on logged-out) */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-4xl mx-auto mt-16 px-6">
-          <div className="p-6 rounded-xl bg-white shadow hover:shadow-md">
-            <Image src="/framed-agents/zeta-framed.png" alt="Zeta framed" width={96} height={96} className="mb-3 mx-auto rounded-lg" />
-            <h3 className="text-lg font-semibold text-gray-800 text-center">Build with Zeta</h3>
-            <p className="mt-2 text-sm text-gray-600 text-center">
+        <section className="mx-auto mt-12 grid w-full max-w-5xl grid-cols-1 gap-6 px-4 sm:grid-cols-3">
+          <div className="rounded-xl bg-white p-6 shadow hover:shadow-md">
+            <Image src="/framed-agents/zeta-framed.png" alt="Zeta framed" width={96} height={96} className="mx-auto mb-3 rounded-lg" />
+            <h3 className="text-center text-lg font-semibold text-gray-800">Build with Zeta</h3>
+            <p className="mt-2 text-center text-sm text-gray-600">
               Organize, plan, and achieve your goals. Build timelines, custom notifications,
               and track projects across work, side hustles, and hobbies.
             </p>
           </div>
 
-          <div className="p-6 rounded-xl bg-white shadow hover:shadow-md relative">
-            <span className="absolute top-2 right-2 text-xs bg-yellow-300 px-2 py-0.5 rounded-md">Coming soon</span>
-            <Image src="/framed-agents/theta-framed.png" alt="Theta framed" width={96} height={96} className="mb-3 mx-auto rounded-lg" />
-            <h3 className="text-lg font-semibold text-gray-800 text-center">Learn with Theta</h3>
+          <div className="relative rounded-xl bg-white p-6 shadow hover:shadow-md">
+            <span className="absolute right-2 top-2 rounded-md bg-yellow-300 px-2 py-0.5 text-xs">Coming soon</span>
+            <Image src="/framed-agents/theta-framed.png" alt="Theta framed" width={96} height={96} className="mx-auto mb-3 rounded-lg" />
+            <h3 className="text-center text-lg font-semibold text-gray-800">Learn with Theta</h3>
           </div>
 
-          <div className="p-6 rounded-xl bg-white shadow hover:shadow-md relative">
-            <span className="absolute top-2 right-2 text-xs bg-yellow-300 px-2 py-0.5 rounded-md">Coming soon</span>
-            <Image src="/framed-agents/delta-framed.png" alt="Delta framed" width={96} height={96} className="mb-3 mx-auto rounded-lg" />
-            <h3 className="text-lg font-semibold text-gray-800 text-center">Grow with Delta</h3>
+          <div className="relative rounded-xl bg-white p-6 shadow hover:shadow-md">
+            <span className="absolute right-2 top-2 rounded-md bg-yellow-300 px-2 py-0.5 text-xs">Coming soon</span>
+            <Image src="/framed-agents/delta-framed.png" alt="Delta framed" width={96} height={96} className="mx-auto mb-3 rounded-lg" />
+            <h3 className="text-center text-lg font-semibold text-gray-800">Grow with Delta</h3>
           </div>
         </section>
 
         {/* Zeta Premium */}
-        <section className="max-w-3xl mx-auto mt-16 px-6 text-center">
+        <section className="mx-auto mt-16 max-w-3xl px-4 text-center">
           <Image src="/zeta-premium.png" alt="Zeta Premium" width={180} height={180} className="mx-auto" />
           <h2 className="mt-6 text-2xl font-bold text-gray-800">Zeta Premium</h2>
           <p className="mt-2 text-gray-600">
@@ -295,7 +288,7 @@ export default function HomePage() {
           </p>
         </section>
 
-        <footer className="mt-20 text-center text-sm text-gray-500 py-6">
+        <footer className="mt-20 px-4 py-6 text-center text-sm text-gray-500">
           © {new Date().getFullYear()} Pantheon. All rights reserved.
         </footer>
       </main>
@@ -318,54 +311,26 @@ export default function HomePage() {
             'radial-gradient(1200px 600px at -10% -10%, rgba(59,130,246,0.25), transparent 60%),' +
             'radial-gradient(900px 500px at 110% 0%, rgba(79,70,229,0.22), transparent 60%),' +
             'radial-gradient(800px 500px at 50% 110%, rgba(99,102,241,0.20), transparent 60%),' +
-            'linear-gradient(to bottom, #eff6ff 0%, #e0e7ff 45%, #eef2ff 100%)'
+            'linear-gradient(to bottom, #eff6ff 0%, #e0e7ff 45%, #eef2ff 100%)',
         }}
       />
 
-      {/* Header (logged-in) */}
-      <header className="flex justify-between items-center px-8 py-4">
-        <Link href="/" className="flex items-center gap-3">
-          <Image src="/pantheon.png" alt="Pantheon Logo" width={48} height={48} priority />
-          <span className="text-xl font-semibold text-gray-800">Pantheon</span>
-        </Link>
-
-        <nav className="flex items-center gap-4">
-          <Link href="/projects" className="text-gray-700 hover:text-indigo-600">Projects</Link>
-          <Link href="/settings" className="text-gray-700 hover:text-indigo-600">Account</Link>
-          <Link href="/support" className="text-gray-700 hover:text-indigo-600">Support</Link>
-
-          {/* Avatar + Logout */}
-          <div className="hidden sm:flex items-center gap-3 pl-3 ml-3 border-l">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={avatarSrc}
-              alt={username || 'User'}
-              width={32}
-              height={32}
-              className="rounded-full border bg-gray-50 object-cover w-8 h-8"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src = DEFAULT_AVATAR_SRC;
-              }}
-            />
-            <PlanTag plan={plan} />
-            <button
-              onClick={async () => {
-                await supabase.auth.signOut();
-                window.location.assign('/');
-              }}
-              className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-500"
-            >
-              Log out
-            </button>
-          </div>
-        </nav>
-      </header>
+      {/* Responsive Header (logged-in) */}
+      <Header
+        authed
+        avatarUrl={avatarSrc}
+        planPill={<PlanTag plan={plan} />}
+        onLogout={async () => {
+          await supabase.auth.signOut();
+          window.location.assign('/');
+        }}
+      />
 
       {/* Account summary (no quick actions) */}
-      <section className="max-w-6xl mx-auto mt-8 px-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-6 rounded-2xl shadow ring-1 ring-black/5">
+      <section className="mx-auto mt-8 w-full max-w-6xl px-4">
+        <div className="grid grid-cols-1 gap-6 rounded-2xl bg-white p-6 shadow ring-1 ring-black/5 md:grid-cols-2">
           {/* Profile */}
-          <div className="col-span-1 flex gap-4 items-start">
+          <div className="col-span-1 flex items-start gap-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={avatarSrc}
@@ -379,17 +344,18 @@ export default function HomePage() {
             />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-xl font-semibold text-gray-900 truncate">{username || 'User'}</h2>
+                <h2 className="truncate text-xl font-semibold text-gray-900">{username || 'User'}</h2>
+                {/* Keep the local PlanBadge for the profile card */}
                 <PlanBadge plan={plan} />
               </div>
-              <p className="text-sm text-gray-600 mt-1 line-clamp-3">
+              <p className="mt-1 line-clamp-3 text-sm text-gray-600">
                 {selfDescription || 'Tell Zeta about your goals in Settings → Profile.'}
               </p>
               <div className="mt-3 flex gap-2">
-                <Link href="/settings" className="text-xs px-3 py-1.5 rounded-md border text-gray-700 hover:bg-gray-50">
+                <Link href="/settings" className="rounded-md border px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
                   Edit profile
                 </Link>
-                <Link href="/projects" className="text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-500">
+                <Link href="/projects" className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500">
                   Open Projects
                 </Link>
               </div>
@@ -398,21 +364,21 @@ export default function HomePage() {
 
           {/* Usage */}
           <div className="col-span-1">
-            <div className="text-sm text-gray-700 font-medium">Projects</div>
+            <div className="text-sm font-medium text-gray-700">Projects</div>
             <div className="mt-1 text-3xl font-extrabold text-gray-900">
               {used} <span className="text-base font-medium text-gray-500">/ {limit}</span>
             </div>
-            <div className="mt-2 h-2 rounded-full bg-gray-200 overflow-hidden">
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-200">
               <div className="h-2 bg-indigo-500" style={{ width: `${progressPct}%` }} />
             </div>
             <div className="mt-1 text-xs text-gray-500">
               {remaining === 0 ? 'Limit reached' : `${remaining} remaining`}
             </div>
             <div className="mt-3 flex gap-2">
-              <Link href="/onboarding" className="text-xs px-3 py-1.5 rounded-md bg-black text-white hover:bg-gray-800">
+              <Link href="/onboarding" className="rounded-md bg-black px-3 py-1.5 text-xs text-white hover:bg-gray-800">
                 + New Project
               </Link>
-              <Link href="/upgrade" className="text-xs px-3 py-1.5 rounded-md border text-gray-700 hover:bg-gray-50">
+              <Link href="/upgrade" className="rounded-md border px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
                 {plan === 'premium' ? 'Manage Billing' : 'Upgrade'}
               </Link>
             </div>
@@ -421,29 +387,29 @@ export default function HomePage() {
       </section>
 
       {/* Agent tiles with counters (top-left) + project lists with level pills */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-5xl mx-auto mt-10 px-6">
+      <section className="mx-auto mt-10 grid w-full max-w-5xl grid-cols-1 gap-6 px-4 sm:grid-cols-3">
         {/* Zeta */}
-        <div className="p-6 rounded-xl bg-white shadow">
+        <div className="rounded-xl bg-white p-6 shadow">
           <div className="relative flex items-center justify-center">
             <Image src="/framed-agents/zeta-framed.png" alt="Zeta framed" width={96} height={96} className="mb-3 rounded-lg" />
-            <span className="absolute -top-2 -left-2 text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full">
+            <span className="absolute -left-2 -top-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">
               {byAgent.zeta.length}
             </span>
           </div>
-          <h3 className="text-lg font-semibold text-gray-800 text-center">Build with Zeta</h3>
-          <ul className="mt-3 text-sm text-gray-700 space-y-1 max-h-28 overflow-auto">
+          <h3 className="text-center text-lg font-semibold text-gray-800">Build with Zeta</h3>
+          <ul className="mt-3 max-h-28 space-y-1 overflow-auto text-sm text-gray-700">
             {byAgent.zeta.length === 0 ? (
-              <li className="text-gray-400 text-center">No Zeta projects yet</li>
+              <li className="text-center text-gray-400">No Zeta projects yet</li>
             ) : (
               byAgent.zeta.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-2">
                   <span className="truncate">• {p.name}</span>
                   {p.levelNum ? (
-                    <span className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
                         Lv {p.levelNum}
                       </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-slate-300 text-slate-700 whitespace-nowrap">
+                      <span className="whitespace-nowrap rounded-full border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-700">
                         {p.levelTitle ?? `Lv ${p.levelNum}`}
                       </span>
                     </span>
@@ -455,28 +421,28 @@ export default function HomePage() {
         </div>
 
         {/* Theta */}
-        <div className="p-6 rounded-xl bg-white shadow relative">
-          <span className="absolute top-2 right-2 text-xs bg-yellow-300 px-2 py-0.5 rounded-md">Coming soon</span>
+        <div className="relative rounded-xl bg-white p-6 shadow">
+          <span className="absolute right-2 top-2 rounded-md bg-yellow-300 px-2 py-0.5 text-xs">Coming soon</span>
           <div className="relative flex items-center justify-center">
             <Image src="/framed-agents/theta-framed.png" alt="Theta framed" width={96} height={96} className="mb-3 rounded-lg" />
-            <span className="absolute -top-2 -left-2 text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full">
+            <span className="absolute -left-2 -top-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">
               {byAgent.theta.length}
             </span>
           </div>
-          <h3 className="text-lg font-semibold text-gray-800 text-center">Learn with Theta</h3>
-          <ul className="mt-3 text-sm text-gray-700 space-y-1 max-h-28 overflow-auto">
+          <h3 className="text-center text-lg font-semibold text-gray-800">Learn with Theta</h3>
+          <ul className="mt-3 max-h-28 space-y-1 overflow-auto text-sm text-gray-700">
             {byAgent.theta.length === 0 ? (
-              <li className="text-gray-400 text-center">No Theta projects yet</li>
+              <li className="text-center text-gray-400">No Theta projects yet</li>
             ) : (
               byAgent.theta.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-2">
                   <span className="truncate">• {p.name}</span>
                   {p.levelNum ? (
-                    <span className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
                         Lv {p.levelNum}
                       </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-slate-300 text-slate-700 whitespace-nowrap">
+                      <span className="whitespace-nowrap rounded-full border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-700">
                         {p.levelTitle ?? `Lv ${p.levelNum}`}
                       </span>
                     </span>
@@ -488,29 +454,29 @@ export default function HomePage() {
         </div>
 
         {/* Delta */}
-        <div className="p-6 rounded-xl bg-white shadow relative">
-          <span className="absolute top-2 right-2 text-xs bg-yellow-300 px-2 py-0.5 rounded-md">Coming soon</span>
+        <div className="relative rounded-xl bg-white p-6 shadow">
+          <span className="absolute right-2 top-2 rounded-md bg-yellow-300 px-2 py-0.5 text-xs">Coming soon</span>
           <div className="relative flex items-center justify-center">
             <Image src="/framed-agents/delta-framed.png" alt="Delta framed" width={96} height={96} className="mb-3 rounded-lg" />
-            <span className="absolute -top-2 -left-2 text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full">
+            <span className="absolute -left-2 -top-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">
               {byAgent.delta.length}
             </span>
           </div>
-          <h3 className="text-lg font-semibold text-gray-800 text-center">Grow with Delta</h3>
-          <ul className="mt-3 text-sm text-gray-700 space-y-1 max-h-28 overflow-auto">
+          <h3 className="text-center text-lg font-semibold text-gray-800">Grow with Delta</h3>
+          <ul className="mt-3 max-h-28 space-y-1 overflow-auto text-sm text-gray-700">
             {byAgent.delta.length === 0 ? (
-              <li className="text-gray-400 text-center">No Delta projects yet</li>
+              <li className="text-center text-gray-400">No Delta projects yet</li>
             ) : (
               byAgent.delta.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-2">
                   <span className="truncate">• {p.name}</span>
                   {p.levelNum ? (
-                    <span className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700">
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
                         Lv {p.levelNum}
                       </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-slate-300 text-slate-700 whitespace-nowrap">
-                        {p.levelTitle ?? `Lv {p.levelNum}`}
+                      <span className="whitespace-nowrap rounded-full border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-700">
+                        {p.levelTitle ?? `Lv ${p.levelNum}`}
                       </span>
                     </span>
                   ) : null}
@@ -521,7 +487,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="mt-16 text-center text-sm text-gray-500 py-6">
+      <footer className="mt-16 px-4 py-6 text-center text-sm text-gray-500">
         © {new Date().getFullYear()} Pantheon. All rights reserved.
       </footer>
     </main>
