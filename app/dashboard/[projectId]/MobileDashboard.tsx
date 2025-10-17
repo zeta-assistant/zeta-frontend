@@ -36,9 +36,9 @@ type Uploaded = { file_name: string; file_url: string };
 
 type Props = {
   projectName: string;
-  userEmail: string | null; // unused on mobile
+  userEmail: string | null;
   projectId: string;
-  threadId: string | null;  // unused on mobile
+  threadId: string | null;
   activeMainTab: MainTab;
   setActiveMainTab: React.Dispatch<React.SetStateAction<MainTab>>;
   chatView: 'all' | 'today' | 'pinned';
@@ -87,8 +87,8 @@ export default function MobileDashboard({
         className="flex flex-col w-full h-[100svh] bg-blue-900 border border-blue-800 shadow-lg overflow-visible"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        {/* ==== Compact Mobile Header (no clock, no 'Zeta Dashboard' text) ==== */}
-        <div className="sticky top-0 z-[200] bg-blue-900 border-b border-blue-800 isolate">
+        {/* ==== Compact Mobile Header ==== */}
+        <div className="sticky top-0 z-[200] bg-blue-900 border-b border-blue-800 isolate pt-[env(safe-area-inset-top)]">
           <div className="flex items-center gap-3 px-3 py-2">
             <img
               src="/zeta-avatar.svg"
@@ -96,9 +96,7 @@ export default function MobileDashboard({
               className="h-7 w-7 rounded-full shrink-0"
             />
             <div className="font-semibold truncate">{projectName}</div>
-            {/* spacer */}
             <div className="ml-auto text-xs opacity-70">
-              {/* optional refresh button for mobile */}
               <button
                 onClick={refreshAll}
                 disabled={refreshing}
@@ -109,28 +107,35 @@ export default function MobileDashboard({
             </div>
           </div>
 
-          {/* ==== Main Tabs (equal width) ==== */}
+          {/* ==== Main Tabs (Equal Width) ==== */}
           <div className="px-2 pb-2">
-            {/* 
-              Make every button inside stretch and use smaller text so labels fit:
-              - equal columns via grid-cols-5
-              - force inner <button> width, center, and font-size using :where selectors
-            */}
-            <div className="
-              grid grid-cols-5 gap-2
-              [&_button]:w-full [&_button]:justify-center [&_button]:px-2
-              [&_*]:text-[13px] [&_*]:leading-5
-              ">
-              <div><ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
-              <div><WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
-              <div><PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
-              <div><IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
-              <div><FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+            <div
+              className="
+                grid grid-cols-5 gap-2
+                [&_button]:w-full [&_button]:justify-center [&_button]:px-2
+                [&_button]:min-w-0 [&_*]:text-[13px] [&_*]:leading-5
+              "
+            >
+              <div className="min-w-0">
+                <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+              </div>
+              <div className="min-w-0">
+                <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+              </div>
+              <div className="min-w-0">
+                <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+              </div>
+              <div className="min-w-0">
+                <IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+              </div>
+              <div className="min-w-0">
+                <FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+              </div>
             </div>
           </div>
         </div>
 
-        {/* ==== Content UNDER the sticky header (dropdowns will overlap) ==== */}
+        {/* ==== Scrollable Content ==== */}
         <div className="relative z-10 flex-1 min-h-0 overflow-y-auto">
           {activeMainTab === 'chat' && (
             <ChatTab
