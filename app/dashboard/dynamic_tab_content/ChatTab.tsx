@@ -123,7 +123,7 @@ const EMOJIS = [
   '🧠','📌','✅','❗','❓','📎','📝','📈','📊','⏱️','🧪','🔧','🛠️','🧰','🧵','🔁'
 ];
 
-/* ---------- Stable anti-bounce scroller ---------- */
+/* ---------- Stable anti-bounce scroller (no bottom padding) ---------- */
 const StableScroller = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   (p, ref) => (
     <div
@@ -134,7 +134,7 @@ const StableScroller = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTM
         overscrollBehavior: 'contain',
         WebkitOverflowScrolling: 'auto',
         touchAction: 'pan-y',
-        scrollbarGutter: 'stable',
+        scrollbarGutter: 'stable', // stops layout jump when bar appears
       }}
     />
   )
@@ -143,8 +143,7 @@ StableScroller.displayName = 'StableScroller';
 
 /* ---------- Footer spacer so last bubble isn't hidden ---------- */
 function FooterSpacer() {
-  // Slightly smaller on mobile; Virtuoso will still keep last row visible
-  return <div className="h-20 md:h-24" />;
+  return <div style={{ height: 96 }} />;
 }
 
 /* ========================================================= */
@@ -308,7 +307,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     setOptimistic((prev) =>
       prev.filter((o) => {
         const oRole = o.role ?? 'user';
-        const oText = normText(getMsgContent(o));
+               const oText = normText(getMsgContent(o));
         const oTime = toDateOrNow(o).getTime();
         const within = (m: any) =>
           (m?.role ?? 'assistant') === oRole &&
@@ -572,7 +571,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
     if (isAtBottom || pendingScrollAfterSendRef.current) {
       pendingScrollAfterSendRef.current = false;
-      virtuosoRef.current.scrollToIndex({ index: rows.length - 1, behavior: 'auto' });
+      virtuosoRef.current.scrollToIndex({ index: rows.length - 1, behavior: isAtBottom ? 'auto' : 'auto' });
     }
   }, [rows.length, isAtBottom]);
 
@@ -583,19 +582,16 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
   if (activeMainTab !== 'chat') return null;
 
-  /* ========================= RENDER ========================= */
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex flex-col h-full min-h-0">
       {/* Tabs + Controls */}
-      <div className="flex items-center justify-between px-3 pt-3 md:px-6">
-        {/* Filters row; scrollable on mobile */}
-        <div className="flex max-w-full gap-2 overflow-x-auto pb-1 pr-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex justify-between items-center px-6 pt-3">
+        <div className="flex items-center gap-2">
           {(['all', 'today', 'pinned'] as const).map((view) => (
             <button
               key={view}
               onClick={() => setChatView(view)}
-              className={`whitespace-nowrap rounded-md border px-3 py-1 text-xs transition ${
+              className={`text-xs px-3 py-1 rounded-md border transition ${
                 chatView === view
                   ? 'bg-blue-600 text-white border-blue-700 shadow'
                   : 'bg-blue-800 text-blue-200 border-blue-500 hover:bg-blue-700'
@@ -606,53 +602,11 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
           ))}
         </div>
 
-        {/* Compact settings on mobile */}
-        <div className="relative md:hidden">
-          <details className="group">
-            <summary className="cursor-pointer list-none rounded-md border border-blue-600 bg-blue-800 px-2 py-1 text-xs text-white">
-              Options ▾
-            </summary>
-            <div className="absolute right-0 z-20 mt-2 w-40 rounded-md border border-blue-700 bg-blue-900 p-2 text-xs text-white shadow-lg">
-              <label className="mb-2 block">
-                <span className="opacity-80">Verbosity</span>
-                <select
-                  className="mt-1 w-full rounded border border-blue-600 bg-blue-950 px-2 py-1"
-                  value={verbosity}
-                  onChange={(e) => setVerbosity(e.target.value as Verbosity)}
-                >
-                  <option value="short">Short</option>
-                  <option value="normal">Normal</option>
-                  <option value="long">Long</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="opacity-80">Font</span>
-                <select
-                  className="mt-1 w-full rounded border border-blue-600 bg-blue-950 px-2 py-1"
-                  value={fontSize}
-                  onChange={(e) => setFontSize(e.target.value as 'sm' | 'base' | 'lg')}
-                >
-                  <option value="sm">Small</option>
-                  <option value="base">Medium</option>
-                  <option value="lg">Large</option>
-                </select>
-              </label>
-              <button
-                onClick={() => setChatHidden(!chatHidden)}
-                className="mt-2 w-full rounded bg-black px-2 py-1"
-              >
-                {chatHidden ? 'Show Chat' : 'Hide Chat'}
-              </button>
-            </div>
-          </details>
-        </div>
-
-        {/* Full controls on md+ */}
-        <div className="hidden items-center text-xs text-white md:flex">
-          <div className="mr-4 flex items-center">
+        <div className="text-xs text-white flex items-center">
+          <div className="flex items-center mr-4">
             <span className="opacity-80">Verbosity:</span>
             <select
-              className="ml-2 rounded border border-blue-500 bg-blue-900 px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="ml-2 px-2 py-1 rounded bg-blue-900 border border-blue-500 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
               value={verbosity}
               onChange={(e) => setVerbosity(e.target.value as Verbosity)}
             >
@@ -664,7 +618,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
           <span className="opacity-80">Font:</span>
           <select
-            className="ml-2 rounded border border-blue-500 bg-blue-900 px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="ml-2 px-2 py-1 rounded bg-blue-900 border border-blue-500 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
             value={fontSize}
             onChange={(e) => setFontSize(e.target.value as 'sm' | 'base' | 'lg')}
           >
@@ -672,27 +626,30 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
             <option value="base">Medium</option>
             <option value="lg">Large</option>
           </select>
-
-          <button
-            onClick={() => setChatHidden(!chatHidden)}
-            className={`ml-3 rounded-md px-3 py-1 text-white transition ${
-              chatHidden ? 'bg-green-600 hover:bg-green-700' : 'bg-black hover:bg-gray-800'
-            }`}
-          >
-            {chatHidden ? 'Show Chat' : 'Hide Chat'}
-          </button>
         </div>
       </div>
 
+      {/* Hide/Show */}
+      <div className="flex justify-end gap-2 px-6 pt-2">
+        <button
+          onClick={() => setChatHidden(!chatHidden)}
+          className={`text-xs text-white px-3 py-1 rounded-md transition ${
+            chatHidden ? 'bg-green-600 hover:bg-green-700' : 'bg-black hover:bg-gray-800'
+          }`}
+        >
+          {chatHidden ? 'Show Chat' : 'Hide Chat'}
+        </button>
+      </div>
+
       {/* Body */}
-      <div className="flex flex-1 flex-col px-3 pt-2 md:px-6">
+      <div className="flex flex-col flex-1 min-h-0 px-6 pt-2 pb-2">
         {!chatHidden && (
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
             <Virtuoso
               ref={virtuosoRef}
               style={{ height: '100%' }}
               totalCount={rows.length}
-              followOutput={isAtBottom ? 'auto' : false}
+              followOutput={isAtBottom ? 'auto' : false}   // no “zip”
               atBottomThreshold={120}
               increaseViewportBy={{ top: 120, bottom: 240 }}
               overscan={120}
@@ -710,14 +667,16 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
               itemContent={(index) => {
                 const r = (rows as any[])[index];
 
+                // Typing row
                 if (r?.__type === 'typing') {
                   return (
-                    <div className="mb-4 md:mb-6">
+                    <div className="mb-5 md:mb-6">
                       <TypingBubble />
                     </div>
                   );
                 }
 
+                // Normal message
                 const msg = r;
                 const contentRaw = getMsgContent(msg);
                 const latestAssistantIndex = [...displayedMessages].reverse().findIndex((m) => m.role === 'assistant' && getMsgContent(m));
@@ -729,17 +688,17 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
                   console.log('📐 Latex formats:', formatCounts);
                 }
 
-                const bubbleCommon = 'relative max-w-[90%] md:max-w-[85%] break-words rounded-2xl border shadow-md transition';
+                const bubbleCommon = 'relative max-w-[85%] break-words shadow-md rounded-2xl border transition';
                 const bubbleByRole = isUserish(msg)
                   ? 'ml-auto bg-gradient-to-br from-blue-200 to-blue-100 border-blue-300 text-blue-900'
                   : 'bg-gradient-to-br from-yellow-300 to-yellow-100 border-yellow-400 text-slate-900';
 
                 return (
-                  <div className="mb-4 md:mb-6">
-                    <div className={`${bubbleCommon} ${bubbleByRole} ${textScale(fontSize)} p-3 md:p-4 pb-6`}>
+                  <div className="mb-5 md:mb-6">
+                    <div className={`${bubbleCommon} ${bubbleByRole} ${textScale(fontSize)} p-4 pb-6`}>
                       <button
                         onClick={() => togglePinMessage(msg)}
-                        className="absolute right-2 top-1 text-[11px] text-gray-400 hover:text-yellow-500"
+                        className="absolute top-1 right-2 text-[11px] text-gray-400 hover:text-yellow-500"
                         title="Pin / Unpin"
                       >
                         📌
@@ -757,7 +716,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
                         </div>
                       )}
 
-                      <div className="absolute bottom-2 right-2 select-none text-[10px] text-gray-500">
+                      <div className="absolute bottom-2 right-2 text-[10px] text-gray-500 select-none">
                         {formatTimeInTZ(rawTs(msg), projectTZ)}
                       </div>
                     </div>
@@ -772,30 +731,34 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
       </div>
 
       {/* Input + Attachments + Emoji */}
-      <div className="rounded-b-2xl border-t border-blue-700 bg-blue-900 px-3 pb-4 pt-3 md:px-4 md:pb-5">
+      <div className="border-t border-blue-700 bg-blue-900 px-4 pt-3 pb-5 rounded-b-2xl">
+        {/* Selected attachment chips */}
         {selectedDocs.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 mb-2">
             {selectedDocs.map((d) => (
-              <span key={d.file_url} className="flex items-center gap-2 rounded-lg bg-blue-700 px-2 py-1 text-xs text-white/90">
-                <span className="max-w-[220px] truncate">{d.file_name}</span>
-                <button onClick={() => removeSelectedDoc(d.file_url)} className="rounded px-1 hover:bg-blue-600" title="Remove">✖</button>
+              <span key={d.file_url} className="text-xs bg-blue-700 text-white/90 px-2 py-1 rounded-lg flex items-center gap-2">
+                <span className="truncate max-w-[220px]">{d.file_name}</span>
+                <button onClick={() => removeSelectedDoc(d.file_url)} className="px-1 rounded hover:bg-blue-600" title="Remove">✖</button>
               </span>
             ))}
           </div>
         )}
 
-        <div className="relative flex items-center gap-2">
-          <button onClick={() => setLibraryOpen(true)} className="rounded-xl bg-blue-800 px-2 py-2 text-sm text-white shadow transition hover:bg-blue-700" title="Attach files">📎</button>
+        <div className="flex items-center gap-2 relative">
+          {/* Attach from library */}
+          <button onClick={() => setLibraryOpen(true)} className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm" title="Attach files">📎</button>
 
-          <button onClick={() => fileInputRef.current?.click()} className="rounded-xl bg-blue-800 px-2 py-2 text-sm text-white shadow transition hover:bg-blue-700" title="Upload new file">⬆️</button>
+          {/* Upload new */}
+          <button onClick={() => fileInputRef.current?.click()} className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm" title="Upload new file">⬆️</button>
           <input ref={fileInputRef} type="file" multiple onChange={(e) => setAttachedFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])])} className="hidden" />
 
+          {/* Emoji */}
           <EmojiButton inputRef={inputRef} setInput={setInput} />
 
           <input
             ref={inputRef}
             type="text"
-            className="w-full rounded-xl border-2 border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="bg-blue-50 text-blue-900 border-2 border-blue-300 rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-sm w-full shadow-sm"
             placeholder="Ask Zeta something..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -806,7 +769,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
           <button
             onClick={handleSend}
             disabled={uploading}
-            className="rounded-xl bg-blue-600 px-4 py-2 text-white shadow transition hover:bg-blue-700 active:scale-[0.98] disabled:opacity-60"
+            className="bg-blue-600 text-white px-4 py-2 rounded-xl shadow hover:bg-blue-700 active:scale-[0.98] transition disabled:opacity-60"
           >
             Send
           </button>
@@ -821,35 +784,35 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
       {libraryOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setLibraryOpen(false)} />
-          <div className="relative max-h-[80vh] w-[min(780px,92vw)] overflow-hidden rounded-2xl border border-blue-700 bg-blue-950 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-blue-800 px-4 py-3">
-              <div className="font-semibold text-white">Attach files from Library</div>
-              <button onClick={() => setLibraryOpen(false)} className="text-sm text-blue-200 hover:text-white">Close</button>
+          <div className="relative bg-blue-950 border border-blue-700 rounded-2xl shadow-2xl w-[min(780px,92vw)] max-h-[80vh] overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-blue-800">
+              <div className="text-white font-semibold">Attach files from Library</div>
+              <button onClick={() => setLibraryOpen(false)} className="text-blue-200 hover:text-white text-sm">Close</button>
             </div>
 
             <div className="p-4">
-              <div className="mb-3 flex gap-2">
+              <div className="flex gap-2 mb-3">
                 <input
                   value={libraryQuery}
                   onChange={(e) => setLibraryQuery(e.target.value)}
                   placeholder="Search files…"
-                  className="flex-1 rounded-lg border border-blue-700 bg-blue-900/60 px-3 py-2 text-sm text-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 bg-blue-900/60 text-blue-100 border border-blue-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <button onClick={() => { setLibraryQuery(''); refreshLibrary(); }} className="rounded-lg border border-blue-700 bg-blue-800 px-3 py-2 text-sm text-white hover:bg-blue-700">Refresh</button>
+                <button onClick={() => { setLibraryQuery(''); refreshLibrary(); }} className="text-sm bg-blue-800 text-white px-3 py-2 rounded-lg border border-blue-700 hover:bg-blue-700">Refresh</button>
               </div>
 
-              <div className="max-h-[48vh] overflow-auto rounded-lg border border-blue-800">
+              <div className="overflow-auto max-h-[48vh] rounded-lg border border-blue-800">
                 {libraryLoading ? (
-                  <div className="p-6 text-sm text-blue-200">Loading…</div>
+                  <div className="p-6 text-blue-200 text-sm">Loading…</div>
                 ) : filteredLibrary.length === 0 ? (
-                  <div className="p-6 text-sm text-blue-300">No files found.</div>
+                  <div className="p-6 text-blue-300 text-sm">No files found.</div>
                 ) : (
                   <table className="w-full text-sm text-blue-100">
-                    <thead className="sticky top-0 bg-blue-900/60">
+                    <thead className="bg-blue-900/60 sticky top-0">
                       <tr>
-                        <th className="w-10 px-3 py-2 text-left">Add</th>
-                        <th className="px-3 py-2 text-left">File name</th>
-                        <th className="w-40 px-3 py-2 text-left">Added</th>
+                        <th className="text-left px-3 py-2 w-10">Add</th>
+                        <th className="text-left px-3 py-2">File name</th>
+                        <th className="text-left px-3 py-2 w-40">Added</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -861,12 +824,12 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
                               <button
                                 onClick={() => addSelectedDoc(doc)}
                                 disabled={already}
-                                className={`rounded px-2 py-1 ${already ? 'cursor-not-allowed bg-green-800/40 text-green-300' : 'bg-blue-800 text-white hover:bg-blue-700'}`}
+                                className={`px-2 py-1 rounded ${already ? 'bg-green-800/40 text-green-300 cursor-not-allowed' : 'bg-blue-800 hover:bg-blue-700 text-white'}`}
                               >
                                 {already ? 'Added' : 'Add'}
                               </button>
                             </td>
-                            <td className="truncate px-3 py-2">{doc.file_name}</td>
+                            <td className="px-3 py-2 truncate">{doc.file_name}</td>
                             <td className="px-3 py-2">{doc.created_at ? new Date(doc.created_at).toLocaleString() : '—'}</td>
                           </tr>
                         );
@@ -879,12 +842,12 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
               <div className="mt-3 flex items-center justify-between">
                 <div className="flex flex-wrap gap-2">
                   {selectedDocs.map((d) => (
-                    <span key={d.file_url} className="rounded-md bg-blue-800 px-2 py-1 text-[11px] text-blue-100">{d.file_name}</span>
+                    <span key={d.file_url} className="text-[11px] bg-blue-800 text-blue-100 px-2 py-1 rounded-md">{d.file_name}</span>
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => setSelectedDocs([])} className="rounded-lg border border-blue-700 bg-blue-900 px-3 py-2 text-sm text-blue-200 hover:bg-blue-800">Clear</button>
-                  <button onClick={() => setLibraryOpen(false)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700">Done</button>
+                  <button onClick={() => setSelectedDocs([])} className="text-sm px-3 py-2 rounded-lg bg-blue-900 border border-blue-700 text-blue-200 hover:bg-blue-800">Clear</button>
+                  <button onClick={() => setLibraryOpen(false)} className="text-sm px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Done</button>
                 </div>
               </div>
             </div>
@@ -953,7 +916,7 @@ function EmojiButton({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="rounded-xl bg-blue-800 px-2 py-2 text-sm text-white shadow transition hover:bg-blue-700"
+        className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm"
         title="Emoji"
       >
         🙂
@@ -962,7 +925,7 @@ function EmojiButton({
       {open && (
         <div
           className={[
-            'absolute bottom-full z-50 mb-2 w-56 rounded-xl border border-blue-700 bg-blue-950 p-2 shadow-xl',
+            'absolute z-50 bottom-full mb-2 w-56 p-2 rounded-xl border border-blue-700 bg-blue-950 shadow-xl',
             align === 'center' ? 'left-1/2 -translate-x-1/2' : '',
             align === 'left' ? 'left-0' : '',
             align === 'right' ? 'right-0' : '',
@@ -972,7 +935,7 @@ function EmojiButton({
             {EMOJIS.map((emo) => (
               <button
                 key={emo}
-                className="rounded p-1 text-xl leading-none hover:bg-blue-800"
+                className="text-xl leading-none p-1 rounded hover:bg-blue-800"
                 onClick={() => onPick(emo)}
                 title={emo}
                 type="button"
@@ -981,7 +944,7 @@ function EmojiButton({
               </button>
             ))}
           </div>
-          <div className="mt-2 px-1 text-[10px] text-blue-300">Click an emoji to insert at cursor</div>
+          <div className="text-[10px] text-blue-300 mt-2 px-1">Click an emoji to insert at cursor</div>
         </div>
       )}
     </div>
@@ -992,16 +955,16 @@ function EmojiButton({
 function TypingBubble() {
   return (
     <div className="mb-1">
-      <div className="relative rounded-2xl border border-yellow-400 bg-gradient-to-br from-yellow-300 to-yellow-100 p-4 pb-6 text-slate-900 shadow-md">
+      <div className="relative max-w-[85%] break-words shadow-md rounded-2xl border transition bg-gradient-to-br from-yellow-300 to-yellow-100 border-yellow-400 text-slate-900 p-4 pb-6">
         <div className="flex items-center gap-2 text-[15px]">
           <span className="font-medium">Zeta is thinking</span>
-          <span className="ml-1 inline-flex h-[1em] items-end gap-1">
+          <span className="inline-flex items-end gap-1 ml-1 h-[1em]">
             <span className="typing-dot" style={{ animationDelay: '0ms' }} />
             <span className="typing-dot" style={{ animationDelay: '120ms' }} />
             <span className="typing-dot" style={{ animationDelay: '240ms' }} />
           </span>
         </div>
-        <div className="absolute bottom-2 right-2 select-none text-[10px] text-gray-500">…</div>
+        <div className="absolute bottom-2 right-2 text-[10px] text-gray-500 select-none">…</div>
 
         <style jsx>{`
           .typing-dot {
@@ -1015,7 +978,7 @@ function TypingBubble() {
           }
           @keyframes zeta-bounce-dot {
             0%, 80%, 100% { transform: translateY(0); opacity: 0.7; }
-            40% { transform: translateY(-6px); opacity: 1; }
+            40%           { transform: translateY(-6px); opacity: 1; }
           }
           @media (prefers-reduced-motion: reduce) { .typing-dot { animation: none; } }
         `}</style>
