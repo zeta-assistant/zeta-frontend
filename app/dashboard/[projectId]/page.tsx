@@ -22,10 +22,17 @@ import LogsPanel from '../dashboard_tabs/dashboard_panels/Logs/LogsPanel';
 
 // ✅ Dynamic import of FilesPanel
 const FilesPanel = dynamic(
-  () => import('../dashboard_tabs/dashboard_panels/Files/FilesPanel').then((m) => m.default || (m as any)),
+  () =>
+    import('../dashboard_tabs/dashboard_panels/Files/FilesPanel').then(
+      (m) => m.default || (m as any)
+    ),
   {
     ssr: false,
-    loading: () => <div className="flex h-[320px] items-center justify-center text-sm text-blue-200">Loading Files…</div>,
+    loading: () => (
+      <div className="flex h-[320px] items-center justify-center text-sm text-blue-200">
+        Loading Files…
+      </div>
+    ),
   }
 );
 
@@ -99,10 +106,7 @@ export default function DashboardPage() {
   }, [projectId]);
 
   const checkSessionAndProject = async () => {
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.user?.email) return router.push('/login');
     setUserEmail(session.user.email);
 
@@ -154,7 +158,9 @@ export default function DashboardPage() {
         if (updated && updated.length > 0) {
           setMessages(updated.map((m) => ({ role: m.role, content: m.message })));
         } else {
-          setMessages([{ role: 'assistant', content: '⚠️ Zeta failed to respond. Try typing something to get started.' }]);
+          setMessages([
+            { role: 'assistant', content: '⚠️ Zeta failed to respond. Try typing something to get started.' },
+          ]);
         }
       }, 3000);
     }
@@ -177,7 +183,7 @@ export default function DashboardPage() {
     if (!projectId) return;
 
     const attachments = opts?.attachments ?? [];
-    const hasText = !!input.trim();
+       const hasText = !!input.trim();
     const hasFiles = attachments.length > 0;
     if (!hasText && !hasFiles) return;
 
@@ -189,7 +195,10 @@ export default function DashboardPage() {
       didTimeout = true;
       controller.abort();
       setSendingMessage(false);
-      setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ Request timed out. Please try again.' }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '⚠️ Request timed out. Please try again.' },
+      ]);
     }, 90_000);
 
     const sentText = input;
@@ -203,10 +212,7 @@ export default function DashboardPage() {
     setInput('');
 
     try {
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
+      const { data: { session }, error } = await supabase.auth.getSession();
       if (error || !session?.access_token || !session?.user?.id) {
         clearTimeout(timeoutId);
         setSendingMessage(false);
@@ -318,24 +324,23 @@ export default function DashboardPage() {
     }
   };
 
-  // 👉 On phones let content size itself; on md+ lock panel height.
+  // On phones let content flow; lock height only on md+
   const PANEL_H_MD = 'calc(100dvh - 110px)';
 
   return (
-    <div className="min-h-[100dvh] bg-sky-800 px-3 py-4 text-white md:px-6 md:py-6">
-      <div className="mx-auto grid w-full max-w-[1500px] grid-cols-12 gap-3 md:gap-4">
-        {/* ===== Left Sidebar (stacks on mobile) ===== */}
-        <div className="col-span-12 md:col-span-3">
-          <div className="relative flex w-full flex-col rounded-2xl px-3 py-2 md:sticky md:top-[88px]" style={{ height: undefined }}>
-            {/* Mascot — responsive on mobile; larger on md+ */}
+    <div className="min-h-[100dvh] bg-sky-800 text-white px-3 md:px-6 py-4 md:py-6">
+      {/* bottom padding so the mobile action bar doesn't cover content */}
+      <div className="mx-auto grid w-full max-w-[1500px] grid-cols-12 gap-3 md:gap-4 pb-[84px] md:pb-0">
+
+        {/* ===== Left Sidebar (hidden on mobile) ===== */}
+        <div className="col-span-12 hidden md:col-span-3 md:block">
+          <div className="relative flex w-full flex-col rounded-2xl px-3 py-2 md:sticky md:top-[88px]">
             <img
               src={sendingMessage ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
               alt={sendingMessage ? 'Zeta Thinking' : 'Zeta Mascot'}
-              className="mx-auto mt-2 w-40 max-w-full md:absolute md:left-1/2 md:top-0 md:w-[250px] md:-translate-x-1/2"
+              className="mx-auto mt-2 w-[250px]"
             />
-
-            {/* Icon rail — hidden on mobile */}
-            <div className="absolute right-[-10px] top-4 z-30 hidden flex-col items-center gap-2 md:flex">
+            <div className="absolute right-[-10px] top-4 z-30 flex flex-col items-center gap-2">
               <SettingsButton
                 projectId={String(projectId)}
                 selectedModelId={selectedModelId}
@@ -352,19 +357,17 @@ export default function DashboardPage() {
               />
             </div>
 
-            {/* Left info cards */}
-            <div className="mt-3 md:mt-[220px]">
+            <div className="mt-[220px]">
               <ZetaLeftSidePanel key={`left-${refreshNonce}`} projectId={projectId} />
             </div>
           </div>
         </div>
 
-        {/* ===== Main panel ===== */}
+        {/* ===== Main panel (full width on mobile) ===== */}
         <div
           className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-800 bg-blue-900 shadow-lg md:col-span-6"
-          style={{ height: undefined, maxHeight: undefined }}
         >
-          {/* On md+ constrain height so header sticks nicely */}
+          {/* lock height on md+ for nicer sticky behavior */}
           <div className="md:h-[var(--panel-h)]" style={{ ['--panel-h' as any]: PANEL_H_MD }} />
 
           <DashboardHeader
@@ -439,7 +442,7 @@ export default function DashboardPage() {
 
           {activeMainTab === 'functions' && <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />}
 
-          {activeMainTab === 'newfunction' && <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={'sm'} />}
+          {activeMainTab === 'newfunction' && <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={'base'} />}
 
           {activeMainTab === 'workshop' && <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />}
         </div>
@@ -450,7 +453,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ===== Mobile Action Bar (replaces right-rail) ===== */}
+      {/* ===== Mobile Action Bar ===== */}
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-white/90 px-3 py-2 text-slate-900 backdrop-blur md:hidden">
         <div className="mx-auto grid w-full max-w-[740px] grid-cols-4 gap-2">
           <SettingsButton
