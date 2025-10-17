@@ -11,6 +11,7 @@ import PlannerTabs from '../dashboard_tabs/PlannerTabs';
 import IntelligenceTabs from '../dashboard_tabs/IntelligenceTabs';
 import FunctionsTabs from '../dashboard_tabs/FunctionsTabs';
 
+import ChatTab from '../dynamic_tab_content/ChatTab';
 import DiscussionsPanel from '../dashboard_tabs/dashboard_panels/Discussions/DiscussionsPanel';
 import LogsPanel from '../dashboard_tabs/dashboard_panels/Logs/LogsPanel';
 const FilesPanel = dynamic(
@@ -31,7 +32,6 @@ import NewFunctionPanel from '../dashboard_tabs/dashboard_panels/NewFunction/New
 import WorkshopPanel from '../dashboard_tabs/dashboard_panels/Workshop/WorkshopPanel';
 import TimelinePanel from '../dashboard_tabs/dashboard_panels/Timeline/TimelinePanel';
 import ConnectionsPanel from '../dashboard_tabs/dashboard_panels/Connections/ConnectionsPanel';
-import ChatTab from '../dynamic_tab_content/ChatTab';
 
 type Uploaded = { file_name: string; file_url: string };
 
@@ -89,17 +89,18 @@ export default function MobileDashboard({
   refreshing,
   recentDocs,
 }: Props) {
+  // Full viewport height; avoid iOS toolbar jumps with svh
   const PANEL_H = '100svh';
 
   return (
     <div className="md:hidden flex flex-col min-h-screen bg-sky-800 text-white">
-      {/* Do NOT hide overflow on this wrapper so menus can escape */}
+      {/* IMPORTANT: no overflow-hidden here so menus can escape */}
       <div
         className="flex flex-col bg-blue-900 border border-blue-800 rounded-none shadow-lg flex-1 overflow-visible"
         style={{ height: PANEL_H }}
       >
-        {/* Sticky header + tabs (stay on top, allow dropdowns above content) */}
-        <div className="sticky top-0 z-[60] bg-blue-900 border-b border-blue-800">
+        {/* Sticky top area with its own stacking context */}
+        <div className="sticky top-0 z-[200] bg-blue-900 border-b border-blue-800 isolate">
           <DashboardHeader
             projectName={projectName}
             userEmail={userEmail}
@@ -112,9 +113,9 @@ export default function MobileDashboard({
             refreshing={refreshing}
           />
 
-          {/* Tabs row (no overflow hidden; allow submenus/popovers) */}
+          {/* Tabs row — keep overflow visible to avoid clipping submenus */}
           <div className="w-full px-2 py-2">
-            <div className="flex gap-2 overflow-x-auto no-scrollbar relative z-[61]">
+            <div className="relative z-[201] flex gap-2 overflow-visible">
               <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
               <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
               <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
@@ -124,8 +125,8 @@ export default function MobileDashboard({
           </div>
         </div>
 
-        {/* Scrollable content below the sticky bar */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* Content sits UNDER the sticky bar */}
+        <div className="relative z-10 flex-1 min-h-0 overflow-y-auto">
           {activeMainTab === 'chat' && (
             <ChatTab
               activeMainTab={activeMainTab}
