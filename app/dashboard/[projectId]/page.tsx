@@ -183,7 +183,7 @@ export default function DashboardPage() {
     if (!projectId) return;
 
     const attachments = opts?.attachments ?? [];
-       const hasText = !!input.trim();
+    const hasText = !!input.trim();
     const hasFiles = attachments.length > 0;
     if (!hasText && !hasFiles) return;
 
@@ -324,13 +324,10 @@ export default function DashboardPage() {
     }
   };
 
-  // On phones let content flow; lock height only on md+
-  const PANEL_H_MD = 'calc(100dvh - 110px)';
-
   return (
-    <div className="min-h-[100dvh] bg-sky-800 text-white px-3 md:px-6 py-4 md:py-6">
+    <div className="min-h-[100dvh] bg-sky-800 px-3 py-4 text-white md:px-6 md:py-6">
       {/* bottom padding so the mobile action bar doesn't cover content */}
-      <div className="mx-auto grid w-full max-w-[1500px] grid-cols-12 gap-3 md:gap-4 pb-[84px] md:pb-0">
+      <div className="mx-auto grid w-full max-w-[1500px] grid-cols-12 gap-3 pb-[84px] md:gap-4 md:pb-0">
 
         {/* ===== Left Sidebar (hidden on mobile) ===== */}
         <div className="col-span-12 hidden md:col-span-3 md:block">
@@ -365,10 +362,9 @@ export default function DashboardPage() {
 
         {/* ===== Main panel (full width on mobile) ===== */}
         <div
-          className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-800 bg-blue-900 shadow-lg md:col-span-6"
+          className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-800 bg-blue-900 shadow-lg md:col-span-6 md:min-h-[calc(100dvh-110px)]"
         >
-          {/* lock height on md+ for nicer sticky behavior */}
-          <div className="md:h-[var(--panel-h)]" style={{ ['--panel-h' as any]: PANEL_H_MD }} />
+          {/* (removed the empty height spacer) */}
 
           <DashboardHeader
             projectName={projectName}
@@ -442,7 +438,7 @@ export default function DashboardPage() {
 
           {activeMainTab === 'functions' && <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />}
 
-          {activeMainTab === 'newfunction' && <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={'base'} />}
+          {activeMainTab === 'newfunction' && <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={'sm'} />}
 
           {activeMainTab === 'workshop' && <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />}
         </div>
