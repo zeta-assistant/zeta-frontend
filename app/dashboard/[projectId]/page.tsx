@@ -20,7 +20,7 @@ import DashboardHeader from '../dashboard-header/dashboard-header';
 import DiscussionsPanel from '../dashboard_tabs/dashboard_panels/Discussions/DiscussionsPanel';
 import LogsPanel from '../dashboard_tabs/dashboard_panels/Logs/LogsPanel';
 
-// ✅ Dynamic import of FilesPanel to avoid "lazy resolves to object" issues
+// ✅ Dynamic import of FilesPanel
 const FilesPanel = dynamic(
   () =>
     import('../dashboard_tabs/dashboard_panels/Files/FilesPanel').then(
@@ -414,13 +414,30 @@ export default function DashboardPage() {
                 refreshing={refreshing}
               />
 
+              {/* === Equal-width tabs on desktop === */}
               <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
-                <div className="flex gap-4 flex-nowrap">
-                  <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-                  <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-                  <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-                  <IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-                  <FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                <div
+                  className="
+                    grid grid-cols-5 gap-4
+                    [&_button]:w-full [&_button]:justify-center [&_button]:px-4
+                    [&_button]:whitespace-nowrap
+                  "
+                >
+                  <div className="min-w-0">
+                    <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  </div>
+                  <div className="min-w-0">
+                    <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  </div>
+                  <div className="min-w-0">
+                    <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  </div>
+                  <div className="min-w-0">
+                    <IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  </div>
+                  <div className="min-w-0">
+                    <FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  </div>
                 </div>
               </div>
 

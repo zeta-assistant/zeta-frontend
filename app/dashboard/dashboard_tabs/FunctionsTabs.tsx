@@ -12,33 +12,37 @@ export default function FunctionsTabs({ activeMainTab, setActiveMainTab }: Props
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  const tabs: { key: MainTab; label: string; locked?: boolean }[] = [
-    { key: 'functions', label: 'Custom Functions', locked: true },
-    { key: 'newfunction', label: 'New Function', locked: true },
-    { key: 'workshop', label: 'Workshop', locked: true },
+  const tabs: { key: MainTab; label: string }[] = [
+    { key: 'functions',   label: 'Custom Functions' },
+    { key: 'newfunction', label: 'New Function' },
+    { key: 'workshop',    label: 'Workshop' },
   ];
 
   return (
-    <div className="relative inline-block align-top flex-shrink-0">
+    // ✅ unified wrapper with full width for grid alignment
+    <div className="relative w-full min-w-0">
       <button
         ref={btnRef}
         onClick={() => setOpen(!open)}
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="menu"
         className={[
-          'inline-flex items-center gap-1 whitespace-nowrap flex-shrink-0',
-          'text-sm font-medium px-3 py-1.5 rounded-t-lg',
-          'bg-blue-800 text-purple-300 hover:bg-purple-600 hover:text-white'
+          // full-width consistent sizing
+          'inline-flex items-center justify-center w-full',
+          // uniform text + padding across all tabs
+          'text-sm font-medium px-4 py-1.5 rounded-t-lg whitespace-nowrap',
+          // consistent colors and hover states
+          'bg-blue-800 text-purple-300 hover:bg-purple-600 hover:text-white',
         ].join(' ')}
       >
-        <span>🛠 Functions</span>
-        <span className="ml-1 text-[9px] leading-none tracking-wide rounded px-1 py-[1px] bg-amber-500/20 text-amber-200 border border-amber-400/40">
-          BETA
-        </span>
+        <span className="mr-1">🛠️</span>
+        <span>Functions</span>
       </button>
 
       {open && (
         <div
-          className="absolute left-0 mt-1 z-50 bg-blue-950 border border-blue-700 rounded-lg shadow-lg"
-          style={{ width: btnRef.current?.offsetWidth }}
+          className="absolute left-0 z-[9999] mt-1 w-full bg-blue-950 border border-blue-700 rounded-lg shadow-lg overflow-hidden"
         >
           {tabs.map((tab) => {
             const isActive = activeMainTab === tab.key;
@@ -49,13 +53,13 @@ export default function FunctionsTabs({ activeMainTab, setActiveMainTab }: Props
                   setActiveMainTab(tab.key as MainTab);
                   setOpen(false);
                 }}
+                type="button"
                 className={[
-                  'block w-full text-left text-sm px-3 py-2 flex items-center gap-2',
+                  'block w-full text-left text-sm px-4 py-2 flex items-center gap-2',
                   'hover:bg-purple-700 hover:text-white',
-                  isActive ? 'bg-purple-600 text-white' : 'text-purple-300'
+                  isActive ? 'bg-purple-600 text-white' : 'text-purple-300',
                 ].join(' ')}
               >
-                
                 <span className="truncate">{tab.label}</span>
               </button>
             );
