@@ -55,6 +55,9 @@ import MessageButton from '../dashboard_buttons/message_button/message_button';
 import SettingsButton from '../dashboard_buttons/settings_button/settings_button';
 import UploadButton from '../dashboard_buttons/upload_button/upload_button';
 
+// ✅ Mobile-only compact dashboard
+import MobileDashboard from './MobileDashboard';
+
 type Uploaded = { file_name: string; file_url: string };
 
 export default function DashboardPage() {
@@ -81,7 +84,7 @@ export default function DashboardPage() {
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('sm');
   const [refreshNonce, setRefreshNonce] = useState(0);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const hasStartedRef = useRef(false);
 
   const router = useRouter();
@@ -103,6 +106,7 @@ export default function DashboardPage() {
     if (!projectId || hasStartedRef.current) return;
     hasStartedRef.current = true;
     checkSessionAndProject();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const checkSessionAndProject = async () => {
@@ -327,145 +331,178 @@ export default function DashboardPage() {
   const PANEL_H = 'calc(100vh - 110px)';
 
   return (
-    // ⬇️ FULL-WIDTH PAGE WRAPPER (no centering / no max-w)
-    <div className="min-h-screen bg-sky-800 text-white px-3 md:px-4 lg:px-6 py-6">
-      {/* ⬇️ ROW LAYOUT, LEFT-ALIGNED, NO MAX-W */}
-      <div className="flex w-full gap-4 justify-start items-stretch">
-        {/* Left Sidebar */}
-        <div
-          className="relative w-[350px] shrink-0 px-3 py-2 flex flex-col"
-          style={{ height: PANEL_H }}
-        >
-          <img
-            src={sendingMessage ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
-            alt={sendingMessage ? 'Zeta Thinking' : 'Zeta Mascot'}
-            className="w-[250px] absolute top-0 left-1/2 -translate-x-1/2"
-          />
+    <>
+      {/* MOBILE: header + tabs + center panel only */}
+      <MobileDashboard
+        projectName={projectName}
+        userEmail={userEmail}
+        projectId={projectId}
+        threadId={threadId}
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+        chatView={chatView}
+        setChatView={setChatView}
+        chatHidden={chatHidden}
+        setChatHidden={setChatHidden}
+        messages={messages}
+        loading={loading}
+        input={input}
+        setInput={setInput}
+        handleKeyDown={handleKeyDown}
+        sendMessage={sendMessage}
+        scrollRef={scrollRef}
+        fontSize={fontSize}
+        setFontSize={setFontSize}
+        refreshAll={refreshAll}
+        refreshing={refreshing}
+        recentDocs={recentDocs}
+      />
 
-          <div className="absolute top-4 left-[300px] z-30 flex flex-col gap-2 items-center">
-            <SettingsButton
-              projectId={String(projectId)}
-              selectedModelId={selectedModelId}
-              setSelectedModelId={setSelectedModelId}
-            />
-            <ThoughtButton projectId={projectId} />
-            <MessageButton projectId={projectId} />
-            <UploadButton
-              projectId={projectId}
-              onUploaded={async () => {
-                await fetchRecentDocs();
-                setRefreshNonce((n) => n + 1);
-              }}
-            />
-          </div>
+      {/* DESKTOP/TABLET: full layout with side panels & floating buttons */}
+      <div className="hidden md:block">
+        {/* ⬇️ FULL-WIDTH PAGE WRAPPER (no centering / no max-w) */}
+        <div className="min-h-screen bg-sky-800 text-white px-3 md:px-4 lg:px-6 py-6">
+          {/* ⬇️ ROW LAYOUT, LEFT-ALIGNED, NO MAX-W */}
+          <div className="flex w-full gap-4 justify-start items-stretch">
+            {/* Left Sidebar */}
+            <div
+              className="relative w-[350px] shrink-0 px-3 py-2 flex flex-col"
+              style={{ height: PANEL_H }}
+            >
+              <img
+                src={sendingMessage ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
+                alt={sendingMessage ? 'Zeta Thinking' : 'Zeta Mascot'}
+                className="w-[250px] absolute top-0 left-1/2 -translate-x-1/2"
+              />
 
-          <ZetaLeftSidePanel key={`left-${refreshNonce}`} projectId={projectId} />
-        </div>
+              <div className="absolute top-4 left-[300px] z-30 flex flex-col gap-2 items-center">
+                <SettingsButton
+                  projectId={String(projectId)}
+                  selectedModelId={selectedModelId}
+                  setSelectedModelId={setSelectedModelId}
+                />
+                <ThoughtButton projectId={projectId} />
+                <MessageButton projectId={projectId} />
+                <UploadButton
+                  projectId={projectId}
+                  onUploaded={async () => {
+                    await fetchRecentDocs();
+                    setRefreshNonce((n) => n + 1);
+                  }}
+                />
+              </div>
 
-        {/* Main panel */}
-        <div
-          className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg min-h-0 overflow-hidden"
-          style={{ height: PANEL_H }}
-        >
-          <DashboardHeader
-            projectName={projectName}
-            userEmail={userEmail}
-            projectId={projectId}
-            threadId={threadId}
-            showAgentMenu={showAgentMenu}
-            setShowAgentMenu={setShowAgentMenu}
-            handleLogout={handleLogout}
-            onRefresh={refreshAll}
-            refreshing={refreshing}
-          />
+              <ZetaLeftSidePanel key={`left-${refreshNonce}`} projectId={projectId} />
+            </div>
 
-          <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
-            <div className="flex gap-4 flex-nowrap">
-              <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              <IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              <FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+            {/* Main panel */}
+            <div
+              className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg min-h-0 overflow-hidden"
+              style={{ height: PANEL_H }}
+            >
+              <DashboardHeader
+                projectName={projectName}
+                userEmail={userEmail}
+                projectId={projectId}
+                threadId={threadId}
+                showAgentMenu={showAgentMenu}
+                setShowAgentMenu={setShowAgentMenu}
+                handleLogout={handleLogout}
+                onRefresh={refreshAll}
+                refreshing={refreshing}
+              />
+
+              <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
+                <div className="flex gap-4 flex-nowrap">
+                  <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  <IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                  <FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                </div>
+              </div>
+
+              {activeMainTab === 'chat' && (
+                <ChatTab
+                  key={`chat-${refreshNonce}`}
+                  activeMainTab={activeMainTab}
+                  chatView={chatView}
+                  setChatView={setChatView}
+                  chatHidden={chatHidden}
+                  setChatHidden={setChatHidden}
+                  messages={messages}
+                  loading={loading}
+                  input={input}
+                  setInput={setInput}
+                  handleKeyDown={handleKeyDown}
+                  sendMessage={sendMessage}
+                  scrollRef={scrollRef}
+                  fontSize={fontSize}
+                  setFontSize={setFontSize}
+                  projectId={projectId}
+                  onRefresh={refreshAll}
+                  refreshing={refreshing}
+                />
+              )}
+
+              {activeMainTab === 'discussions' && (
+                <DiscussionsPanel key={`discussions-${refreshNonce}`} fontSize={fontSize} />
+              )}
+
+              {/* 🌐 Connections */}
+              {activeMainTab === 'connections' && (
+                <ConnectionsPanel key={`connections-${refreshNonce}`} projectId={projectId} />
+              )}
+
+              {activeMainTab === 'logs' && <LogsPanel key="Logs" fontSize={fontSize} projectId={projectId} />}
+
+              {activeMainTab === 'files' && (
+                <FilesPanel
+                  key={`files-${refreshNonce}`}
+                  recentDocs={recentDocs}
+                  fontSize={fontSize}
+                  projectId={projectId}
+                />
+              )}
+
+              {activeMainTab === 'apis' && <ApisPanel key={`apis-${refreshNonce}`} fontSize={fontSize} projectId={projectId} />}
+
+              {activeMainTab === 'calendar' && <CalendarPanel key={`calendar-${refreshNonce}`} fontSize={fontSize} />}
+
+              {activeMainTab === 'goals' && <GoalsPanel key={`goals-${refreshNonce}`} fontSize="base" projectId={projectId} />}
+
+              {activeMainTab === 'notifications' && (
+                <NotificationsPanel key={`notifications-${refreshNonce}`} projectId={projectId} />
+              )}
+
+              {activeMainTab === 'tasks' && <TasksPanel key={`tasks-${refreshNonce}`} fontSize={fontSize} userName={userName} />}
+
+              {activeMainTab === 'thoughts' && (
+                <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
+              )}
+
+              {activeMainTab === 'timeline' && <TimelinePanel key={`timeline-${refreshNonce}`} projectId={projectId} />}
+
+              {activeMainTab === 'functions' && (
+                <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
+              )}
+
+              {activeMainTab === 'newfunction' && (
+                <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
+              )}
+
+              {activeMainTab === 'workshop' && (
+                <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />
+              )}
+            </div>
+
+            {/* Right sidebar */}
+            <div className="w-[380px] shrink-0" style={{ height: PANEL_H }}>
+              <ZetaRightSidePanel key={`right-${refreshNonce}`} userEmail={userEmail} projectId={projectId} />
             </div>
           </div>
-
-          {activeMainTab === 'chat' && (
-            <ChatTab
-              key={`chat-${refreshNonce}`}
-              activeMainTab={activeMainTab}
-              chatView={chatView}
-              setChatView={setChatView}
-              chatHidden={chatHidden}
-              setChatHidden={setChatHidden}
-              messages={messages}
-              loading={loading}
-              input={input}
-              setInput={setInput}
-              handleKeyDown={handleKeyDown}
-              sendMessage={sendMessage}
-              scrollRef={scrollRef}
-              fontSize={fontSize}
-              setFontSize={setFontSize}
-              projectId={projectId}
-              onRefresh={refreshAll}
-              refreshing={refreshing}
-            />
-          )}
-
-          {activeMainTab === 'discussions' && (
-            <DiscussionsPanel key={`discussions-${refreshNonce}`} fontSize={fontSize} />
-          )}
-
-          {/* 🌐 Connections */}
-          {activeMainTab === 'connections' && (
-            <ConnectionsPanel key={`connections-${refreshNonce}`} projectId={projectId} />
-          )}
-
-          {activeMainTab === 'logs' && <LogsPanel key="Logs" fontSize={fontSize} projectId={projectId} />}
-
-          {activeMainTab === 'files' && (
-            <FilesPanel
-              key={`files-${refreshNonce}`}
-              recentDocs={recentDocs}
-              fontSize={fontSize}
-              projectId={projectId}
-            />
-          )}
-
-          {activeMainTab === 'apis' && <ApisPanel key={`apis-${refreshNonce}`} fontSize={fontSize} projectId={projectId} />}
-
-          {activeMainTab === 'calendar' && <CalendarPanel key={`calendar-${refreshNonce}`} fontSize={fontSize} />}
-
-          {activeMainTab === 'goals' && <GoalsPanel key={`goals-${refreshNonce}`} fontSize="base" projectId={projectId} />}
-
-          {activeMainTab === 'notifications' && (
-            <NotificationsPanel key={`notifications-${refreshNonce}`} projectId={projectId} />
-          )}
-
-          {activeMainTab === 'tasks' && <TasksPanel key={`tasks-${refreshNonce}`} fontSize={fontSize} userName={userName} />}
-
-          {activeMainTab === 'thoughts' && (
-            <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
-          )}
-
-          {activeMainTab === 'timeline' && <TimelinePanel key={`timeline-${refreshNonce}`} projectId={projectId} />}
-
-          {activeMainTab === 'functions' && (
-            <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
-          )}
-
-          {activeMainTab === 'newfunction' && (
-            <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
-          )}
-
-          {activeMainTab === 'workshop' && <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />}
-        </div>
-
-        {/* Right sidebar */}
-        <div className="w-[380px] shrink-0" style={{ height: PANEL_H }}>
-          <ZetaRightSidePanel key={`right-${refreshNonce}`} userEmail={userEmail} projectId={projectId} />
         </div>
       </div>
-    </div>
+    </>
   );
 }
