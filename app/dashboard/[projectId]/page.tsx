@@ -333,35 +333,37 @@ export default function DashboardPage() {
   return (
     <>
       {/* MOBILE: header + tabs + center panel only */}
-      <MobileDashboard
-        projectName={projectName}
-        userEmail={userEmail}
-        projectId={projectId}
-        threadId={threadId}
-        activeMainTab={activeMainTab}
-        setActiveMainTab={setActiveMainTab}
-        chatView={chatView}
-        setChatView={setChatView}
-        chatHidden={chatHidden}
-        setChatHidden={setChatHidden}
-        messages={messages}
-        loading={loading}
-        input={input}
-        setInput={setInput}
-        handleKeyDown={handleKeyDown}
-        sendMessage={sendMessage}
-        scrollRef={scrollRef}
-        fontSize={fontSize}
-        setFontSize={setFontSize}
-        refreshAll={refreshAll}
-        refreshing={refreshing}
-        recentDocs={recentDocs}
-      />
+      <div className="md:hidden">
+        <MobileDashboard
+          projectName={projectName}
+          userEmail={userEmail}
+          projectId={projectId}
+          threadId={threadId}
+          activeMainTab={activeMainTab}
+          setActiveMainTab={setActiveMainTab}
+          chatView={chatView}
+          setChatView={setChatView}
+          chatHidden={chatHidden}
+          setChatHidden={setChatHidden}
+          messages={messages}
+          loading={loading}
+          input={input}
+          setInput={setInput}
+          handleKeyDown={handleKeyDown}
+          sendMessage={sendMessage}
+          scrollRef={scrollRef}
+          fontSize={fontSize}
+          setFontSize={setFontSize}
+          refreshAll={refreshAll}
+          refreshing={refreshing}
+          recentDocs={recentDocs}
+        />
+      </div>
 
       {/* DESKTOP/TABLET: full layout with side panels & floating buttons */}
-      <div className="hidden md:block">
+      <div className="hidden md:flex">
         {/* ⬇️ FULL-WIDTH PAGE WRAPPER (no centering / no max-w) */}
-        <div className="min-h-screen bg-sky-800 text-white px-3 md:px-4 lg:px-6 py-6">
+        <div className="min-h-screen w-full bg-sky-800 text-white px-3 md:px-4 lg:px-6 py-6">
           {/* ⬇️ ROW LAYOUT, LEFT-ALIGNED, NO MAX-W */}
           <div className="flex w-full gap-4 justify-start items-stretch">
             {/* Left Sidebar */}
