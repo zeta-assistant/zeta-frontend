@@ -4,7 +4,6 @@ import React, { RefObject } from 'react';
 import dynamic from 'next/dynamic';
 import { MainTab } from '@/types/MainTab';
 
-import DashboardHeader from '../dashboard-header/dashboard-header';
 import ChatboardTab from '../dashboard_tabs/ChatboardTab';
 import WorkspaceTabs from '../dashboard_tabs/WorkspaceTabs';
 import PlannerTabs from '../dashboard_tabs/PlannerTabs';
@@ -37,18 +36,15 @@ type Uploaded = { file_name: string; file_url: string };
 
 type Props = {
   projectName: string;
-  userEmail: string | null;
+  userEmail: string | null; // unused on mobile
   projectId: string;
-  threadId: string | null;
-
+  threadId: string | null;  // unused on mobile
   activeMainTab: MainTab;
   setActiveMainTab: React.Dispatch<React.SetStateAction<MainTab>>;
-
   chatView: 'all' | 'today' | 'pinned';
   setChatView: React.Dispatch<React.SetStateAction<'all' | 'today' | 'pinned'>>;
   chatHidden: boolean;
   setChatHidden: React.Dispatch<React.SetStateAction<boolean>>;
-
   messages: any[];
   loading: boolean;
   input: string;
@@ -58,19 +54,14 @@ type Props = {
   scrollRef: RefObject<HTMLDivElement | null>;
   fontSize: 'sm' | 'base' | 'lg';
   setFontSize: React.Dispatch<React.SetStateAction<'sm' | 'base' | 'lg'>>;
-
   refreshAll: () => Promise<void>;
   refreshing: boolean;
-
   recentDocs: Uploaded[];
 };
 
 export default function MobileDashboard({
   projectName,
-  // we’ll hide email + ids in the header by passing nulls
-  userEmail: _unusedUserEmail,
   projectId,
-  threadId: _unusedThreadId,
   activeMainTab,
   setActiveMainTab,
   chatView,
@@ -91,43 +82,55 @@ export default function MobileDashboard({
   recentDocs,
 }: Props) {
   return (
-    // page bg
     <div className="md:hidden min-h-[100svh] w-full bg-sky-800 text-white">
-      {/* main card */}
       <div
         className="flex flex-col w-full h-[100svh] bg-blue-900 border border-blue-800 shadow-lg overflow-visible"
-        style={{
-          paddingBottom: 'env(safe-area-inset-bottom)',
-        }}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        {/* Sticky header + tabs — high z-index, own stacking context */}
+        {/* ==== Compact Mobile Header (no clock, no 'Zeta Dashboard' text) ==== */}
         <div className="sticky top-0 z-[200] bg-blue-900 border-b border-blue-800 isolate">
-          <DashboardHeader
-            projectName={projectName}
-            // hide email + ids on mobile by passing nulls
-            userEmail={null}
-            projectId={projectId}      // still needed for API calls elsewhere, not displayed by header when userEmail/threadId are null
-            threadId={null}
-            showAgentMenu={false}
-            setShowAgentMenu={() => {}}
-            handleLogout={() => {}}
-            onRefresh={refreshAll}
-            refreshing={refreshing}
-          />
+          <div className="flex items-center gap-3 px-3 py-2">
+            <img
+              src="/zeta-avatar.svg"
+              alt="Zeta"
+              className="h-7 w-7 rounded-full shrink-0"
+            />
+            <div className="font-semibold truncate">{projectName}</div>
+            {/* spacer */}
+            <div className="ml-auto text-xs opacity-70">
+              {/* optional refresh button for mobile */}
+              <button
+                onClick={refreshAll}
+                disabled={refreshing}
+                className="px-2 py-1 rounded-md bg-blue-800 border border-blue-700"
+              >
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+          </div>
 
-          {/* Equal-width main tabs that fit the screen */}
+          {/* ==== Main Tabs (equal width) ==== */}
           <div className="px-2 pb-2">
-            <div className="flex gap-2 text-sm">
-              <div className="flex-1 min-w-0"><ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
-              <div className="flex-1 min-w-0"><WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
-              <div className="flex-1 min-w-0"><PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
-              <div className="flex-1 min-w-0"><IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
-              <div className="flex-1 min-w-0"><FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+            {/* 
+              Make every button inside stretch and use smaller text so labels fit:
+              - equal columns via grid-cols-5
+              - force inner <button> width, center, and font-size using :where selectors
+            */}
+            <div className="
+              grid grid-cols-5 gap-2
+              [&_button]:w-full [&_button]:justify-center [&_button]:px-2
+              [&_*]:text-[13px] [&_*]:leading-5
+              ">
+              <div><ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+              <div><WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+              <div><PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+              <div><IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+              <div><FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
             </div>
           </div>
         </div>
 
-        {/* Content UNDER the sticky block; allow menus to overlap it */}
+        {/* ==== Content UNDER the sticky header (dropdowns will overlap) ==== */}
         <div className="relative z-10 flex-1 min-h-0 overflow-y-auto">
           {activeMainTab === 'chat' && (
             <ChatTab
