@@ -19,19 +19,13 @@ import DashboardHeader from '../dashboard-header/dashboard-header';
 
 import DiscussionsPanel from '../dashboard_tabs/dashboard_panels/Discussions/DiscussionsPanel';
 import LogsPanel from '../dashboard_tabs/dashboard_panels/Logs/LogsPanel';
-// ✅ Dynamic import of FilesPanel to avoid "lazy resolves to object" issues
+
+// ✅ Dynamic import of FilesPanel
 const FilesPanel = dynamic(
-  () =>
-    import('../dashboard_tabs/dashboard_panels/Files/FilesPanel').then(
-      (m) => m.default || (m as any)
-    ),
+  () => import('../dashboard_tabs/dashboard_panels/Files/FilesPanel').then((m) => m.default || (m as any)),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-[320px] text-sm text-blue-200">
-        Loading Files…
-      </div>
-    ),
+    loading: () => <div className="flex h-[320px] items-center justify-center text-sm text-blue-200">Loading Files…</div>,
   }
 );
 
@@ -105,7 +99,10 @@ export default function DashboardPage() {
   }, [projectId]);
 
   const checkSessionAndProject = async () => {
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
     if (sessionError || !session?.user?.email) return router.push('/login');
     setUserEmail(session.user.email);
 
@@ -157,9 +154,7 @@ export default function DashboardPage() {
         if (updated && updated.length > 0) {
           setMessages(updated.map((m) => ({ role: m.role, content: m.message })));
         } else {
-          setMessages([
-            { role: 'assistant', content: '⚠️ Zeta failed to respond. Try typing something to get started.' },
-          ]);
+          setMessages([{ role: 'assistant', content: '⚠️ Zeta failed to respond. Try typing something to get started.' }]);
         }
       }, 3000);
     }
@@ -194,10 +189,7 @@ export default function DashboardPage() {
       didTimeout = true;
       controller.abort();
       setSendingMessage(false);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: '⚠️ Request timed out. Please try again.' },
-      ]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ Request timed out. Please try again.' }]);
     }, 90_000);
 
     const sentText = input;
@@ -211,7 +203,10 @@ export default function DashboardPage() {
     setInput('');
 
     try {
-      const { data: { session }, error } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
       if (error || !session?.access_token || !session?.user?.id) {
         clearTimeout(timeoutId);
         setSendingMessage(false);
@@ -323,47 +318,55 @@ export default function DashboardPage() {
     }
   };
 
-  const PANEL_H = 'calc(100vh - 110px)';
+  // 👉 On phones let content size itself; on md+ lock panel height.
+  const PANEL_H_MD = 'calc(100dvh - 110px)';
 
   return (
-    <div className="min-h-screen bg-sky-800 text-white px-6 py-6 flex flex-col items-center">
-      <div className="flex w-full max-w-[1500px] gap-4 justify-start px-2 items-stretch">
-        {/* Left Sidebar */}
-        <div
-  className="relative w-[350px] shrink-0 px-3 py-2 flex flex-col"
-  style={{ height: PANEL_H }}
->
-          <img
-            src={sendingMessage ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
-            alt={sendingMessage ? 'Zeta Thinking' : 'Zeta Mascot'}
-            className="w-[250px] absolute top-0 left-1/2 -translate-x-1/2"
-          />
+    <div className="min-h-[100dvh] bg-sky-800 px-3 py-4 text-white md:px-6 md:py-6">
+      <div className="mx-auto grid w-full max-w-[1500px] grid-cols-12 gap-3 md:gap-4">
+        {/* ===== Left Sidebar (stacks on mobile) ===== */}
+        <div className="col-span-12 md:col-span-3">
+          <div className="relative flex w-full flex-col rounded-2xl px-3 py-2 md:sticky md:top-[88px]" style={{ height: undefined }}>
+            {/* Mascot — responsive on mobile; larger on md+ */}
+            <img
+              src={sendingMessage ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
+              alt={sendingMessage ? 'Zeta Thinking' : 'Zeta Mascot'}
+              className="mx-auto mt-2 w-40 max-w-full md:absolute md:left-1/2 md:top-0 md:w-[250px] md:-translate-x-1/2"
+            />
 
-          <div className="absolute top-4 left-[300px] z-30 flex flex-col gap-2 items-center">
-            <SettingsButton
-              projectId={String(projectId)}
-              selectedModelId={selectedModelId}
-              setSelectedModelId={setSelectedModelId}
-            />
-            <ThoughtButton projectId={projectId} />
-            <MessageButton projectId={projectId} />
-            <UploadButton
-              projectId={projectId}
-              onUploaded={async () => {
-                await fetchRecentDocs();
-                setRefreshNonce((n) => n + 1);
-              }}
-            />
+            {/* Icon rail — hidden on mobile */}
+            <div className="absolute right-[-10px] top-4 z-30 hidden flex-col items-center gap-2 md:flex">
+              <SettingsButton
+                projectId={String(projectId)}
+                selectedModelId={selectedModelId}
+                setSelectedModelId={setSelectedModelId}
+              />
+              <ThoughtButton projectId={projectId} />
+              <MessageButton projectId={projectId} />
+              <UploadButton
+                projectId={projectId}
+                onUploaded={async () => {
+                  await fetchRecentDocs();
+                  setRefreshNonce((n) => n + 1);
+                }}
+              />
+            </div>
+
+            {/* Left info cards */}
+            <div className="mt-3 md:mt-[220px]">
+              <ZetaLeftSidePanel key={`left-${refreshNonce}`} projectId={projectId} />
+            </div>
           </div>
-
-          <ZetaLeftSidePanel key={`left-${refreshNonce}`} projectId={projectId} />
         </div>
 
-        {/* Main panel */}
+        {/* ===== Main panel ===== */}
         <div
-          className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg min-h-0 overflow-hidden"
-          style={{ height: PANEL_H }}
+          className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-800 bg-blue-900 shadow-lg md:col-span-6"
+          style={{ height: undefined, maxHeight: undefined }}
         >
+          {/* On md+ constrain height so header sticks nicely */}
+          <div className="md:h-[var(--panel-h)]" style={{ ['--panel-h' as any]: PANEL_H_MD }} />
+
           <DashboardHeader
             projectName={projectName}
             userEmail={userEmail}
@@ -376,8 +379,8 @@ export default function DashboardPage() {
             refreshing={refreshing}
           />
 
-          <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
-            <div className="flex gap-4 flex-nowrap">
+          <div className="relative z-30 mt-4 w-full border-b border-blue-700 px-3 md:px-6">
+            <div className="flex flex-wrap gap-3 md:flex-nowrap md:gap-4">
               <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
               <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
               <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
@@ -409,24 +412,15 @@ export default function DashboardPage() {
             />
           )}
 
-          {activeMainTab === 'discussions' && (
-            <DiscussionsPanel key={`discussions-${refreshNonce}`} fontSize={fontSize} />
-          )}
+          {activeMainTab === 'discussions' && <DiscussionsPanel key={`discussions-${refreshNonce}`} fontSize={fontSize} />}
 
           {/* 🌐 Connections */}
-          {activeMainTab === 'connections' && (
-            <ConnectionsPanel key={`connections-${refreshNonce}`} projectId={projectId} />
-          )}
+          {activeMainTab === 'connections' && <ConnectionsPanel key={`connections-${refreshNonce}`} projectId={projectId} />}
 
           {activeMainTab === 'logs' && <LogsPanel key="Logs" fontSize={fontSize} projectId={projectId} />}
 
           {activeMainTab === 'files' && (
-            <FilesPanel
-              key={`files-${refreshNonce}`}
-              recentDocs={recentDocs}
-              fontSize={fontSize}
-              projectId={projectId}
-            />
+            <FilesPanel key={`files-${refreshNonce}`} recentDocs={recentDocs} fontSize={fontSize} projectId={projectId} />
           )}
 
           {activeMainTab === 'apis' && <ApisPanel key={`apis-${refreshNonce}`} fontSize={fontSize} projectId={projectId} />}
@@ -435,31 +429,46 @@ export default function DashboardPage() {
 
           {activeMainTab === 'goals' && <GoalsPanel key={`goals-${refreshNonce}`} fontSize="base" projectId={projectId} />}
 
-          {activeMainTab === 'notifications' && (
-            <NotificationsPanel key={`notifications-${refreshNonce}`} projectId={projectId} />
-          )}
+          {activeMainTab === 'notifications' && <NotificationsPanel key={`notifications-${refreshNonce}`} projectId={projectId} />}
 
           {activeMainTab === 'tasks' && <TasksPanel key={`tasks-${refreshNonce}`} fontSize={fontSize} userName={userName} />}
 
-          {activeMainTab === 'thoughts' && (
-            <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
-          )}
+          {activeMainTab === 'thoughts' && <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />}
 
           {activeMainTab === 'timeline' && <TimelinePanel key={`timeline-${refreshNonce}`} projectId={projectId} />}
 
-          {activeMainTab === 'functions' && (
-            <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
-          )}
+          {activeMainTab === 'functions' && <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />}
 
-          {activeMainTab === 'newfunction' && (
-            <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
-          )}
+          {activeMainTab === 'newfunction' && <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={'sm'} />}
 
           {activeMainTab === 'workshop' && <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />}
         </div>
 
-        <ZetaRightSidePanel key={`right-${refreshNonce}`} userEmail={userEmail} projectId={projectId} />
+        {/* ===== Right Panel (hidden on mobile) ===== */}
+        <div className="col-span-12 hidden md:col-span-3 md:block">
+          <ZetaRightSidePanel key={`right-${refreshNonce}`} userEmail={userEmail} projectId={projectId} />
+        </div>
       </div>
+
+      {/* ===== Mobile Action Bar (replaces right-rail) ===== */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-white/90 px-3 py-2 text-slate-900 backdrop-blur md:hidden">
+        <div className="mx-auto grid w-full max-w-[740px] grid-cols-4 gap-2">
+          <SettingsButton
+            projectId={String(projectId)}
+            selectedModelId={selectedModelId}
+            setSelectedModelId={setSelectedModelId}
+          />
+          <ThoughtButton projectId={projectId} />
+          <MessageButton projectId={projectId} />
+          <UploadButton
+            projectId={projectId}
+            onUploaded={async () => {
+              await fetchRecentDocs();
+              setRefreshNonce((n) => n + 1);
+            }}
+          />
+        </div>
+      </nav>
     </div>
   );
 }
