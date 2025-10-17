@@ -18,7 +18,7 @@ type Props = {
   refreshing?: boolean;
 };
 
-/** Centered, pretty plan pill (hidden on mobile by parent) */
+/** Centered plan/billing pill (hidden text tweaks on mobile) */
 function PlanPill({
   plan,
   onClick,
@@ -103,9 +103,9 @@ export default function DashboardHeader({
 
   return (
     <>
-      {/* Top header */}
+      {/* ===== Top bar: brand, clock, project title ===== */}
       <div className="flex flex-wrap items-center gap-3 border-b border-blue-700 px-4 py-3 md:px-6 md:py-4">
-        {/* Brand + menu */}
+        {/* Brand + Agent menu */}
         <div className="relative flex min-w-0 items-center gap-2">
           <button
             className="flex items-center gap-2"
@@ -118,92 +118,89 @@ export default function DashboardHeader({
               alt="Pantheon Logo"
               className="h-8 w-8 rounded-xl shadow-md transition-transform hover:scale-105"
             />
-            <h1 className="truncate text-xl font-semibold hover:underline">Zeta Dashboard</h1>
+            <span className="truncate text-xl font-semibold hover:underline">Zeta Dashboard</span>
           </button>
 
-        {/* Hide the live clock on very small screens to save space */}
           <div className="ml-2 hidden sm:block">
             <Clock />
           </div>
 
           {showAgentMenu && (
             <div className="absolute left-0 top-[105%] z-50 w-52 rounded-xl border border-indigo-300 bg-indigo-100 text-sm text-indigo-900 shadow-lg">
-              <div className="rounded-t-xl border-b border-indigo-300 px-4 py-2 text-center font-semibold bg-indigo-200">
+              <div className="rounded-t-xl border-b border-indigo-300 bg-indigo-200 px-4 py-2 text-center font-semibold">
                 Choose Agent
               </div>
               <div className="cursor-pointer px-4 py-2 text-center font-medium hover:bg-indigo-300">
-                ⚡ Zeta <span className="ml-1 text-xs text-gray-600">(currently selected)</span>
+                ⚡ Zeta <span className="ml-1 text-xs text-gray-600">(selected)</span>
               </div>
               <div className="cursor-not-allowed px-4 py-2 text-center opacity-60 hover:bg-indigo-300">
-                📚 Theta <span className="ml-1 text-xs text-gray-600">coming soon...</span>
+                📚 Theta <span className="ml-1 text-xs text-gray-600">coming soon…</span>
               </div>
               <div className="cursor-not-allowed rounded-b-xl px-4 py-2 text-center opacity-60 hover:bg-indigo-300">
-                ❤️ Delta <span className="ml-1 text-xs text-gray-600">coming soon...</span>
+                ❤️ Delta <span className="ml-1 text-xs text-gray-600">coming soon…</span>
               </div>
             </div>
           )}
         </div>
 
-        {/* Project title (wraps nicely) */}
-        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold">
-          ⚡ {projectName}
-        </h1>
+        {/* Project title */}
+        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold">⚡ {projectName}</h1>
 
-        {/* Controls (always visible) */}
-        <div className="flex items-center gap-2">
-          <RefreshButton
-            variant="inline"
-            onRefresh={onRefresh ?? (async () => {})}
-            refreshing={refreshing ?? false}
-            className="!text-xs"
-          />
-          <button
-            onClick={() => router.push('/projects')}
-            className="rounded-md bg-purple-500 px-3 py-1 text-xs text-white hover:bg-purple-600"
-            title={`Projects ${used}/${limit}`}
-          >
-            Projects
-          </button>
-          <button
-            onClick={handleLogout}
-            className="rounded-md bg-red-500 px-3 py-1 text-xs text-white hover:bg-red-600"
-          >
-            Log Out
-          </button>
-        </div>
+        {/* (Right side intentionally kept empty so top row stays uncluttered) */}
+        <div className="hidden md:block w-10" />
       </div>
 
-      {/* IDs + Plan pill row */}
-      {userEmail && (
-        <div className="px-4 pb-2 pt-1 text-[10px] text-gray-400 md:px-6">
-          <div className="grid grid-cols-1 items-center gap-2 md:grid-cols-3">
-            {/* LEFT: IDs */}
-            <div className="space-y-0.5 leading-tight">
+      {/* ===== Second row: IDs (left) • Plan pill (center) • Controls (right) ===== */}
+      <div className="px-4 pb-2 pt-2 text-[10px] text-gray-300 md:px-6">
+        <div className="grid grid-cols-1 items-center gap-3 md:grid-cols-3">
+          {/* LEFT: IDs */}
+          <div className="space-y-0.5 leading-tight">
+            {userEmail && (
               <p>
                 <span className="font-semibold">👤</span> {userEmail}
               </p>
+            )}
+            <p className="truncate">
+              <span className="font-semibold">📁</span>{' '}
+              <span className="font-mono break-all">{projectId}</span>
+            </p>
+            {threadId && (
               <p className="truncate">
-                <span className="font-semibold">📁</span>{' '}
-                <span className="font-mono break-all">{projectId}</span>
+                <span className="font-semibold">🧵</span>{' '}
+                <span className="font-mono break-all">{threadId}</span>
               </p>
-              {threadId && (
-                <p className="truncate">
-                  <span className="font-semibold">🧵</span>{' '}
-                  <span className="font-mono break-all">{threadId}</span>
-                </p>
-              )}
-            </div>
+            )}
+          </div>
 
-            {/* MIDDLE: Plan pill (hidden on mobile) */}
-            <div className="hidden items-center justify-center md:flex">
-              <PlanPill plan={plan} onClick={() => router.push('/settings')} />
-            </div>
+          {/* CENTER: Plan pill */}
+          <div className="flex items-center justify-center">
+            <PlanPill plan={plan} onClick={() => router.push('/settings')} />
+          </div>
 
-            {/* RIGHT: (empty spacer on md to keep symmetry) */}
-            <div className="hidden md:block" />
+          {/* RIGHT: Controls (Refresh • Projects • Log Out) */}
+          <div className="flex flex-wrap items-center justify-start gap-2 md:justify-end">
+            <RefreshButton
+              variant="inline"
+              onRefresh={onRefresh ?? (async () => {})}
+              refreshing={refreshing ?? false}
+              className="!text-xs"
+            />
+            <button
+              onClick={() => router.push('/projects')}
+              className="rounded-md bg-purple-500 px-3 py-1 text-xs font-medium text-white hover:bg-purple-600"
+              title={`Projects ${used}/${limit}`}
+            >
+              Projects
+            </button>
+            <button
+              onClick={handleLogout}
+              className="rounded-md bg-red-500 px-3 py-1 text-xs font-medium text-white hover:bg-red-600"
+            >
+              Log Out
+            </button>
           </div>
         </div>
-      )}
+      </div>
     </>
   );
 }
