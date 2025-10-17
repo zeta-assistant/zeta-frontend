@@ -18,7 +18,7 @@ type Props = {
   refreshing?: boolean;
 };
 
-/** Centered, pretty plan pill */
+/** Centered, pretty plan pill (hidden on mobile by parent) */
 function PlanPill({
   plan,
   onClick,
@@ -45,7 +45,7 @@ function PlanPill({
         text: 'text-emerald-100',
         ping: 'bg-emerald-300',
         dot: 'bg-emerald-400',
-        
+        emoji: '🟢',
         label: 'User Subscription',
       };
 
@@ -62,19 +62,13 @@ function PlanPill({
         'text-xs font-semibold', tone.text,
       ].join(' ')}
     >
-      {/* animated status dot */}
       <span className="relative flex h-2.5 w-2.5">
         <span className={['absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping', tone.ping].join(' ')} />
         <span className={['relative inline-flex h-2.5 w-2.5 rounded-full', tone.dot].join(' ')} />
       </span>
       <span aria-hidden className="leading-none">{tone.emoji}</span>
-      <span>{tone.label}</span>
-      <svg
-        aria-hidden
-        viewBox="0 0 20 20"
-        className="h-3.5 w-3.5 opacity-80"
-        fill="currentColor"
-      >
+      <span className="whitespace-nowrap">{tone.label}</span>
+      <svg aria-hidden viewBox="0 0 20 20" className="h-3.5 w-3.5 opacity-80" fill="currentColor">
         <path d="M7.05 5.293a1 1 0 011.414 0L12.172 9l-3.707 3.707a1 1 0 01-1.414-1.414L9.343 9 7.05 6.707a1 1 0 010-1.414z" />
       </svg>
     </button>
@@ -109,98 +103,104 @@ export default function DashboardHeader({
 
   return (
     <>
-      {/* 🧠 Top header */}
-      <div className="flex items-center px-6 py-4 border-b border-blue-700">
-        <div className="relative flex items-center gap-4 shrink-0">
-          <div
-            className="relative flex items-center gap-2 cursor-pointer"
+      {/* Top header */}
+      <div className="flex flex-wrap items-center gap-3 border-b border-blue-700 px-4 py-3 md:px-6 md:py-4">
+        {/* Brand + menu */}
+        <div className="relative flex min-w-0 items-center gap-2">
+          <button
+            className="flex items-center gap-2"
             onClick={() => setShowAgentMenu((prev) => !prev)}
+            aria-expanded={showAgentMenu}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/pantheon.png"
               alt="Pantheon Logo"
-              className="w-8 h-8 rounded-xl shadow-md hover:scale-105 transition-transform"
+              className="h-8 w-8 rounded-xl shadow-md transition-transform hover:scale-105"
             />
-            <h1 className="text-xl font-semibold whitespace-nowrap hover:underline">
-              Zeta Dashboard
-            </h1>
+            <h1 className="truncate text-xl font-semibold hover:underline">Zeta Dashboard</h1>
+          </button>
+
+        {/* Hide the live clock on very small screens to save space */}
+          <div className="ml-2 hidden sm:block">
+            <Clock />
           </div>
 
-          <Clock />
-
           {showAgentMenu && (
-            <div className="absolute top-[105%] left-0 w-52 bg-indigo-100 text-indigo-900 border border-indigo-300 rounded-xl shadow-lg text-sm z-50">
-              <div className="px-4 py-2 border-b border-indigo-300 font-semibold bg-indigo-200 text-center rounded-t-xl">
+            <div className="absolute left-0 top-[105%] z-50 w-52 rounded-xl border border-indigo-300 bg-indigo-100 text-sm text-indigo-900 shadow-lg">
+              <div className="rounded-t-xl border-b border-indigo-300 px-4 py-2 text-center font-semibold bg-indigo-200">
                 Choose Agent
               </div>
-              <div className="hover:bg-indigo-300 px-4 py-2 cursor-pointer text-center font-medium">
-                ⚡ Zeta <span className="text-xs text-gray-600 ml-1">(currently selected)</span>
+              <div className="cursor-pointer px-4 py-2 text-center font-medium hover:bg-indigo-300">
+                ⚡ Zeta <span className="ml-1 text-xs text-gray-600">(currently selected)</span>
               </div>
-              <div className="hover:bg-indigo-300 px-4 py-2 cursor-not-allowed text-center opacity-60">
-                📚 Theta <span className="text-xs text-gray-600 ml-1">coming soon...</span>
+              <div className="cursor-not-allowed px-4 py-2 text-center opacity-60 hover:bg-indigo-300">
+                📚 Theta <span className="ml-1 text-xs text-gray-600">coming soon...</span>
               </div>
-              <div className="hover:bg-indigo-300 px-4 py-2 cursor-not-allowed text-center opacity-60 rounded-b-xl">
-                ❤️ Delta <span className="text-xs text-gray-600 ml-1">coming soon...</span>
+              <div className="cursor-not-allowed rounded-b-xl px-4 py-2 text-center opacity-60 hover:bg-indigo-300">
+                ❤️ Delta <span className="ml-1 text-xs text-gray-600">coming soon...</span>
               </div>
             </div>
           )}
         </div>
 
-        <div className="px-4">
-          <h1 className="text-2xl font-bold inline-flex items-center gap-2 whitespace-nowrap truncate max-w-[320px]">
-            ⚡ {projectName}
-          </h1>
+        {/* Project title (wraps nicely) */}
+        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold">
+          ⚡ {projectName}
+        </h1>
+
+        {/* Controls (always visible) */}
+        <div className="flex items-center gap-2">
+          <RefreshButton
+            variant="inline"
+            onRefresh={onRefresh ?? (async () => {})}
+            refreshing={refreshing ?? false}
+            className="!text-xs"
+          />
+          <button
+            onClick={() => router.push('/projects')}
+            className="rounded-md bg-purple-500 px-3 py-1 text-xs text-white hover:bg-purple-600"
+            title={`Projects ${used}/${limit}`}
+          >
+            Projects
+          </button>
+          <button
+            onClick={handleLogout}
+            className="rounded-md bg-red-500 px-3 py-1 text-xs text-white hover:bg-red-600"
+          >
+            Log Out
+          </button>
         </div>
       </div>
 
-      {/* 🔐 IDs + centered plan pill + right controls */}
+      {/* IDs + Plan pill row */}
       {userEmail && (
-        <div className="px-4 pt-1 pb-1 text-[10px] text-gray-400">
-          <div className="flex items-center w-full">
+        <div className="px-4 pb-2 pt-1 text-[10px] text-gray-400 md:px-6">
+          <div className="grid grid-cols-1 items-center gap-2 md:grid-cols-3">
             {/* LEFT: IDs */}
-            <div className="leading-tight space-y-0.5">
+            <div className="space-y-0.5 leading-tight">
               <p>
                 <span className="font-semibold">👤</span> {userEmail}
               </p>
-              <p>
+              <p className="truncate">
                 <span className="font-semibold">📁</span>{' '}
-                <span className="font-mono">{projectId}</span>
+                <span className="font-mono break-all">{projectId}</span>
               </p>
               {threadId && (
-                <p>
+                <p className="truncate">
                   <span className="font-semibold">🧵</span>{' '}
                   <span className="font-mono break-all">{threadId}</span>
                 </p>
               )}
             </div>
 
-            {/* MIDDLE: perfectly centered plan pill */}
-            <div className="flex-1 flex justify-center">
+            {/* MIDDLE: Plan pill (hidden on mobile) */}
+            <div className="hidden items-center justify-center md:flex">
               <PlanPill plan={plan} onClick={() => router.push('/settings')} />
             </div>
 
-            {/* RIGHT: Refresh / Projects / Logout */}
-            <div className="flex gap-2 items-center">
-              <RefreshButton
-                variant="inline"
-                onRefresh={onRefresh ?? (async () => {})}
-                refreshing={refreshing ?? false}
-                className="!text-xs"
-              />
-              <button
-                onClick={() => router.push('/projects')}
-                className="text-xs bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-md"
-                title={`Projects ${used}/${limit}`}
-              >
-                Projects
-              </button>
-              <button
-                onClick={handleLogout}
-                className="text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md"
-              >
-                Log Out
-              </button>
-            </div>
+            {/* RIGHT: (empty spacer on md to keep symmetry) */}
+            <div className="hidden md:block" />
           </div>
         </div>
       )}
