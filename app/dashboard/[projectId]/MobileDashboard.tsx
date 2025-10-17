@@ -67,9 +67,10 @@ type Props = {
 
 export default function MobileDashboard({
   projectName,
-  userEmail,
+  // we’ll hide email + ids in the header by passing nulls
+  userEmail: _unusedUserEmail,
   projectId,
-  threadId,
+  threadId: _unusedThreadId,
   activeMainTab,
   setActiveMainTab,
   chatView,
@@ -89,23 +90,24 @@ export default function MobileDashboard({
   refreshing,
   recentDocs,
 }: Props) {
-  // Full viewport height; avoid iOS toolbar jumps with svh
-  const PANEL_H = '100svh';
-
   return (
-    <div className="md:hidden flex flex-col min-h-screen bg-sky-800 text-white">
-      {/* IMPORTANT: no overflow-hidden here so menus can escape */}
+    // page bg
+    <div className="md:hidden min-h-[100svh] w-full bg-sky-800 text-white">
+      {/* main card */}
       <div
-        className="flex flex-col bg-blue-900 border border-blue-800 rounded-none shadow-lg flex-1 overflow-visible"
-        style={{ height: PANEL_H }}
+        className="flex flex-col w-full h-[100svh] bg-blue-900 border border-blue-800 shadow-lg overflow-visible"
+        style={{
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
       >
-        {/* Sticky top area with its own stacking context */}
+        {/* Sticky header + tabs — high z-index, own stacking context */}
         <div className="sticky top-0 z-[200] bg-blue-900 border-b border-blue-800 isolate">
           <DashboardHeader
             projectName={projectName}
-            userEmail={userEmail}
-            projectId={projectId}
-            threadId={threadId}
+            // hide email + ids on mobile by passing nulls
+            userEmail={null}
+            projectId={projectId}      // still needed for API calls elsewhere, not displayed by header when userEmail/threadId are null
+            threadId={null}
             showAgentMenu={false}
             setShowAgentMenu={() => {}}
             handleLogout={() => {}}
@@ -113,19 +115,19 @@ export default function MobileDashboard({
             refreshing={refreshing}
           />
 
-          {/* Tabs row — keep overflow visible to avoid clipping submenus */}
-          <div className="w-full px-2 py-2">
-            <div className="relative z-[201] flex gap-2 overflow-visible">
-              <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              <IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              <FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+          {/* Equal-width main tabs that fit the screen */}
+          <div className="px-2 pb-2">
+            <div className="flex gap-2 text-sm">
+              <div className="flex-1 min-w-0"><ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+              <div className="flex-1 min-w-0"><WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+              <div className="flex-1 min-w-0"><PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+              <div className="flex-1 min-w-0"><IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
+              <div className="flex-1 min-w-0"><FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} /></div>
             </div>
           </div>
         </div>
 
-        {/* Content sits UNDER the sticky bar */}
+        {/* Content UNDER the sticky block; allow menus to overlap it */}
         <div className="relative z-10 flex-1 min-h-0 overflow-y-auto">
           {activeMainTab === 'chat' && (
             <ChatTab
