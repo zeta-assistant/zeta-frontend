@@ -115,7 +115,9 @@ function formatTimeInTZ(isoNumOrDate: any, tz: string) {
 
 const isUserish = (msg: any) =>
   msg?.role === 'user' ||
-  (msg?.role === 'system' && typeof getMsgContent(msg) === 'string' && getMsgContent(msg).startsWith('📎 Files attached'));
+  (msg?.role === 'system' &&
+    typeof getMsgContent(msg) === 'string' &&
+    getMsgContent(msg).startsWith('📎 Files attached'));
 
 /* ============ Emoji ============ */
 const EMOJIS = [
@@ -123,7 +125,7 @@ const EMOJIS = [
   '🧠','📌','✅','❗','❓','📎','📝','📈','📊','⏱️','🧪','🔧','🛠️','🧰','🧵','🔁'
 ];
 
-/* ---------- Stable anti-bounce scroller ---------- */
+/* ---------- Stable scroller ---------- */
 const StableScroller = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   (p, ref) => (
     <div
@@ -141,10 +143,8 @@ const StableScroller = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTM
 );
 StableScroller.displayName = 'StableScroller';
 
-/* ---------- Footer spacer so last bubble isn't hidden ---------- */
 function FooterSpacer() {
-  // Slightly smaller on mobile; Virtuoso will still keep last row visible
-  return <div className="h-20 md:h-24" />;
+  return <div style={{ height: 96 }} />;
 }
 
 /* ========================================================= */
@@ -176,7 +176,6 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   const [live, setLive] = useState<any[]>([]);
   const [userInputs, setUserInputs] = useState<any[]>([]);
 
-  // Realtime: zeta_conversation_log
   useEffect(() => {
     const channel = supabase
       .channel(`zeta_conversation_log:${projectId}`)
@@ -203,8 +202,6 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
   /* ---------- Outreach feed ---------- */
   const [outreach, setOutreach] = useState<any[]>([]);
-  const [outreachLoaded, setOutreachLoaded] = useState(false);
-
   useEffect(() => {
     let canceled = false;
     (async () => {
@@ -213,41 +210,19 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
         .select('id, project_id, message, created_at')
         .eq('project_id', projectId)
         .order('created_at', { ascending: true });
-
-      if (!canceled) {
-        if (!error && Array.isArray(data)) {
-          setOutreach(
-            data.map((r) => ({
-              id: r.id,
-              role: 'assistant',
-              message: r.message,
-              timestamp: r.created_at,
-              source: 'outreach' as const,
-            }))
-          );
-        }
-        setOutreachLoaded(true);
+      if (!canceled && !error && Array.isArray(data)) {
+        setOutreach(
+          data.map((r) => ({
+            id: r.id,
+            role: 'assistant',
+            message: r.message,
+            timestamp: r.created_at,
+            source: 'outreach' as const,
+          }))
+        );
       }
     })();
     return () => { canceled = true; };
-  }, [projectId]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel(`outreach_chats:${projectId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'outreach_chats', filter: `project_id=eq.${projectId}` },
-        (payload: any) => {
-          const r = payload.new;
-          setOutreach((prev) => [
-            ...prev,
-            { id: r.id, role: 'assistant', message: r.message, timestamp: r.created_at, source: 'outreach' as const },
-          ]);
-        }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
   }, [projectId]);
 
   /* ---------- user_input_log fetch + realtime ---------- */
@@ -310,6 +285,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
         const oRole = o.role ?? 'user';
         const oText = normText(getMsgContent(o));
         const oTime = toDateOrNow(o).getTime();
+
         const within = (m: any) =>
           (m?.role ?? 'assistant') === oRole &&
           normText(getMsgContent(m)) === oText &&
@@ -333,9 +309,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     const out: any[] = [];
     const byId = new Map<string, number>();
 
-    const sourcePriority: Record<string, number> = {
-      live: 4, base: 3, user_input_log: 2, outreach: 1, optimistic: 0,
-    };
+    const sourcePriority: Record<string, number> = { live: 4, base: 3, user_input_log: 2, outreach: 1, optimistic: 0 };
     const roleRank = (r?: string) => (r === 'user' ? 0 : r === 'assistant' ? 1 : 2);
 
     const pushOrMerge = (m: any) => {
@@ -369,7 +343,10 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
       }
 
       const existing = out[idx];
-      const existingHasRealId = !!existing?.id && !String(existing.id).startsWith('temp-') && !String(existing.id).startsWith('uil-');
+      const existingHasRealId =
+        !!existing?.id &&
+        !String(existing.id).startsWith('temp-') &&
+        !String(existing.id).startsWith('uil-');
       const existingTime = toDateOrNow(existing).getTime();
       const existingSrc = existing?.source ?? 'base';
 
@@ -517,7 +494,6 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
     pendingScrollAfterSendRef.current = true;
 
-    // Start local loading + timeout failsafe
     setUiLoading(true);
     lastSendAtRef.current = Date.now();
     if (uiLoadingTimerRef.current) clearTimeout(uiLoadingTimerRef.current);
@@ -561,9 +537,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   }, [chatView, pinnedMessages, combined, projectTZ, now.getTime()]);
 
   /* ---------- Derived rows (messages + typing) ---------- */
-  const rows = useMemo(() => {
-    return isLoading ? [...displayedMessages, { __type: 'typing' as const }] : displayedMessages;
-  }, [displayedMessages, isLoading]);
+  const rows = useMemo(() => (isLoading ? [...displayedMessages, { __type: 'typing' as const }] : displayedMessages), [displayedMessages, isLoading]);
 
   /* ---------- follow-to-bottom behavior ---------- */
   useEffect(() => {
@@ -583,19 +557,16 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
   if (activeMainTab !== 'chat') return null;
 
-  /* ========================= RENDER ========================= */
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex flex-col h-full min-h-0">
       {/* Tabs + Controls */}
-      <div className="flex items-center justify-between px-3 pt-3 md:px-6">
-        {/* Filters row; scrollable on mobile */}
-        <div className="flex max-w-full gap-2 overflow-x-auto pb-1 pr-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex items-center justify-between px-4 pt-2 md:px-6 md:pt-3">
+        <div className="flex items-center gap-2">
           {(['all', 'today', 'pinned'] as const).map((view) => (
             <button
               key={view}
               onClick={() => setChatView(view)}
-              className={`whitespace-nowrap rounded-md border px-3 py-1 text-xs transition ${
+              className={`text-xs px-3 py-1 rounded-md border transition ${
                 chatView === view
                   ? 'bg-blue-600 text-white border-blue-700 shadow'
                   : 'bg-blue-800 text-blue-200 border-blue-500 hover:bg-blue-700'
@@ -606,53 +577,11 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
           ))}
         </div>
 
-        {/* Compact settings on mobile */}
-        <div className="relative md:hidden">
-          <details className="group">
-            <summary className="cursor-pointer list-none rounded-md border border-blue-600 bg-blue-800 px-2 py-1 text-xs text-white">
-              Options ▾
-            </summary>
-            <div className="absolute right-0 z-20 mt-2 w-40 rounded-md border border-blue-700 bg-blue-900 p-2 text-xs text-white shadow-lg">
-              <label className="mb-2 block">
-                <span className="opacity-80">Verbosity</span>
-                <select
-                  className="mt-1 w-full rounded border border-blue-600 bg-blue-950 px-2 py-1"
-                  value={verbosity}
-                  onChange={(e) => setVerbosity(e.target.value as Verbosity)}
-                >
-                  <option value="short">Short</option>
-                  <option value="normal">Normal</option>
-                  <option value="long">Long</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="opacity-80">Font</span>
-                <select
-                  className="mt-1 w-full rounded border border-blue-600 bg-blue-950 px-2 py-1"
-                  value={fontSize}
-                  onChange={(e) => setFontSize(e.target.value as 'sm' | 'base' | 'lg')}
-                >
-                  <option value="sm">Small</option>
-                  <option value="base">Medium</option>
-                  <option value="lg">Large</option>
-                </select>
-              </label>
-              <button
-                onClick={() => setChatHidden(!chatHidden)}
-                className="mt-2 w-full rounded bg-black px-2 py-1"
-              >
-                {chatHidden ? 'Show Chat' : 'Hide Chat'}
-              </button>
-            </div>
-          </details>
-        </div>
-
-        {/* Full controls on md+ */}
-        <div className="hidden items-center text-xs text-white md:flex">
-          <div className="mr-4 flex items-center">
+        <div className="text-xs text-white flex items-center">
+          <div className="mr-2 flex items-center md:mr-4">
             <span className="opacity-80">Verbosity:</span>
             <select
-              className="ml-2 rounded border border-blue-500 bg-blue-900 px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="ml-2 rounded bg-blue-900 border border-blue-500 px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
               value={verbosity}
               onChange={(e) => setVerbosity(e.target.value as Verbosity)}
             >
@@ -664,7 +593,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
           <span className="opacity-80">Font:</span>
           <select
-            className="ml-2 rounded border border-blue-500 bg-blue-900 px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="ml-2 rounded bg-blue-900 border border-blue-500 px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
             value={fontSize}
             onChange={(e) => setFontSize(e.target.value as 'sm' | 'base' | 'lg')}
           >
@@ -672,22 +601,26 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
             <option value="base">Medium</option>
             <option value="lg">Large</option>
           </select>
-
-          <button
-            onClick={() => setChatHidden(!chatHidden)}
-            className={`ml-3 rounded-md px-3 py-1 text-white transition ${
-              chatHidden ? 'bg-green-600 hover:bg-green-700' : 'bg-black hover:bg-gray-800'
-            }`}
-          >
-            {chatHidden ? 'Show Chat' : 'Hide Chat'}
-          </button>
         </div>
       </div>
 
+      {/* Hide/Show */}
+      <div className="flex justify-end gap-2 px-4 pt-2 md:px-6">
+        <button
+          onClick={() => setChatHidden(!chatHidden)}
+          className={`text-xs text-white px-3 py-1 rounded-md transition ${
+            chatHidden ? 'bg-green-600 hover:bg-green-700' : 'bg-black hover:bg-gray-800'
+          }`}
+        >
+          {chatHidden ? 'Show Chat' : 'Hide Chat'}
+        </button>
+      </div>
+
       {/* Body */}
-      <div className="flex flex-1 flex-col px-3 pt-2 md:px-6">
+      <div className="flex min-h-0 flex-col px-4 pt-2 pb-2 md:px-6">
         {!chatHidden && (
-          <div className="min-h-0 flex-1 overflow-hidden">
+          // 👇 give the scroller a real height on mobile (fixes “no chat list”)
+          <div className="h-[60dvh] min-h-0 overflow-hidden md:h-auto md:flex-1">
             <Virtuoso
               ref={virtuosoRef}
               style={{ height: '100%' }}
@@ -710,14 +643,16 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
               itemContent={(index) => {
                 const r = (rows as any[])[index];
 
+                // Typing row
                 if (r?.__type === 'typing') {
                   return (
-                    <div className="mb-4 md:mb-6">
+                    <div className="mb-5 md:mb-6">
                       <TypingBubble />
                     </div>
                   );
                 }
 
+                // Normal message
                 const msg = r;
                 const contentRaw = getMsgContent(msg);
                 const latestAssistantIndex = [...displayedMessages].reverse().findIndex((m) => m.role === 'assistant' && getMsgContent(m));
@@ -729,7 +664,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
                   console.log('📐 Latex formats:', formatCounts);
                 }
 
-                const bubbleCommon = 'relative max-w-[90%] md:max-w-[85%] break-words rounded-2xl border shadow-md transition';
+                const bubbleCommon = 'relative max-w-[90%] md:max-w-[85%] break-words shadow-md rounded-2xl border transition';
                 const bubbleByRole = isUserish(msg)
                   ? 'ml-auto bg-gradient-to-br from-blue-200 to-blue-100 border-blue-300 text-blue-900'
                   : 'bg-gradient-to-br from-yellow-300 to-yellow-100 border-yellow-400 text-slate-900';
@@ -772,7 +707,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
       </div>
 
       {/* Input + Attachments + Emoji */}
-      <div className="rounded-b-2xl border-t border-blue-700 bg-blue-900 px-3 pb-4 pt-3 md:px-4 md:pb-5">
+      <div className="rounded-b-2xl border-t border-blue-700 bg-blue-900 px-3 pt-3 pb-5 md:px-4">
         {selectedDocs.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {selectedDocs.map((d) => (
@@ -786,16 +721,14 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
         <div className="relative flex items-center gap-2">
           <button onClick={() => setLibraryOpen(true)} className="rounded-xl bg-blue-800 px-2 py-2 text-sm text-white shadow transition hover:bg-blue-700" title="Attach files">📎</button>
-
           <button onClick={() => fileInputRef.current?.click()} className="rounded-xl bg-blue-800 px-2 py-2 text-sm text-white shadow transition hover:bg-blue-700" title="Upload new file">⬆️</button>
           <input ref={fileInputRef} type="file" multiple onChange={(e) => setAttachedFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])])} className="hidden" />
-
           <EmojiButton inputRef={inputRef} setInput={setInput} />
 
           <input
             ref={inputRef}
             type="text"
-            className="w-full rounded-xl border-2 border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-xl border-2 border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="Ask Zeta something..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -813,7 +746,9 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
         </div>
 
         {attachedFiles.length > 0 && (
-          <div className="mt-2 text-xs text-blue-100">Pending upload: {attachedFiles.map((f) => f.name).join(', ')}</div>
+          <div className="mt-2 text-xs text-blue-100">
+            Pending upload: {attachedFiles.map((f) => f.name).join(', ')}
+          </div>
         )}
       </div>
 
@@ -883,7 +818,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => setSelectedDocs([])} className="rounded-lg border border-blue-700 bg-blue-900 px-3 py-2 text-sm text-blue-200 hover:bg-blue-800">Clear</button>
+                  <button onClick={() => setSelectedDocs([])} className="rounded-lg bg-blue-900 px-3 py-2 text-sm text-blue-200 hover:bg-blue-800 border border-blue-700">Clear</button>
                   <button onClick={() => setLibraryOpen(false)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700">Done</button>
                 </div>
               </div>
@@ -962,7 +897,7 @@ function EmojiButton({
       {open && (
         <div
           className={[
-            'absolute bottom-full z-50 mb-2 w-56 rounded-xl border border-blue-700 bg-blue-950 p-2 shadow-xl',
+            'absolute z-50 bottom-full mb-2 w-56 rounded-xl border border-blue-700 bg-blue-950 p-2 shadow-xl',
             align === 'center' ? 'left-1/2 -translate-x-1/2' : '',
             align === 'left' ? 'left-0' : '',
             align === 'right' ? 'right-0' : '',
@@ -988,11 +923,11 @@ function EmojiButton({
   );
 }
 
-/* ---------- Typing bubble (animated …) ---------- */
+/* ---------- Typing bubble ---------- */
 function TypingBubble() {
   return (
     <div className="mb-1">
-      <div className="relative rounded-2xl border border-yellow-400 bg-gradient-to-br from-yellow-300 to-yellow-100 p-4 pb-6 text-slate-900 shadow-md">
+      <div className="relative rounded-2xl border bg-gradient-to-br from-yellow-300 to-yellow-100 p-4 pb-6 text-slate-900 shadow-md transition">
         <div className="flex items-center gap-2 text-[15px]">
           <span className="font-medium">Zeta is thinking</span>
           <span className="ml-1 inline-flex h-[1em] items-end gap-1">
@@ -1015,7 +950,7 @@ function TypingBubble() {
           }
           @keyframes zeta-bounce-dot {
             0%, 80%, 100% { transform: translateY(0); opacity: 0.7; }
-            40% { transform: translateY(-6px); opacity: 1; }
+            40%           { transform: translateY(-6px); opacity: 1; }
           }
           @media (prefers-reduced-motion: reduce) { .typing-dot { animation: none; } }
         `}</style>
