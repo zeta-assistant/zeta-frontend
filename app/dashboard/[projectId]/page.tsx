@@ -183,7 +183,7 @@ export default function DashboardPage() {
     if (!projectId) return;
 
     const attachments = opts?.attachments ?? [];
-    const hasText = !!input.trim();
+       const hasText = !!input.trim();
     const hasFiles = attachments.length > 0;
     if (!hasText && !hasFiles) return;
 
@@ -324,10 +324,14 @@ export default function DashboardPage() {
     }
   };
 
+  // On phones let content flow; lock height only on md+
+  const PANEL_H_MD = 'calc(100dvh - 110px)';
+
   return (
-    <div className="min-h-[100dvh] bg-sky-800 px-3 py-4 text-white md:px-6 md:py-6">
+    <div className="min-h-[100dvh] bg-sky-800 text-white px-3 md:px-6 py-4 md:py-6">
       {/* bottom padding so the mobile action bar doesn't cover content */}
-      <div className="mx-auto grid w-full max-w-[1500px] grid-cols-12 gap-3 pb-[84px] md:gap-4 md:pb-0">
+      <div className="mx-auto grid w-full max-w-[1500px] grid-cols-12 gap-3 md:gap-4 pb-[84px] md:pb-0">
+
         {/* ===== Left Sidebar (hidden on mobile) ===== */}
         <div className="col-span-12 hidden md:col-span-3 md:block">
           <div className="relative flex w-full flex-col rounded-2xl px-3 py-2 md:sticky md:top-[88px]">
@@ -360,7 +364,12 @@ export default function DashboardPage() {
         </div>
 
         {/* ===== Main panel (full width on mobile) ===== */}
-        <div className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-800 bg-blue-900 shadow-lg md:col-span-6">
+        <div
+          className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-800 bg-blue-900 shadow-lg md:col-span-6"
+        >
+          {/* lock height on md+ for nicer sticky behavior */}
+          <div className="md:h-[var(--panel-h)]" style={{ ['--panel-h' as any]: PANEL_H_MD }} />
+
           <DashboardHeader
             projectName={projectName}
             userEmail={userEmail}
@@ -423,29 +432,19 @@ export default function DashboardPage() {
 
           {activeMainTab === 'goals' && <GoalsPanel key={`goals-${refreshNonce}`} fontSize="base" projectId={projectId} />}
 
-          {activeMainTab === 'notifications' && (
-            <NotificationsPanel key={`notifications-${refreshNonce}`} projectId={projectId} />
-          )}
+          {activeMainTab === 'notifications' && <NotificationsPanel key={`notifications-${refreshNonce}`} projectId={projectId} />}
 
           {activeMainTab === 'tasks' && <TasksPanel key={`tasks-${refreshNonce}`} fontSize={fontSize} userName={userName} />}
 
-          {activeMainTab === 'thoughts' && (
-            <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
-          )}
+          {activeMainTab === 'thoughts' && <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />}
 
           {activeMainTab === 'timeline' && <TimelinePanel key={`timeline-${refreshNonce}`} projectId={projectId} />}
 
-          {activeMainTab === 'functions' && (
-            <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
-          )}
+          {activeMainTab === 'functions' && <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />}
 
-          {activeMainTab === 'newfunction' && (
-            <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={'base'} />
-          )}
+          {activeMainTab === 'newfunction' && <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={'base'} />}
 
-          {activeMainTab === 'workshop' && (
-            <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />
-          )}
+          {activeMainTab === 'workshop' && <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />}
         </div>
 
         {/* ===== Right Panel (hidden on mobile) ===== */}
