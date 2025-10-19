@@ -1,4 +1,3 @@
-// app/projects/page.tsx
 'use client';
 
 import Image from 'next/image';
@@ -27,7 +26,6 @@ export default function ProjectsPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // plan/usage state
   const [plan, setPlan] = useState<'free' | 'premium'>('free');
   const [limit, setLimit] = useState<number>(3);
   const [used, setUsed] = useState<number>(0);
@@ -89,7 +87,6 @@ export default function ProjectsPage() {
 
     setLoading(true);
     try {
-      // best-effort: get assistant id
       const { data: projRow } = await supabase
         .from('user_projects')
         .select('assistant_id')
@@ -99,7 +96,6 @@ export default function ProjectsPage() {
 
       const assistantId = (projRow as { assistant_id?: string | null } | null)?.assistant_id;
 
-      // best-effort: delete assistant
       if (assistantId) {
         try {
           const ares = await fetch('/api/delete-assistant', {
@@ -107,16 +103,12 @@ export default function ProjectsPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ projectId, assistantId }),
           });
-          if (!ares.ok) {
-            const txt = await ares.text();
-            console.warn('Assistant deletion warning:', txt);
-          }
+          if (!ares.ok) console.warn('Assistant deletion warning:', await ares.text());
         } catch (e) {
           console.warn('Assistant deletion request failed:', e);
         }
       }
 
-      // delete project via API (service role)
       const res = await fetch('/api/delete-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -125,7 +117,6 @@ export default function ProjectsPage() {
 
       const result = await res.json();
       if (!res.ok) {
-        console.error('❌ Failed to delete project:', result?.error || res.statusText);
         alert(`Failed to delete project: ${result?.error || res.statusText}`);
       } else {
         setProjects((prev) => prev.filter((p) => p.id !== projectId));
@@ -142,24 +133,27 @@ export default function ProjectsPage() {
   const remaining = Math.max(0, limit - used);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-indigo-100">
+    <div className="min-h-screen bg-gradient-to-br from-[#0f1b3d] via-[#1d2d6b] to-[#2438a6] text-white">
       {/* Header */}
       <div className="max-w-6xl mx-auto flex items-center justify-between px-6 py-6">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-3">
             <Image src="/pantheon.png" alt="Pantheon" width={36} height={36} className="rounded-md" />
-            <span className="text-lg font-semibold text-[#0f1b3d]">Pantheon</span>
+            <span className="text-lg font-semibold">Pantheon</span>
           </Link>
         </div>
 
         <div className="flex items-center gap-4">
-          <Link href="/support" className="text-sm text-slate-700 hover:underline">
+          <Link href="/" className="text-sm text-slate-200 hover:text-white hover:underline">
+            Home
+          </Link>
+          <Link href="/support" className="text-sm text-slate-200 hover:text-white hover:underline">
             Support
           </Link>
           {userEmail && (
             <>
-              <span className="text-sm text-slate-600 hidden sm:inline">|</span>
-              <span className="text-sm text-slate-700 hidden sm:inline">{userEmail}</span>
+              <span className="text-sm text-slate-300 hidden sm:inline">|</span>
+              <span className="text-sm text-slate-200 hidden sm:inline">{userEmail}</span>
             </>
           )}
           <button
@@ -175,8 +169,8 @@ export default function ProjectsPage() {
       <div className="max-w-6xl mx-auto px-6">
         {remaining === 0 ? (
           <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 px-3 py-2 text-sm">
-            You’ve reached your {plan === 'premium' ? 'Premium' : 'Free'} project limit ({limit}).
-            {plan === 'free' && <> Upgrade to <span className="font-semibold">Premium</span> for up to 10 projects.</>}
+            You’ve reached your {plan === 'premium' ? 'Premium' : 'Free'} project limit ({limit}).{' '}
+            {plan === 'free' && <>Upgrade to <span className="font-semibold">Premium</span> for up to 10 projects.</>}
           </div>
         ) : (
           <div className="rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 px-3 py-2 text-sm">
@@ -185,17 +179,17 @@ export default function ProjectsPage() {
         )}
       </div>
 
-      {/* Project Cards */}
+      {/* Projects */}
       <div className="mt-6">
         {loading ? (
-          <div className="text-center text-gray-500">Loading your projects...</div>
+          <div className="text-center text-gray-200">Loading your projects...</div>
         ) : (
           <div className="flex flex-col items-center gap-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl px-6">
               {projects.map((project) => (
                 <div
                   key={project.id}
-                  className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition"
+                  className="bg-white text-gray-900 rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition"
                 >
                   <h2 className="text-xl font-bold mb-1">{project.name}</h2>
                   <p className="text-sm text-gray-600 mb-1">⚡ Type: {project.type}</p>
@@ -240,13 +234,6 @@ export default function ProjectsPage() {
                   ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
                   : 'bg-black text-white hover:bg-gray-800'
               }`}
-              title={
-                remaining === 0
-                  ? plan === 'premium'
-                    ? 'Premium limit reached (10)'
-                    : 'Free limit reached (3). Upgrade for more.'
-                  : 'Create a new project'
-              }
             >
               ➕ Create New Project
             </button>

@@ -13,7 +13,7 @@ export default function WorkspaceTabs({ activeMainTab, setActiveMainTab }: Props
 
   const workspaceTabs = [
     { key: 'logs', label: 'Logs' },
-    { key: 'files', label: 'Files' },
+    { key: 'desktop', label: 'Desktop' },
     { key: 'apis', label: 'APIs' },
   ];
 
