@@ -1,6 +1,13 @@
-// NO "use client" here
-import EngineerScreen from './EngineerScreen';
+//dddddd
+
+import ZetaSetupCore from '../ZetaSetupCore';
 
 export default function Page() {
-  return <EngineerScreen />;
-}
+  return (
+    <ZetaSetupCore
+      title="Zeta Engineer"
+      blurb="Your coding copilot: plan features, generate code, review PRs, and keep tickets moving."
+      logo="/zeta-engineer.png"
+    />
+  );
+} 
