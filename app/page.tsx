@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { getPlanFromUser, PLAN_LIMIT, type Plan } from '@/lib/plan';
 import { PlanTag } from '@/components/ui/ZetaPremiumMark';
 
-// Optional XP utils. If not present, we fall back gracefully.
+// Optional XP utils. Falls back gracefully if not present.
 let getXPProgress: ((xp: number) => any) | undefined;
 let LEVELS: Array<{ level: number; title: string }> | undefined;
 try {
@@ -35,10 +35,20 @@ type SessionSummary = {
 
 type ProjectRowRaw = Record<string, any>;
 
+type Template =
+  | 'zeta build'
+  | 'zeta learn'
+  | 'zeta chef'
+  | 'zeta trainer'
+  | 'zeta engineer'
+  | 'zeta writer'
+  | 'zeta motivation'
+  | 'zeta quant';
+
 type Project = {
   id: string;
   name: string;
-  agent: 'zeta' | 'theta' | 'delta' | 'unknown';
+  template: Template;
   levelNum?: number;
   levelTitle?: string;
 };
@@ -47,41 +57,168 @@ type Project = {
 
 const DEFAULT_AVATAR_SRC = '/user-faceless.svg';
 
+const TEMPLATE_ICONS: Record<Template, string> = {
+  'zeta build': '/templates/zeta-build.png',
+  'zeta learn': '/templates/zeta-learn.png',
+  'zeta chef': '/templates/zeta-chef.png',
+  'zeta trainer': '/templates/zeta-trainer.png',
+  'zeta engineer': '/templates/zeta-engineer.png',
+  'zeta writer': '/templates/zeta-writer.png',
+  'zeta motivation': '/templates/zeta-motivation.png',
+  'zeta quant': '/templates/zeta-quant.png',
+};
+
+const TEMPLATE_DISPLAY: Record<
+  Template,
+  { title: string; sub: string; href: string }
+> = {
+  'zeta build': {
+    title: 'Zeta Build',
+    sub: 'Plan, ship, and track progress.',
+    href: '/onboarding?template=zeta%20build',
+  },
+  'zeta learn': {
+    title: 'Zeta Learn',
+    sub: 'Study, research, and write faster.',
+    href: '/onboarding?template=zeta%20learn',
+  },
+  'zeta chef': {
+    title: 'Zeta Chef',
+    sub: 'Plan meals and generate smart recipes.',
+    href: '/onboarding?template=zeta%20chef',
+  },
+  'zeta trainer': {
+    title: 'Zeta Trainer',
+    sub: 'Programs, tracking, and coaching.',
+    href: '/onboarding?template=zeta%20trainer',
+  },
+  'zeta engineer': {
+    title: 'Zeta Engineer',
+    sub: 'Code, debug, and design systems.',
+    href: '/onboarding?template=zeta%20engineer',
+  },
+  'zeta writer': {
+    title: 'Zeta Writer',
+    sub: 'Concept to outline to polished draft.',
+    href: '/onboarding?template=zeta%20writer',
+  },
+  'zeta motivation': {
+    title: 'Zeta Motivation',
+    sub: 'Mindset, focus, and momentum.',
+    href: '/onboarding?template=zeta%20motivation',
+  },
+  'zeta quant': {
+    title: 'Zeta Quant',
+    sub: 'Data, finance, accounting & analysis.',
+    href: '/onboarding?template=zeta%20quant',
+  },
+};
+
+// 5-trait lists shown under each template card
+const TEMPLATE_TRAITS: Record<Template, string[]> = {
+  'zeta learn': ['Math Whiz', 'Concept Simplifier', 'Patient Teacher', 'Pattern Spotter', 'Curious Explorer'],
+  'zeta build': ['Goal-Driven', 'Organized Planner', 'Strategic Thinker', 'Visionary Leader', 'Outcome Oriented'],
+  'zeta engineer': ['Analytical Mind', 'Code Architect', 'Problem Solver', 'Logical Thinker', 'Efficiency Optimizer'],
+  'zeta writer': ['Idea Generator', 'Creative Thinker', 'Expressive Communicator', 'Storyteller', 'Wordsmith'],
+  'zeta trainer': ['Motivator', 'Performance Coach', 'Habit Architect', 'Disciplined', 'Results-Focused'],
+  'zeta chef': ['Creative Cook', 'Resourceful Planner', 'Flavor Experimenter', 'Nutritional Thinker', 'Precision Maker'],
+  'zeta motivation': ['Drive Igniter', 'Resilience Coach', 'Mindset Shifter', 'Focus Builder', 'Purpose Finder'],
+  'zeta quant': ['Data Analyst', 'Financial Thinker', 'Risk Evaluator', 'Precision Calculator', 'Insight Generator'],
+};
+
+const KNOWN_TEMPLATES: Template[] = [
+  'zeta build',
+  'zeta learn',
+  'zeta engineer',
+  'zeta writer',
+  'zeta trainer',
+  'zeta chef',
+  'zeta motivation',
+  'zeta quant',
+];
+
+// Normalize various values (strings, slugs, ids) into a Template key
+function classifyTemplateValue(raw: unknown): Template | null {
+  const s = (raw ?? '').toString().trim().toLowerCase();
+  if (!s) return null;
+
+  // exact matches
+  if (KNOWN_TEMPLATES.includes(s as Template)) return s as Template;
+
+  // friendly aliasing
+  if (/\bexercise\b/.test(s)) return 'zeta trainer';
+  if (/\btrainer\b/.test(s)) return 'zeta trainer';
+  if (/\bbuild\b/.test(s)) return 'zeta build';
+  if (/\blearn\b/.test(s)) return 'zeta learn';
+  if (/\bchef|cook|kitchen|recipe\b/.test(s)) return 'zeta chef';
+  if (/\bengineer|code|coder|dev|developer\b/.test(s)) return 'zeta engineer';
+  if (/\bwriter|writing|author|copy\b/.test(s)) return 'zeta writer';
+  if (/\bmotivation|mindset|sage|emotion\b/.test(s)) return 'zeta motivation';
+  if (/\bquant|finance|accounting|analytics|data\b/.test(s)) return 'zeta quant';
+
+  // sometimes template_id is a human slug like "zeta_build" or "build"
+  if (/zeta[_\s-]*build/.test(s)) return 'zeta build';
+  if (/zeta[_\s-]*learn/.test(s)) return 'zeta learn';
+  if (/zeta[_\s-]*chef/.test(s)) return 'zeta chef';
+  if (/zeta[_\s-]*trainer|zeta[_\s-]*exercise/.test(s)) return 'zeta trainer';
+  if (/zeta[_\s-]*engineer|zeta[_\s-]*code/.test(s)) return 'zeta engineer';
+  if (/zeta[_\s-]*writer/.test(s)) return 'zeta writer';
+  if (/zeta[_\s-]*motivation|zeta[_\s-]*sage|zeta[_\s-]*emotion/.test(s)) return 'zeta motivation';
+  if (/zeta[_\s-]*quant/.test(s)) return 'zeta quant';
+
+  return null;
+}
+
 function normStr(v: any): string {
   return (v ?? '').toString().trim();
 }
 
-function normalizeAgentFromAny(row: ProjectRowRaw): Project['agent'] {
-  const candidates = [
-    row.assistant_type,
-    row.agent,
-    row.agent_type,
-    row.agentName,
-    row.agent_kind,
-    row.assistant,
-    row.assistant_label,
-    row.assistant_slug,
-    row.type,
-    row.project_type,
-    row.primary_agent,
-  ]
-    .map(normStr)
-    .filter(Boolean);
+function normalizeTemplateFromAny(row: ProjectRowRaw): Template {
+  // Prefer template_id if present
+  const idCandidates = [
+    row.template_id,
+    row.templateId,
+    row.project_template_id,
+    row.template_key,
+  ];
 
-  const allStrings = Object.values(row)
+  for (const c of idCandidates) {
+    const t = classifyTemplateValue(c);
+    if (t) return t;
+  }
+
+  // Then check name-ish fields
+  const nameCandidates = [
+    row.template,
+    row.project_template,
+    row.zeta_template,
+    row.template_name,
+    row.templateSlug,
+    row.template_type,
+    row.assistant_type, // legacy
+    row.agent,          // legacy
+    row.type,           // legacy
+  ];
+  for (const c of nameCandidates) {
+    const t = classifyTemplateValue(c);
+    if (t) return t;
+  }
+
+  // Last resort: scan all strings in the row
+  const hay = Object.values(row)
     .filter((v) => typeof v === 'string')
-    .map(normStr);
+    .map(normStr)
+    .join(' | ');
+  const t = classifyTemplateValue(hay);
+  if (t) return t;
 
-  const haystack = (candidates.length ? candidates : allStrings).join(' | ').toLowerCase();
-
-  if (/\bzeta\b/.test(haystack)) return 'zeta';
-  if (/\btheta\b/.test(haystack)) return 'theta';
-  if (/\bdelta\b/.test(haystack)) return 'delta';
-  return 'zeta'; // default for today
+  // Failsafe: default to Build so nothing goes to "Other"
+  return 'zeta build';
 }
 
 // Lightweight fallback in case XP utils aren't available
-const fallbackLevelFromXP = (xp: number) => Math.max(1, Math.min(10, Math.floor(xp / 100) + 1));
+const fallbackLevelFromXP = (xp: number) =>
+  Math.max(1, Math.min(10, Math.floor(xp / 100) + 1));
 const fallbackTitleFromLevel = (lvl: number) => `Lv ${lvl}`;
 
 function getProjectLevel(row: ProjectRowRaw): { levelNum: number; levelTitle: string } | null {
@@ -110,16 +247,17 @@ function getProjectLevel(row: ProjectRowRaw): { levelNum: number; levelTitle: st
 
 function normalizeProject(row: ProjectRowRaw): Project {
   const id =
-    normStr(row.id) || (typeof crypto !== 'undefined' ? crypto.randomUUID() : `tmp_${Date.now()}`);
+    normStr(row.id) ||
+    (typeof crypto !== 'undefined' ? crypto.randomUUID() : `tmp_${Date.now()}`);
   const name =
     normStr(row.name) ||
     normStr(row.title) ||
     normStr(row.project_name) ||
     normStr(row.projectTitle) ||
     'Untitled';
-  const agent = normalizeAgentFromAny(row);
+  const template = normalizeTemplateFromAny(row);
   const lvl = getProjectLevel(row);
-  return { id, name, agent, ...(lvl ?? {}) };
+  return { id, name, template, ...(lvl ?? {}) };
 }
 
 /* ========================= Page ========================= */
@@ -196,10 +334,21 @@ export default function HomePage() {
     })();
   }, []);
 
-  // group by agent
-  const byAgent = useMemo(() => {
-    const base = { zeta: [] as Project[], theta: [] as Project[], delta: [] as Project[], unknown: [] as Project[] };
-    for (const p of projects) (base[p.agent] || base.unknown).push(p);
+  // Group by template (no "unknown" bucket anymore)
+  const byTemplate = useMemo(() => {
+    const base: Record<Template, Project[]> = {
+      'zeta build': [],
+      'zeta learn': [],
+      'zeta chef': [],
+      'zeta trainer': [],
+      'zeta engineer': [],
+      'zeta writer': [],
+      'zeta motivation': [],
+      'zeta quant': [],
+    };
+    for (const p of projects) {
+      base[p.template]?.push(p);
+    }
     return base;
   }, [projects]);
 
@@ -211,7 +360,9 @@ export default function HomePage() {
           <span
             className={[
               'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs border',
-              isPremium ? 'border-amber-400 bg-white text-amber-700' : 'border-slate-300 bg-white text-slate-700',
+              isPremium
+                ? 'border-amber-400 bg-white text-amber-700'
+                : 'border-slate-300 bg-white text-slate-700',
             ].join(' ')}
           >
             <span aria-hidden>{isPremium ? '👑' : '🟢'}</span>
@@ -228,7 +379,7 @@ export default function HomePage() {
   if (!isAuthed) {
     return (
       <main className="relative min-h-screen overflow-hidden">
-        {/* Pantheon blue background (layered radial gradients) */}
+        {/* Background */}
         <div
           className="absolute inset-0 -z-10"
           style={{
@@ -240,7 +391,6 @@ export default function HomePage() {
           }}
         />
 
-        {/* Responsive Header */}
         <Header authed={false} />
 
         {/* Hero */}
@@ -249,43 +399,91 @@ export default function HomePage() {
             Pantheon <span className="text-indigo-600">Personal Superintelligence</span>
           </h1>
           <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
-            Not just another chatbot. Pantheon adds memory, initiative, notifications,
-            files, goals & tasks — and works with any model (including custom).
+            Pantheon is a collection of AI agents that deliver personal superintelligence — helping you
+            <strong> think smarter</strong>, <strong> build faster</strong>, and
+            <strong> achieve more</strong>. Each Zeta template focuses on a different domain, from business
+            automation to learning, creativity, and mindset.
           </p>
         </section>
 
-        {/* Agent tiles (static on logged-out) */}
-        <section className="mx-auto mt-12 grid w-full max-w-5xl grid-cols-1 gap-6 px-4 sm:grid-cols-3">
-          <div className="rounded-xl bg-white p-6 shadow hover:shadow-md">
-            <Image src="/framed-agents/zeta-framed.png" alt="Zeta framed" width={96} height={96} className="mx-auto mb-3 rounded-lg" />
-            <h3 className="text-center text-lg font-semibold text-gray-800">Build with Zeta</h3>
-            <p className="mt-2 text-center text-sm text-gray-600">
-              Organize, plan, and achieve your goals. Build timelines, custom notifications,
-              and track projects across work, side hustles, and hobbies.
-            </p>
-          </div>
-
-          <div className="relative rounded-xl bg-white p-6 shadow hover:shadow-md">
-            <span className="absolute right-2 top-2 rounded-md bg-yellow-300 px-2 py-0.5 text-xs">Coming soon</span>
-            <Image src="/framed-agents/theta-framed.png" alt="Theta framed" width={96} height={96} className="mx-auto mb-3 rounded-lg" />
-            <h3 className="text-center text-lg font-semibold text-gray-800">Learn with Theta</h3>
-          </div>
-
-          <div className="relative rounded-xl bg-white p-6 shadow hover:shadow-md">
-            <span className="absolute right-2 top-2 rounded-md bg-yellow-300 px-2 py-0.5 text-xs">Coming soon</span>
-            <Image src="/framed-agents/delta-framed.png" alt="Delta framed" width={96} height={96} className="mx-auto mb-3 rounded-lg" />
-            <h3 className="text-center text-lg font-semibold text-gray-800">Grow with Delta</h3>
-          </div>
+        {/* Templates */}
+        <section className="mx-auto mt-12 grid w-full max-w-5xl grid-cols-1 gap-6 px-4 sm:grid-cols-4">
+          {(['zeta build', 'zeta learn', 'zeta chef', 'zeta trainer'] as Template[]).map(
+            (tpl) => {
+              const icon = TEMPLATE_ICONS[tpl];
+              const { title, sub, href } = TEMPLATE_DISPLAY[tpl];
+              const traits = TEMPLATE_TRAITS[tpl];
+              return (
+                <Link
+                  key={tpl}
+                  href={href}
+                  className="rounded-xl bg-white p-6 shadow hover:shadow-md"
+                >
+                  <Image
+                    src={encodeURI(icon)}
+                    alt={title}
+                    width={96}
+                    height={96}
+                    className="mx-auto mb-3 rounded-lg"
+                  />
+                  <h3 className="text-center text-lg font-semibold text-gray-800">{title}</h3>
+                  <p className="mt-1 text-center text-sm text-gray-600">{sub}</p>
+                  <ul className="mt-3 grid grid-cols-1 gap-1 text-xs text-gray-700">
+                    {traits.map((t) => (
+                      <li key={t} className="mx-auto w-fit rounded-full border px-2 py-0.5">
+                        {t}
+                      </li>
+                    ))}
+                  </ul>
+                </Link>
+              );
+            }
+          )}
         </section>
 
-        {/* Zeta Premium */}
-        <section className="mx-auto mt-16 max-w-3xl px-4 text-center">
-          <Image src="/zeta-premium.png" alt="Zeta Premium" width={180} height={180} className="mx-auto" />
-          <h2 className="mt-6 text-2xl font-bold text-gray-800">Zeta Premium</h2>
-          <p className="mt-2 text-gray-600">
-            Unlock more features, deeper customization, and advanced tools designed
-            to supercharge your projects and personal growth.
-          </p>
+        {/* Browse Templates Button */}
+        <div className="text-center mt-10">
+          <Link
+            href="/onboarding"
+            className="inline-block rounded-full bg-indigo-600 px-6 py-3 text-white font-medium hover:bg-indigo-700 transition"
+          >
+            Browse All Zeta Templates →
+          </Link>
+        </div>
+
+        {/* Premium */}
+        <section className="mx-auto mt-16 flex flex-col md:flex-row items-center justify-center gap-8 max-w-5xl px-4 text-center md:text-left">
+          <div className="flex-shrink-0">
+            <Image
+              src="/zeta-premium.png"
+              alt="Zeta Premium"
+              width={180}
+              height={180}
+              className="mx-auto"
+            />
+          </div>
+          <div>
+            <h2 className="text-3xl font-bold text-gray-800 mb-2">Zeta Premium</h2>
+            <p className="text-gray-600 text-lg max-w-md">
+  Unlock the full power of Pantheon — access more AI agents, deeper customization,
+  higher limits, and exclusive premium tools. Premium gives you elite capabilities
+  to turn ideas into outcomes faster, smarter, and with greater precision.
+</p>
+
+<ul className="mt-3 text-gray-700 text-sm space-y-1">
+  <li>✅ Advanced memory & long-term context</li>
+  <li>✅ Smarter notifications & initiative</li>
+  <li>✅ More projects & higher limits</li>
+  <li>✅ Deeper customization & control</li>
+</ul>
+
+            <Link
+              href="/upgrade"
+              className="mt-5 inline-block rounded-full bg-amber-500 px-6 py-3 text-white font-semibold hover:bg-amber-600 transition"
+            >
+              Upgrade to Premium
+            </Link>
+          </div>
         </section>
 
         <footer className="mt-20 px-4 py-6 text-center text-sm text-gray-500">
@@ -301,9 +499,20 @@ export default function HomePage() {
   const avatarSrc = avatarUrl || DEFAULT_AVATAR_SRC;
   const progressPct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
 
+  const TEMPLATE_ORDER: Template[] = [
+    'zeta build',
+    'zeta learn',
+    'zeta engineer',
+    'zeta writer',
+    'zeta trainer',
+    'zeta chef',
+    'zeta motivation',
+    'zeta quant',
+  ];
+
   return (
     <main className="relative min-h-screen overflow-hidden">
-      {/* Pantheon blue background (layered radial gradients) */}
+      {/* Background */}
       <div
         className="absolute inset-0 -z-10"
         style={{
@@ -315,7 +524,6 @@ export default function HomePage() {
         }}
       />
 
-      {/* Responsive Header (logged-in) */}
       <Header
         authed
         avatarUrl={avatarSrc}
@@ -326,7 +534,7 @@ export default function HomePage() {
         }}
       />
 
-      {/* Account summary (no quick actions) */}
+      {/* Account summary */}
       <section className="mx-auto mt-8 w-full max-w-6xl px-4">
         <div className="grid grid-cols-1 gap-6 rounded-2xl bg-white p-6 shadow ring-1 ring-black/5 md:grid-cols-2">
           {/* Profile */}
@@ -345,7 +553,6 @@ export default function HomePage() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-xl font-semibold text-gray-900">{username || 'User'}</h2>
-                {/* Keep the local PlanBadge for the profile card */}
                 <PlanBadge plan={plan} />
               </div>
               <p className="mt-1 line-clamp-3 text-sm text-gray-600">
@@ -386,105 +593,74 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Agent tiles with counters (top-left) + project lists with level pills */}
-      <section className="mx-auto mt-10 grid w-full max-w-5xl grid-cols-1 gap-6 px-4 sm:grid-cols-3">
-        {/* Zeta */}
-        <div className="rounded-xl bg-white p-6 shadow">
-          <div className="relative flex items-center justify-center">
-            <Image src="/framed-agents/zeta-framed.png" alt="Zeta framed" width={96} height={96} className="mb-3 rounded-lg" />
-            <span className="absolute -left-2 -top-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">
-              {byAgent.zeta.length}
-            </span>
-          </div>
-          <h3 className="text-center text-lg font-semibold text-gray-800">Build with Zeta</h3>
-          <ul className="mt-3 max-h-28 space-y-1 overflow-auto text-sm text-gray-700">
-            {byAgent.zeta.length === 0 ? (
-              <li className="text-center text-gray-400">No Zeta projects yet</li>
-            ) : (
-              byAgent.zeta.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-2">
-                  <span className="truncate">• {p.name}</span>
-                  {p.levelNum ? (
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
-                        Lv {p.levelNum}
-                      </span>
-                      <span className="whitespace-nowrap rounded-full border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-700">
-                        {p.levelTitle ?? `Lv ${p.levelNum}`}
-                      </span>
-                    </span>
-                  ) : null}
-                </li>
-              ))
-            )}
-          </ul>
-        </div>
+      {/* Templates grid */}
+      <section className="mx-auto mt-10 grid w-full max-w-6xl grid-cols-1 gap-6 px-4 md:grid-cols-2 lg:grid-cols-4">
+        {TEMPLATE_ORDER.map((tpl) => {
+          const icon = TEMPLATE_ICONS[tpl];
+          const { title, sub, href } = TEMPLATE_DISPLAY[tpl];
+          const items = byTemplate[tpl] || [];
+          const traits = TEMPLATE_TRAITS[tpl];
+          return (
+            <div key={tpl} className="rounded-2xl bg-white p-6 shadow ring-1 ring-black/5">
+              <div className="relative flex items-center justify-center">
+                <Image
+                  src={encodeURI(icon)}
+                  alt={title}
+                  width={96}
+                  height={96}
+                  className="mb-3 rounded-lg"
+                />
+                <span className="absolute -left-2 -top-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">
+                  {items.length}
+                </span>
+              </div>
+              <h3 className="text-center text-lg font-semibold text-gray-800">{title}</h3>
+              <p className="mt-1 text-center text-xs text-gray-500">{sub}</p>
 
-        {/* Theta */}
-        <div className="relative rounded-xl bg-white p-6 shadow">
-          <span className="absolute right-2 top-2 rounded-md bg-yellow-300 px-2 py-0.5 text-xs">Coming soon</span>
-          <div className="relative flex items-center justify-center">
-            <Image src="/framed-agents/theta-framed.png" alt="Theta framed" width={96} height={96} className="mb-3 rounded-lg" />
-            <span className="absolute -left-2 -top-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">
-              {byAgent.theta.length}
-            </span>
-          </div>
-          <h3 className="text-center text-lg font-semibold text-gray-800">Learn with Theta</h3>
-          <ul className="mt-3 max-h-28 space-y-1 overflow-auto text-sm text-gray-700">
-            {byAgent.theta.length === 0 ? (
-              <li className="text-center text-gray-400">No Theta projects yet</li>
-            ) : (
-              byAgent.theta.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-2">
-                  <span className="truncate">• {p.name}</span>
-                  {p.levelNum ? (
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
-                        Lv {p.levelNum}
-                      </span>
-                      <span className="whitespace-nowrap rounded-full border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-700">
-                        {p.levelTitle ?? `Lv ${p.levelNum}`}
-                      </span>
-                    </span>
-                  ) : null}
-                </li>
-              ))
-            )}
-          </ul>
-        </div>
+              {/* Traits */}
+              <ul className="mt-3 grid grid-cols-1 gap-1 text-xs text-gray-700">
+                {traits.map((t) => (
+                  <li key={t} className="mx-auto w-fit rounded-full border px-2 py-0.5">
+                    {t}
+                  </li>
+                ))}
+              </ul>
 
-        {/* Delta */}
-        <div className="relative rounded-xl bg-white p-6 shadow">
-          <span className="absolute right-2 top-2 rounded-md bg-yellow-300 px-2 py-0.5 text-xs">Coming soon</span>
-          <div className="relative flex items-center justify-center">
-            <Image src="/framed-agents/delta-framed.png" alt="Delta framed" width={96} height={96} className="mb-3 rounded-lg" />
-            <span className="absolute -left-2 -top-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">
-              {byAgent.delta.length}
-            </span>
-          </div>
-          <h3 className="text-center text-lg font-semibold text-gray-800">Grow with Delta</h3>
-          <ul className="mt-3 max-h-28 space-y-1 overflow-auto text-sm text-gray-700">
-            {byAgent.delta.length === 0 ? (
-              <li className="text-center text-gray-400">No Delta projects yet</li>
-            ) : (
-              byAgent.delta.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-2">
-                  <span className="truncate">• {p.name}</span>
-                  {p.levelNum ? (
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
-                        Lv {p.levelNum}
-                      </span>
-                      <span className="whitespace-nowrap rounded-full border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-700">
-                        {p.levelTitle ?? `Lv ${p.levelNum}`}
-                      </span>
-                    </span>
-                  ) : null}
-                </li>
-              ))
-            )}
-          </ul>
-        </div>
+              {/* Project list */}
+              <ul className="mt-3 max-h-36 space-y-1 overflow-auto text-sm text-gray-700">
+                {items.length === 0 ? (
+                  <li className="text-center text-gray-400">No projects yet</li>
+                ) : (
+                  items.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between gap-2">
+                      <span className="truncate">• {p.name}</span>
+                      {p.levelNum ? (
+                        <span className="flex shrink-0 items-center gap-2">
+                          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
+                            Lv {p.levelNum}
+                          </span>
+                          <span className="whitespace-nowrap rounded-full border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-700">
+                            {p.levelTitle ?? `Lv ${p.levelNum}`}
+                          </span>
+                        </span>
+                      ) : null}
+                    </li>
+                  ))
+                )}
+              </ul>
+
+              <div className="mt-4 flex items-center justify-center">
+                <Link
+                  href={href}
+                  className="rounded-md bg.black px-3 py-1.5 text-xs text-white hover:bg-gray-800"
+                  style={{ backgroundColor: '#000' }}
+                >
+                  New {title.replace('Zeta ', '')} Project
+                </Link>
+              </div>
+            </div>
+          );
+        })}
       </section>
 
       <footer className="mt-16 px-4 py-6 text-center text-sm text-gray-500">
