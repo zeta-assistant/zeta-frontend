@@ -1,12 +1,12 @@
-'use client';
-import ZetaSetup from '../ZetaSetupCore';
+// app/zetasetup/build/page.tsx
+import ZetaSetupCore from '../ZetaSetupCore';
 
-export default function BaseSetup() {
+export default function Page() {
   return (
-    <ZetaSetup
-      title="Zeta Base Setup"
-      blurb="Start with a blank assistant — customize everything yourself."
-      logo="/zeta.png"
+    <ZetaSetupCore
+      title="Zeta Build"
+      blurb="Automate workflows, manage data, and boost operational efficiency — your AI business operator."
+      logo="/zeta-build.png"
     />
   );
 }
