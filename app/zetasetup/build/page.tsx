@@ -1,4 +1,11 @@
-import BuildScreen from './BuildScreen';
+import ZetaSetupCore from '../ZetaSetupCore';
+
 export default function Page() {
-  return <BuildScreen />;
+  return (
+    <ZetaSetupCore
+      title="Zeta Build"
+      blurb="Automate workflows, manage data, and boost operational efficiency — your AI business operator."
+      logo="/zeta-build.png"
+    />
+  );
 }
