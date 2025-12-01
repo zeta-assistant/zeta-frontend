@@ -43,7 +43,9 @@ export default function ZetaSetupCore({
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   const handleAddTrait = () => {
@@ -58,32 +60,55 @@ export default function ZetaSetupCore({
     setCustomTraits((prev) => prev.filter((x) => x !== t));
   };
 
+  // ✅ New handleSubmit: ignore template inputs, create minimal project, go to /dashboard/[id]
   const handleSubmit = async () => {
-    if (!user?.id) return alert('No user found');
-    if (!projectName) return alert('Please name your project');
+  if (!user?.id) {
+    alert('No user found – please log in.');
+    return;
+  }
 
-    setSubmitting(true);
-    try {
-      const { data, error } = await supabase.from('user_projects').insert([
-        {
-          user_id: user.id,
-          name: projectName,
-          assistant_type: title,
-          system_instructions: systemInstructions,
-          traits: [...traits, ...customTraits],
-          initiative_cadence: initiativeCadence,
-        },
-      ]);
+  setSubmitting(true);
+  try {
+    // 🔹 Minimal payload: only what should be 100% safe
+    const insertPayload = {
+      user_id: user.id,
+      name: projectName || 'Zeta Project',
+      // If your schema allows defaults for the rest, DO NOT send them here.
+      // assistant_type, system_instructions, traits, initiative_cadence, etc.
+      // will fall back to DB defaults.
+    };
 
-      if (error) throw error;
-      router.push('/dashboard');
-    } catch (err: any) {
-      console.error(err);
-      alert('Error creating project');
-    } finally {
-      if (mounted.current) setSubmitting(false);
+    const { data, error } = await supabase
+      .from('user_projects')
+      .insert(insertPayload)
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('Supabase insert error:', error);
+      alert(error.message || 'Error creating project');
+      return;
     }
-  };
+
+    if (!data?.id) {
+      console.error('No project id returned from insert:', data);
+      alert('Project created but no id returned.');
+      return;
+    }
+
+    const newProjectId = data.id as string;
+
+    // 🚀 Go straight to the Zeta dashboard for that project
+    router.push(`/dashboard/${newProjectId}`);
+  } catch (err: any) {
+    // Supabase errors print as {} unless you read .message
+    console.error('Unexpected error creating project:', err?.message || err);
+    alert('Unexpected error creating project');
+  } finally {
+    if (mounted.current) setSubmitting(false);
+  }
+};
+
 
   return (
     <div className="relative min-h-screen text-black flex items-center justify-center px-6 py-10 overflow-hidden bg-gradient-to-br from-sky-50 via-sky-100 to-indigo-100">
@@ -147,7 +172,7 @@ export default function ZetaSetupCore({
             </div>
           </div>
 
-          {/* Traits Section */}
+          {/* Traits Section (still visible, but not used for now) */}
           <div className="mt-6">
             <h2 className="text-lg font-semibold text-indigo-900 mb-3">Personality Traits</h2>
             <div className="flex flex-wrap gap-2">
@@ -204,7 +229,7 @@ export default function ZetaSetupCore({
               disabled={submitting || isPending}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-2 rounded-full"
             >
-              {submitting ? 'Creating...' : 'Create Project'}
+              {submitting || isPending ? 'Creating Zeta…' : 'Create Project'}
             </Button>
           </div>
         </Card>

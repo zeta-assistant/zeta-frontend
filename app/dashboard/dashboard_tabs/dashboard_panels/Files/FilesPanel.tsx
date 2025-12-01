@@ -114,7 +114,9 @@ function looksLikeMarkdownText(text: string) {
 }
 const isTextLike = (name: string) => /\.(md|markdown|txt|csv|json)$/i.test(name || '');
 
-// Safe paragraph that won’t nest <pre> inside <p>
+/* ─────────────────────────────────────────────────────────
+   Safe paragraph (pre inside p fix) + MD components
+────────────────────────────────────────────────────────── */
 function ParagraphSmart({
   children,
   className = 'text-cyan-50/90 my-2',
@@ -228,6 +230,36 @@ function Modal({
   );
 }
 
+/* ─────────────────────────────────────────────────────────
+   Error Boundary (prevents total white-screen)
+────────────────────────────────────────────────────────── */
+class ViewErrorBoundary extends React.Component<
+  { children: React.ReactNode; label: string },
+  { hasError: boolean; message?: string }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, message: undefined };
+  }
+  static getDerivedStateFromError(err: any) {
+    return { hasError: true, message: err?.message ?? String(err) };
+  }
+  componentDidCatch(err: any) {
+    // eslint-disable-next-line no-console
+    console.error(`[FilesPanel:${this.props.label}] crashed`, err);
+  }
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <SectionCard title={`${this.props.label} crashed`} subtitle="Something went wrong">
+        <div className="text-red-200 text-sm">
+          {this.state.message || 'Unknown error.'}
+        </div>
+      </SectionCard>
+    );
+  }
+}
+
 /* ╔════════════════════════════════════════════════════════╗
    ║                       PAYWALL UI                       ║
    ╚════════════════════════════════════════════════════════╝ */
@@ -295,12 +327,17 @@ export default function FilesPanel({
   const isFree = plan === 'free';
   const [showPaywall, setShowPaywall] = useState<false | 'interpreter' | 'converter'>(false);
 
-  // resolve projectId: props → URL
+  // resolve projectId: props → URL (+ query fallback)
   useEffect(() => {
     if (projectIdProp) { setProjectId(projectIdProp); return; }
-    const fromUrl = route?.projectId?.trim();
+    const all = (route ?? {}) as Record<string, string | undefined>;
+    const fromUrl =
+      all.projectId?.trim() ||
+      all.id?.trim() ||
+      all.pid?.trim() ||
+      new URLSearchParams(window.location.search).get('projectId')?.trim();
     if (fromUrl) setProjectId(fromUrl);
-  }, [projectIdProp, route?.projectId]);
+  }, [projectIdProp, route]);
 
   // DEV override (?forcePremium=1 or localStorage flag)
   useEffect(() => {
@@ -323,6 +360,11 @@ export default function FilesPanel({
 
         if (error) {
           console.warn('[FilesPanel] mainframe_info plan error:', error);
+          if (!cancelled) setPlan('free');
+          return;
+        }
+        if (!data) {
+          console.warn('[FilesPanel] no mainframe_info row for project', projectId);
           if (!cancelled) setPlan('free');
           return;
         }
@@ -353,22 +395,19 @@ export default function FilesPanel({
   const toStoragePath = (urlOrPath: string) => {
     if (!urlOrPath) return '';
     if (urlOrPath.startsWith('http')) {
-      const marker = '/object/public/project-docs/';
-      const i = urlOrPath.indexOf(marker);
-      return i >= 0 ? urlOrPath.slice(i + marker.length) : urlOrPath;
+      const markerA = '/object/public/project-docs/';
+      const markerB = '/storage/v1/object/public/project-docs/';
+      const iA = urlOrPath.indexOf(markerA);
+      const iB = urlOrPath.indexOf(markerB);
+      if (iA >= 0) return urlOrPath.slice(iA + markerA.length);
+      if (iB >= 0) return urlOrPath.slice(iB + markerB.length);
+      return urlOrPath;
     }
     return urlOrPath;
   };
 
   const publicUrlForPath = (path: string) =>
     supabase.storage.from('project-docs').getPublicUrl(path).data.publicUrl;
-
-  function isStorageFile(it: any) {
-    const hasExt = /\.[A-Za-z0-9]{1,8}$/.test(it?.name || '');
-    const looksLikeFolder = !hasExt || String(it?.name).endsWith('/');
-    const isKnownFolder = it?.name === 'generated';
-    return !looksLikeFolder && !isKnownFolder;
-  }
 
   // ───────── Data loads ─────────
   async function loadDocs() {
@@ -422,12 +461,16 @@ export default function FilesPanel({
         return;
       }
 
-      const list: FileDoc[] = (items || []).map((it) => ({
-        file_name: it.name,
-        file_url: publicUrlForPath(`${projectId}/generated/${it.name}`),
-        created_at: null,
-        created_by: 'zeta' as const,
-      }));
+      const list: FileDoc[] = (items || []).map((it) => ([
+        'png','jpg','jpeg','webp','pdf','md','markdown','txt','csv','json'
+      ].includes(it.name.split('.').pop()?.toLowerCase() || '')
+        ? {
+            file_name: it.name,
+            file_url: publicUrlForPath(`${projectId}/generated/${it.name}`),
+            created_at: null,
+            created_by: 'zeta' as const,
+          }
+        : null)).filter(Boolean) as FileDoc[];
       setGenDocs(list);
     } finally {
       setLoadingGen(false);
@@ -465,6 +508,7 @@ export default function FilesPanel({
         } catch { setCustomFolders([]); }
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   useEffect(() => {
@@ -682,7 +726,7 @@ export default function FilesPanel({
   }
 
   return (
-    <div className={`relative h-full min-h=[520px] ${textSize}`}>
+    <div className={`relative h-full min-h-[520px] ${textSize}`}>
       {/* wallpaper */}
       <div className="absolute inset-0 bg-[radial-gradient(60rem_40rem_at_20%_0%,rgba(125,211,252,0.10),transparent_60%),radial-gradient(50rem_30rem_at_80%_20%,rgba(20,184,166,0.12),transparent_55%),linear-gradient(180deg,#063750_0%,#053244_70%,#042836_100%)]" />
       <div className="absolute inset-0 pointer-events-none [background:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:22px_22px] opacity-40" />
@@ -729,25 +773,29 @@ export default function FilesPanel({
         )}
 
         {view === 'uploaded' && (
-          <UploadedView
-            projectId={projectId}
-            docs={docs}
-            loading={loading}
-            onRefresh={loadDocs}
-            onDelete={handleDelete}
-            busyUrl={busy}
-          />
+          <ViewErrorBoundary label="Uploaded Files">
+            <UploadedView
+              projectId={projectId}
+              docs={docs}
+              loading={loading}
+              onRefresh={loadDocs}
+              onDelete={handleDelete}
+              busyUrl={busy}
+            />
+          </ViewErrorBoundary>
         )}
 
         {view === 'generated' && (
-          <GeneratedView
-            docs={genDocs}
-            loading={loadingGen}
-            onRefresh={loadGenerated}
-            onDelete={handleDelete}
-            busyUrl={busy}
-            onPreview={openGeneratedPreview}
-          />
+          <ViewErrorBoundary label="Generated Files">
+            <GeneratedView
+              docs={genDocs}
+              loading={loadingGen}
+              onRefresh={loadGenerated}
+              onDelete={handleDelete}
+              busyUrl={busy}
+              onPreview={openGeneratedPreview}
+            />
+          </ViewErrorBoundary>
         )}
 
         {/* Premium-gated views */}
@@ -755,19 +803,31 @@ export default function FilesPanel({
           (isFree ? (
             <Paywall feature="converter" onUpgrade={() => (window.location.href = '/billing')} />
           ) : (
-            <ConverterView projectId={projectId} />
+            <ViewErrorBoundary label="File Converter">
+              <ConverterView projectId={projectId} />
+            </ViewErrorBoundary>
           ))}
 
-        {view === 'generator' && <GeneratorView projectId={projectId} onGenerated={loadGenerated} />}
+        {view === 'generator' && (
+          <ViewErrorBoundary label="File Generator">
+            <GeneratorView projectId={projectId} onGenerated={loadGenerated} />
+          </ViewErrorBoundary>
+        )}
 
         {view === 'interpreter' &&
           (isFree ? (
             <Paywall feature="interpreter" onUpgrade={() => (window.location.href = '/billing')} />
           ) : (
-            <InterpreterView projectId={projectId} />
+            <ViewErrorBoundary label="File Interpreter">
+              <InterpreterView projectId={projectId} />
+            </ViewErrorBoundary>
           ))}
 
-        {view === 'memory' && <MemoryView projectId={projectId} />}
+        {view === 'memory' && (
+          <ViewErrorBoundary label="Memory Files">
+            <MemoryView projectId={projectId} />
+          </ViewErrorBoundary>
+        )}
 
         {view?.startsWith('custom:') && (
           <SectionCard
@@ -995,8 +1055,11 @@ function DesktopGrid({
           title={it.title}
           subtitle={it.subtitle}
           selected={selectedId === it.id}
-          onClick={() => setSelected(it.id)}
-          onOpen={it.onOpen}
+          onClick={() => {
+            // single click opens immediately, and also marks selected for visual feedback
+            setSelected(it.id);
+            it.onOpen();
+          }}
           onDelete={it.onDelete}
           onRename={it.onRename}
           locked={!!it.locked}
@@ -1012,7 +1075,6 @@ function DesktopIcon({
   subtitle,
   selected,
   onClick,
-  onOpen,
   onDelete,
   onRename,
   locked,
@@ -1022,7 +1084,6 @@ function DesktopIcon({
   subtitle?: string;
   selected?: boolean;
   onClick: () => void;
-  onOpen: () => void;
   onDelete?: () => void;
   onRename?: () => void;
   locked?: boolean;
@@ -1031,8 +1092,7 @@ function DesktopIcon({
     <div
       tabIndex={0}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
-      onDoubleClick={(e) => { e.stopPropagation(); onOpen(); }}
-      onKeyDown={(e) => { if (e.key === 'Enter') onOpen(); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') onClick(); }}
       className="group select-none w-36 focus:outline-none transition-transform hover:-translate-y-0.5"
       onContextMenu={(e) => {
         if (!onDelete && !onRename) return;
