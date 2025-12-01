@@ -18,15 +18,13 @@ const BASE_TRAITS = [
   'minimalist', 'thorough',
 ];
 
-export default function ZetaSetupCore({
-  title,
-  blurb,
-  logo,
-}: {
+type Props = {
   title: string;
   blurb: string;
-  logo: string;
-}) {
+  logo?: string; // kept so existing calls with { logo } still type-check
+};
+
+export default function ZetaSetupCore({ title, blurb }: Props) {
   const router = useRouter();
   const user = useUser();
 
@@ -36,7 +34,7 @@ export default function ZetaSetupCore({
   const [traits, setTraits] = useState<string[]>([]);
   const [customTraits, setCustomTraits] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
-  const [initiativeCadence, setInitiativeCadence] = useState<'hourly' | 'daily' | 'weekly'>('daily');
+  const [initiativeCadence, setInitiativeCadence] = useState('daily');
   const [isPending, startTransition] = useTransition();
   const [submitting, setSubmitting] = useState(false);
   const mounted = useRef(true);
@@ -49,8 +47,9 @@ export default function ZetaSetupCore({
   }, []);
 
   const handleAddTrait = () => {
-    if (customInput.trim() && !customTraits.includes(customInput.trim())) {
-      setCustomTraits((prev) => [...prev, customInput.trim()]);
+    const v = customInput.trim();
+    if (v && !customTraits.includes(v)) {
+      setCustomTraits((prev) => [...prev, v]);
       setCustomInput('');
     }
   };
@@ -60,179 +59,236 @@ export default function ZetaSetupCore({
     setCustomTraits((prev) => prev.filter((x) => x !== t));
   };
 
-  // ✅ New handleSubmit: ignore template inputs, create minimal project, go to /dashboard/[id]
   const handleSubmit = async () => {
-  if (!user?.id) {
-    alert('No user found – please log in.');
-    return;
-  }
-
-  setSubmitting(true);
-  try {
-    // 🔹 Minimal payload: only what should be 100% safe
-    const insertPayload = {
-      user_id: user.id,
-      name: projectName || 'Zeta Project',
-      // If your schema allows defaults for the rest, DO NOT send them here.
-      // assistant_type, system_instructions, traits, initiative_cadence, etc.
-      // will fall back to DB defaults.
-    };
-
-    const { data, error } = await supabase
-      .from('user_projects')
-      .insert(insertPayload)
-      .select('id')
-      .single();
-
-    if (error) {
-      console.error('Supabase insert error:', error);
-      alert(error.message || 'Error creating project');
+    if (!user?.id) {
+      alert('No user found – please log in.');
       return;
     }
 
-    if (!data?.id) {
-      console.error('No project id returned from insert:', data);
-      alert('Project created but no id returned.');
-      return;
+    setSubmitting(true);
+    try {
+      const { data, error } = await supabase
+        .from('user_projects')
+        .insert({
+          user_id: user.id,
+          name: projectName || 'Zeta Project',
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        alert(error.message || 'Error creating project');
+        return;
+      }
+
+      const projectId = data?.id;
+      if (!projectId) return;
+
+      startTransition(() => router.push(`/dashboard/${projectId}`));
+    } finally {
+      if (mounted.current) setSubmitting(false);
     }
-
-    const newProjectId = data.id as string;
-
-    // 🚀 Go straight to the Zeta dashboard for that project
-    router.push(`/dashboard/${newProjectId}`);
-  } catch (err: any) {
-    // Supabase errors print as {} unless you read .message
-    console.error('Unexpected error creating project:', err?.message || err);
-    alert('Unexpected error creating project');
-  } finally {
-    if (mounted.current) setSubmitting(false);
-  }
-};
-
+  };
 
   return (
-    <div className="relative min-h-screen text-black flex items-center justify-center px-6 py-10 overflow-hidden bg-gradient-to-br from-sky-50 via-sky-100 to-indigo-100">
-      <div className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-yellow-300/40 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-indigo-700/30 blur-3xl" />
+    <div
+      className="
+        relative min-h-screen text-white
+        bg-gradient-to-br from-[#070b21] via-[#0b1250] to-[#14237a]
+        px-4 md:px-8 py-6
+      "
+    >
+      {/* soft background glows (keep, but subtle) */}
+      <div className="pointer-events-none absolute -top-32 -left-40 h-[340px] w-[340px] bg-[#00aaff]/12 blur-[110px] rounded-full" />
+      <div className="pointer-events-none absolute -bottom-32 -right-40 h-[340px] w-[340px] bg-[#6d4aff]/15 blur-[110px] rounded-full" />
 
-      <div className="w-full max-w-5xl">
-        {/* Header */}
-        <div className="flex flex-col items-center mb-6">
-          <Image src={logo} alt="Zeta Logo" width={72} height={72} />
-          <h1 className="text-3xl font-bold text-indigo-900 mt-4">{title}</h1>
-          <p className="text-md text-indigo-800/80 text-center mt-2">{blurb}</p>
+      {/* 3-column layout: avatar | main card | avatar */}
+      <div className="relative z-10 max-w-6xl mx-auto flex items-start justify-center gap-4">
+        {/* LEFT AVATAR (desktop only, no glow) */}
+        <div className="hidden lg:flex flex-col items-center pt-10 w-40 shrink-0">
+          <Image
+            src="/zeta-avatar.svg"
+            alt="Zeta Left"
+            width={150}
+            height={150}
+          />
         </div>
 
-        {/* Card */}
-        <Card className="p-6 shadow-lg bg-white/90 backdrop-blur rounded-2xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* User & Project Info */}
-            <div className="flex flex-col gap-4">
-              <div>
-                <label className="text-sm font-semibold text-gray-700">Preferred Name</label>
-                <Input
-                  value={preferredUserName}
-                  onChange={(e) => setPreferredUserName(e.target.value)}
-                  placeholder="How should Zeta refer to you?"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-semibold text-gray-700">Project Name</label>
-                <Input
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="Name your project"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-semibold text-gray-700">Initiative Cadence</label>
-                <select
-                  value={initiativeCadence}
-                  onChange={(e) => setInitiativeCadence(e.target.value as any)}
-                  className="w-full mt-1 p-2 border border-gray-300 rounded-lg"
-                >
-                  <option value="hourly">Hourly</option>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                </select>
-              </div>
+        {/* MAIN CARD COLUMN */}
+        <div className="w-full max-w-3xl">
+          <Card className="p-5 md:p-7 bg-white text-slate-900 rounded-2xl shadow-2xl space-y-6">
+            {/* Title + blurb INSIDE card */}
+            <div className="text-center mb-2">
+              <h1 className="text-3xl md:text-4xl font-bold text-indigo-900">
+                {title}
+              </h1>
+              <p className="text-xs md:text-sm text-gray-600 mt-2 max-w-2xl mx-auto">
+                {blurb}
+              </p>
             </div>
 
-            {/* System Instructions */}
-            <div className="flex flex-col gap-4">
-              <label className="text-sm font-semibold text-gray-700">System Instructions</label>
-              <Textarea
-                rows={6}
-                value={systemInstructions}
-                onChange={(e) => setSystemInstructions(e.target.value)}
-                placeholder="Describe your assistant's behavior, tone, and objectives..."
-              />
+            {/* STEP 1 */}
+            <div className="space-y-1">
+              <h2 className="text-base md:text-lg font-semibold text-indigo-900">
+                Step 1 · Project basics
+              </h2>
+              <p className="text-[11px] md:text-xs text-gray-500">
+                Name your Zeta and set how often it checks in. You can change this later.
+              </p>
             </div>
-          </div>
 
-          {/* Traits Section (still visible, but not used for now) */}
-          <div className="mt-6">
-            <h2 className="text-lg font-semibold text-indigo-900 mb-3">Personality Traits</h2>
-            <div className="flex flex-wrap gap-2">
-              {BASE_TRAITS.slice(0, 12).map((trait) => {
-                const active = traits.includes(trait);
-                return (
-                  <button
-                    key={trait}
-                    type="button"
-                    onClick={() =>
-                      setTraits((prev) =>
-                        active ? prev.filter((t) => t !== trait) : [...prev, trait]
-                      )
-                    }
-                    className={`px-3 py-1 rounded-full text-sm border ${
-                      active
-                        ? 'bg-indigo-600 text-white border-indigo-700'
-                        : 'bg-white hover:bg-gray-100 border-gray-300'
-                    }`}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* left side of step 1 */}
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-700">
+                    Preferred name
+                  </label>
+                  <Input
+                    value={preferredUserName}
+                    onChange={(e) => setPreferredUserName(e.target.value)}
+                    placeholder="What should Zeta call you?"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-700">
+                    Project name
+                  </label>
+                  <Input
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    placeholder="Weight Loss Plan 2025"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-700">
+                    Initiative cadence
+                  </label>
+                  <select
+                    value={initiativeCadence}
+                    onChange={(e) => setInitiativeCadence(e.target.value)}
+                    className="w-full p-2 text-sm border border-gray-300 rounded-lg mt-1"
                   >
-                    {trait}
-                  </button>
-                );
-              })}
+                    <option value="hourly">Hourly</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* right side of step 1 */}
+              <div className="flex flex-col">
+                <label className="text-[11px] font-semibold text-gray-700">
+                  System instructions <span className="text-gray-400">(optional)</span>
+                </label>
+                <Textarea
+                  rows={6}
+                  className="text-sm mt-1"
+                  value={systemInstructions}
+                  onChange={(e) => setSystemInstructions(e.target.value)}
+                  placeholder="Describe your assistant's behavior, tone, and objectives..."
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  You can refine this later inside the dashboard.
+                </p>
+              </div>
             </div>
 
-            {/* Custom Traits */}
-            <div className="flex items-center gap-2 mt-4">
-              <Input
-                value={customInput}
-                onChange={(e) => setCustomInput(e.target.value)}
-                placeholder="Add custom trait"
-              />
-              <Button onClick={handleAddTrait}>Add</Button>
+            {/* STEP 2 */}
+            <div className="border-top border-gray-300 pt-4">
+              <div className="flex justify-between items-center mb-2">
+                <h2 className="text-base md:text-lg font-semibold text-indigo-900">
+                  Step 2 · Personality (optional)
+                </h2>
+                <span className="text-[10px] text-gray-500">You can skip this.</span>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-[11px] text-gray-600">
+                  Pick a few traits to shape how Zeta talks to you.
+                </p>
+
+                <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">
+                  {BASE_TRAITS.slice(0, 18).map((trait) => {
+                    const active = traits.includes(trait);
+                    return (
+                      <button
+                        key={trait}
+                        type="button"
+                        onClick={() =>
+                          setTraits((prev) =>
+                            active ? prev.filter((t) => t !== trait) : [...prev, trait]
+                          )
+                        }
+                        className={`px-3 py-1 rounded-full text-[11px] border ${
+                          active
+                            ? 'bg-indigo-600 text-white border-indigo-700'
+                            : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        {trait}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    placeholder="Add custom trait"
+                    className="text-sm"
+                  />
+                  <Button
+                    onClick={handleAddTrait}
+                    type="button"
+                    variant="outline"
+                    className="text-[11px] px-3 py-1"
+                  >
+                    Add
+                  </Button>
+                </div>
+
+                {customTraits.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {customTraits.map((t) => (
+                      <span
+                        key={t}
+                        onClick={() => handleRemoveTrait(t)}
+                        className="cursor-pointer px-3 py-1 text-[11px] bg-gray-100 rounded-full border border-gray-300 hover:bg-gray-200"
+                      >
+                        {t} ✕
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 mt-3">
-              {[...customTraits].map((t) => (
-                <span
-                  key={t}
-                  onClick={() => handleRemoveTrait(t)}
-                  className="cursor-pointer px-3 py-1 text-sm bg-gray-100 rounded-full hover:bg-gray-200 border border-gray-300"
-                >
-                  {t} ✕
-                </span>
-              ))}
+            {/* SUBMIT */}
+            <div className="pt-2 flex justify-center">
+              <Button
+                onClick={handleSubmit}
+                disabled={submitting || isPending}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-10 py-2 rounded-full text-sm"
+              >
+                {submitting ? 'Creating…' : 'Create Project'}
+              </Button>
             </div>
-          </div>
+          </Card>
+        </div>
 
-          {/* Submit */}
-          <div className="mt-8 flex justify-center">
-            <Button
-              onClick={handleSubmit}
-              disabled={submitting || isPending}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-2 rounded-full"
-            >
-              {submitting || isPending ? 'Creating Zeta…' : 'Create Project'}
-            </Button>
-          </div>
-        </Card>
+        {/* RIGHT AVATAR (desktop only, no glow) */}
+        <div className="hidden lg:flex flex-col items-center pt-10 w-40 shrink-0">
+          <Image
+            src="/zeta-avatar.svg"
+            alt="Zeta Right"
+            width={150}
+            height={150}
+          />
+        </div>
       </div>
     </div>
   );
