@@ -23,7 +23,7 @@ type Props = {
   blurb: string;
   logo?: string;
   /** slug from zeta_templates, e.g. "zeta-build", "zeta-learn" */
-  templateSlug?: string;
+  templateSlug: string;
 };
 
 export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Props) {
@@ -69,8 +69,8 @@ export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Prop
 
     setSubmitting(true);
     try {
-      // 🔹 Look up template_id from zeta_templates if templateSlug was provided
-      let template_id: string | null = null;
+      // 🔹 Look up template_id from zeta_templates by slug
+      let templateId: string | null = null;
       if (templateSlug) {
         const { data: template, error: templateError } = await supabase
           .from('zeta_templates')
@@ -79,9 +79,9 @@ export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Prop
           .single();
 
         if (!templateError && template?.id) {
-          template_id = template.id;
+          templateId = template.id;
         } else {
-          console.error('Template lookup failed', templateError);
+          console.warn('No template found for slug:', templateSlug, templateError);
         }
       }
 
@@ -89,8 +89,11 @@ export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Prop
         .from('user_projects')
         .insert({
           user_id: user.id,
-          name: projectName || 'Zeta Project',
-          template_id, // ✅ save it here
+          name: projectName || title || 'Zeta Project',
+          template_id: templateId,          // 🔹 this is the key line
+          // you can store these later if you want:
+          // preferred_name: preferredUserName || null,
+          // initiative_cadence: initiativeCadence,
         })
         .select('id')
         .single();
@@ -126,7 +129,7 @@ export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Prop
         {/* LEFT AVATAR (desktop only, no glow) */}
         <div className="hidden lg:flex flex-col items-center pt-10 w-40 shrink-0">
           <Image
-            src={logo || '/templates/zeta.png'}
+            src={logo || '/zeta-avatar.svg'}
             alt="Zeta Left"
             width={150}
             height={150}
@@ -302,7 +305,7 @@ export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Prop
         {/* RIGHT AVATAR (desktop only, no glow) */}
         <div className="hidden lg:flex flex-col items-center pt-10 w-40 shrink-0">
           <Image
-            src={logo || '/templates/zeta.png'}
+            src={logo || '/zeta-avatar.svg'}
             alt="Zeta Right"
             width={150}
             height={150}
