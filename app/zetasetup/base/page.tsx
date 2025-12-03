@@ -1,11 +1,12 @@
-// app/zetasetup/build/page.tsx
 import ZetaSetupCore from '../ZetaSetupCore';
 
 export default function Page() {
   return (
     <ZetaSetupCore
-      title="Zeta Build"
-      blurb="Automate workflows, manage data, and boost operational efficiency — your AI business operator."
-      logo="/zeta-build.png" templateSlug={''}    />
+      title="Zeta Base"
+      blurb="A general-purpose Zeta you can shape into anything: projects, planning, or exploration."
+      logo="/zeta.png"
+      templateSlug="zeta-base"
+    />
   );
 }

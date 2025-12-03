@@ -1,13 +1,12 @@
-'use client';
-
 import ZetaSetupCore from '../ZetaSetupCore';
 
-export default function ChefSetup() {
+export default function Page() {
   return (
     <ZetaSetupCore
-      title="Zeta Chef Setup"
-      blurb="Zeta Chef assists you in crafting meal plans, exploring recipes, and managing ingredients intelligently."
-      logo="/zeta chef.png"
+      title="Zeta Chef"
+      blurb="From pantry → plate: meal plans, substitutions, and smart grocery lists."
+      logo="/zeta-chef.png"
+      templateSlug="zeta-chef"
     />
   );
 }

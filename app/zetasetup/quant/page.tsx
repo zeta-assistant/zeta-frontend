@@ -6,6 +6,7 @@ export default function Page() {
       title="Zeta Quant"
       blurb="Data-first research assistant for modeling, backtests, and decision support."
       logo="/zeta-quant.png"
+      templateSlug="zeta-quant"
     />
   );
 }

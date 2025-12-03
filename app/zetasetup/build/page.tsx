@@ -6,6 +6,7 @@ export default function Page() {
       title="Zeta Build"
       blurb="Automate workflows, manage data, and boost operational efficiency — your AI business operator."
       logo="/zeta-build.png"
+      templateSlug="zeta-build"
     />
   );
 }

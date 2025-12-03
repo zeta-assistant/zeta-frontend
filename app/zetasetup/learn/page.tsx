@@ -1,4 +1,3 @@
-// app/zetasetup/learn/page.tsx
 import ZetaSetupCore from '../ZetaSetupCore';
 
 export default function Page() {
@@ -6,7 +5,7 @@ export default function Page() {
     <ZetaSetupCore
       title="Zeta Learn"
       blurb="Study partner for courses, papers, and problem-sets with spaced review and summaries."
-      logo="/templates/zeta-learn.png"
+      logo="/zeta-learn.png"
       templateSlug="zeta-learn"
     />
   );
