@@ -119,7 +119,7 @@ export async function savePreferredNameForProject(
       return;
     }
 
-    // mirror preferred name to mainframe_info
+    // mirror preferred name to mainframe_info (still fine to keep this)
     const MF_COL = 'preferred_user_name';
     const { data: existingRow, error: checkErr } = await supabase
       .from('mainframe_info')
@@ -182,41 +182,30 @@ export default function SettingsButton({
   const [xp, setXP] = useState<XPState>(ZERO_XP);
   const [plan, setPlan] = useState<string | null>(null);
 
-  // Prefill when opening (created_at + plan from user_projects; traits/name from mainframe_info; XP same as TimelinePanel)
+  // Prefill when opening (created_at, plan, preferred name, traits from user_projects; XP via RPC)
   useEffect(() => {
     if (!showModal || !projectId) return;
     (async () => {
-      // 1) user_projects: created_at + plan
+      // 1) user_projects: created_at, plan, preferred_user_name, personality_traits
       const { data: proj, error: projErr } = await supabase
         .from('user_projects')
-        .select('created_at, plan')
+        .select('created_at, plan, preferred_user_name, personality_traits')
         .eq('id', projectId)
         .maybeSingle();
 
       if (!projErr && proj) {
         setCreatedAt((proj as any).created_at ?? null);
         setPlan((proj as any).plan ?? null);
+        setPreferredName((proj as any).preferred_user_name ?? '');
+        setPersonalityTraits(normalizeTraits((proj as any).personality_traits));
       } else {
         setCreatedAt(null);
         setPlan(null);
-      }
-
-      // 2) mainframe_info: preferred name + traits
-      const { data: mf, error: mfErr } = await supabase
-        .from('mainframe_info')
-        .select('preferred_user_name, personality_traits')
-        .eq('project_id', projectId)
-        .maybeSingle();
-
-      if (!mfErr && mf) {
-        setPreferredName((mf as any).preferred_user_name ?? '');
-        setPersonalityTraits(normalizeTraits((mf as any).personality_traits));
-      } else {
         setPreferredName('');
         setPersonalityTraits([]);
       }
 
-      // 3) XP — mirror TimelinePanel exactly (RPC → fallback → compute)
+      // 2) XP — mirror TimelinePanel exactly (RPC → fallback → compute)
       try {
         let serverCounts: Partial<XPMetrics> | null = null;
         try {
@@ -328,7 +317,7 @@ export default function SettingsButton({
                   </div>
                 </div>
 
-                {/* Personality traits (from mainframe_info) */}
+                {/* Personality traits (from user_projects) */}
                 <div className="mt-4">
                   <div className="text-xs font-semibold text-indigo-800 mb-1">Personality traits</div>
                   {personalityTraits.length > 0 ? (
@@ -354,7 +343,7 @@ export default function SettingsButton({
                 <div>
                   <label className="block text-sm font-semibold mb-1 flex items-center gap-2">
                     🧠 Choose Intelligence Engine
-                    {!(['premium','pro'].includes(String(plan ?? '').toLowerCase())) && (
+                    {modelLocked && (
                       <span
                         className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide
                                    text-yellow-800 bg-yellow-100 border border-yellow-300 rounded-full px-2 py-0.5"
@@ -366,7 +355,7 @@ export default function SettingsButton({
                   </label>
 
                   <div className="relative">
-                    {!(plan && ['premium','pro'].includes(String(plan).toLowerCase())) && (
+                    {modelLocked && (
                       <div
                         className="absolute inset-0 z-10 rounded-md bg-white/60 cursor-not-allowed"
                         aria-hidden
@@ -376,10 +365,10 @@ export default function SettingsButton({
                     <select
                       value={selectedModelId}
                       onChange={(e) => setSelectedModelId(e.target.value)}
-                      disabled={!(plan && ['premium','pro'].includes(String(plan).toLowerCase()))}
+                      disabled={modelLocked}
                       className={`w-full border border-indigo-300 rounded-md p-2 text-sm bg-indigo-50 text-indigo-900 shadow-sm
                                  focus:outline-none focus:ring-2 focus:ring-indigo-400
-                                 ${!(plan && ['premium','pro'].includes(String(plan).toLowerCase())) ? 'opacity-70' : ''}`}
+                                 ${modelLocked ? 'opacity-70' : ''}`}
                     >
                       <option value="gpt-4o">OpenAI</option>
                       <option value="deepseek-chat">DeepSeek</option>
@@ -387,7 +376,7 @@ export default function SettingsButton({
                     </select>
                   </div>
 
-                  {!(plan && ['premium','pro'].includes(String(plan).toLowerCase())) && (
+                  {modelLocked && (
                     <div className="mt-1 text-[11px] text-indigo-700/70">
                       Changing models is a <span className="font-semibold">Premium</span> feature.
                     </div>
@@ -437,8 +426,8 @@ export default function SettingsButton({
               (<code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">fetch_xp_counts</code> →{' '}
               <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">lib/XP</code>).
               Traits & preferred name come from{' '}
-              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">mainframe_info</code>.
-              Plan & created date are from{' '}
+              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">user_projects</code>.
+              Plan & created date are also from{' '}
               <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">user_projects</code>.
             </div>
           </div>

@@ -33,7 +33,14 @@ function labelForStep(k: OnboardingKey) {
 function isOnboardingQuestion(input?: string) {
   if (!input) return false;
   const s = input.toLowerCase();
-  return /\bonboarding\b/.test(s) && (/\bwhat\b.*\bstep\b/.test(s) || /\bwhich\b.*\bstep\b/.test(s) || /\bwhere\b.*\bam i\b/.test(s) || /\bstatus\b/.test(s) || /\bprogress\b/.test(s));
+  return (
+    /\bonboarding\b/.test(s) &&
+    (/\bwhat\b.*\bstep\b/.test(s) ||
+      /\bwhich\b.*\bstep\b/.test(s) ||
+      /\bwhere\b.*\bam i\b/.test(s) ||
+      /\bstatus\b/.test(s) ||
+      /\bprogress\b/.test(s))
+  );
 }
 function parseFilesIntent(message?: string) {
   if (!message) return { wantsFiles: false, query: '' };
@@ -119,14 +126,18 @@ async function handleRequiredActions(
         const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
         const srk = process.env.SUPABASE_SERVICE_ROLE_KEY;
         if (!baseUrl || !srk) {
-          tool_outputs.push({ tool_call_id: tc.id, output: JSON.stringify({ ok: false, error: 'Missing Supabase URL or Service Role Key in env.' }) });
+          tool_outputs.push({
+            tool_call_id: tc.id,
+            output: JSON.stringify({ ok: false, error: 'Missing Supabase URL or Service Role Key in env.' }),
+          });
         } else {
           const res = await fetch(`${baseUrl}/functions/v1/apply-autonomy`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', apikey: srk, Authorization: `Bearer ${srk}` },
             body: JSON.stringify({ projectId, policy: autonomyPolicy, plan: args }),
           });
-          let out: any; try { out = await res.json(); } catch { out = { ok: res.ok }; }
+          let out: any;
+          try { out = await res.json(); } catch { out = { ok: res.ok }; }
           tool_outputs.push({ tool_call_id: tc.id, output: JSON.stringify(out) });
         }
       } else {
@@ -155,19 +166,74 @@ export async function POST(req: Request) {
     const nowISO = now.toISOString();
 
     const model = AVAILABLE_MODELS.find(m => m.id === modelId);
-    if (!model) return NextResponse.json({ reply: '⚠️ Invalid model selected.' }, { status: 400 });
+    if (!model) {
+      return NextResponse.json({ reply: '⚠️ Invalid model selected.' }, { status: 400 });
+    }
 
     // get project & owner
     const { data: projRow, error: projErr } = await supabaseAdmin
       .from('user_projects')
-      .select('assistant_id, preferred_user_name, autonomy_policy, user_id')
+      .select('assistant_id, preferred_user_name, autonomy_policy, user_id, name')
       .eq('id', projectId)
       .single();
-    if (projErr) throw projErr;
-    if (!projRow?.assistant_id) throw new Error('Missing assistant ID');
-    if (!projRow?.user_id) throw new Error('Missing user_id on project');
+
+    if (projErr) {
+      console.error('❌ /api/chat: failed to load project', projErr.message);
+      return NextResponse.json(
+        { reply: '⚠️ Could not load this project.', error: projErr.message },
+        { status: 500 }
+      );
+    }
+
+    if (!projRow?.user_id) {
+      return NextResponse.json(
+        {
+          reply: '⚠️ This project is missing its owner (user_id).',
+          error: 'Missing user_id on project',
+        },
+        { status: 400 }
+      );
+    }
+
     const ownerUserId: string = projRow.user_id as string;
     const autonomyPolicy: AutonomyPolicy = (projRow?.autonomy_policy as AutonomyPolicy) ?? 'auto';
+
+    /* ──────────────────────────────────────────────
+       Ensure we ALWAYS have an assistant_id
+       If missing, create a minimal fallback assistant,
+       save it to user_projects, and keep going.
+    ─────────────────────────────────────────────── */
+    let assistantId = projRow.assistant_id as string | null;
+
+    if (!assistantId) {
+      console.warn('⚠️ /api/chat: no assistant_id for project, creating fallback assistant…');
+
+      const fallback = await openai.beta.assistants.create({
+        name: projRow.name ? `${projRow.name} (fallback)` : 'Zeta Fallback',
+        model: modelId === 'gpt-4o' ? 'gpt-4o' : 'gpt-4',
+        instructions:
+          'You are Zeta, an AI assistant for this project. Respond clearly, helpfully, and concisely. If something seems misconfigured, gently mention it.',
+        tools: [{ type: 'file_search' }],
+      });
+
+      assistantId = fallback.id;
+
+      const { error: upErr } = await supabaseAdmin
+        .from('user_projects')
+        .update({ assistant_id: assistantId })
+        .eq('id', projectId);
+
+      if (upErr) {
+        console.error('❌ /api/chat: failed to save fallback assistant_id', upErr.message);
+        return NextResponse.json(
+          {
+            reply: '⚠️ Failed to attach an assistant to this project.',
+            error: upErr.message,
+          },
+          { status: 500 }
+        );
+      }
+    }
 
     // thread
     const { data: existingThread } = await supabaseAdmin
@@ -180,14 +246,19 @@ export async function POST(req: Request) {
 
     const expired =
       existingThread?.expired ||
-      (existingThread?.last_active && now.getTime() - new Date(existingThread.last_active).getTime() > 1000 * 60 * 60);
+      (existingThread?.last_active &&
+        now.getTime() - new Date(existingThread.last_active).getTime() > 1000 * 60 * 60);
 
     let threadId = existingThread?.thread_id as string | undefined;
     if (!existingThread || !existingThread.thread_id || expired) {
       const newThread = await openai.beta.threads.create();
       threadId = newThread.id;
       await supabaseAdmin.from('threads').insert({
-        project_id: projectId, thread_id: threadId, created_at: nowISO, last_active: nowISO, expired: false,
+        project_id: projectId,
+        thread_id: threadId,
+        created_at: nowISO,
+        last_active: nowISO,
+        expired: false,
       });
       await supabaseAdmin.from('user_projects').update({ thread_id: threadId }).eq('id', projectId);
     } else {
@@ -213,11 +284,20 @@ export async function POST(req: Request) {
           onboarding: true,
           step: nextStep,
           onboarding_status: statusNum,
-          reply: `You're on onboarding step ${Math.min(Math.max(statusNum + 1, 1), 4)} of 4: **${labelForStep(nextStep)}**.\n${getCurrentStepPrompt(nextStep)}`,
+          reply: `You're on onboarding step ${Math.min(Math.max(statusNum + 1, 1), 4)} of 4: **${labelForStep(
+            nextStep
+          )}**.\n${getCurrentStepPrompt(nextStep)}`,
           threadId,
         });
       }
-      return NextResponse.json({ status: 'onboarding', onboarding: false, step: 'complete', onboarding_status: statusNum, reply: 'Onboarding is complete (4/4). ✅', threadId });
+      return NextResponse.json({
+        status: 'onboarding',
+        onboarding: false,
+        step: 'complete',
+        onboarding_status: statusNum,
+        reply: 'Onboarding is complete (4/4). ✅',
+        threadId,
+      });
     }
 
     // log user input (best-effort)
@@ -251,13 +331,15 @@ export async function POST(req: Request) {
 
     const filesFormatted =
       filesContext.length === 0
-        ? (wantsFiles ? 'No matching files.' : 'Not requested.')
+        ? wantsFiles
+          ? 'No matching files.'
+          : 'Not requested.'
         : filesContext.map(f => `- ${f.file_name} — ${f.file_url} (${f.created_at})`).join('\n');
 
     const verbosityInstruction =
-      (body.verbosity === 'short')
+      body.verbosity === 'short'
         ? 'For THIS reply, keep it to 1–2 sentences (<= ~60 words).'
-        : (body.verbosity === 'long')
+        : body.verbosity === 'long'
         ? 'For THIS reply, be thorough: at least 5 sentences with helpful detail.'
         : 'No special length requirement for this reply.';
 
@@ -290,7 +372,7 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
     await openai.beta.threads.messages.create(threadId!, { role: 'user', content: context });
     await openai.beta.threads.messages.create(threadId!, { role: 'user', content: message || ' ' });
 
-    let run = await openai.beta.threads.runs.createAndPoll(threadId!, { assistant_id: projRow.assistant_id });
+    let run = await openai.beta.threads.runs.createAndPoll(threadId!, { assistant_id: assistantId! });
     if (run.status === 'requires_action') {
       await handleRequiredActions(threadId!, run.id, run, projectId, autonomyPolicy);
       run = await openai.beta.threads.runs.poll(run.id, { thread_id: threadId! });
@@ -310,10 +392,10 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
       textContent = anyAssistant ? extractText(anyAssistant) : '⚠️ No reply.';
     }
 
-    // attach onboarding nudge AFTER we’ve got the model’s reply,
-    // so idempotency check sees final text
     if (onboardingActive && nextStep) {
-      textContent += `\n\n—\nWe still need to finish onboarding (status ${statusNum}/4).\nNext step: **${labelForStep(nextStep)}**.\n${getCurrentStepPrompt(nextStep)}`;
+      textContent += `\n\n—\nWe still need to finish onboarding (status ${statusNum}/4).\nNext step: **${labelForStep(
+        nextStep
+      )}**.\n${getCurrentStepPrompt(nextStep)}`;
     }
     if (verbosity === 'short' && !/```|\\\[|\\\(|\$\$/.test(textContent)) textContent = clampShort(textContent);
 
@@ -321,7 +403,6 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
     let appended: any = null;
     if (textContent && textContent !== '⚠️ No reply.') {
       try {
-        // find identical assistant message in the last 3 minutes
         const threeMinAgoISO = new Date(Date.now() - 3 * 60 * 1000).toISOString();
         const { data: recent } = await supabaseAdmin
           .from('zeta_conversation_log')
@@ -335,7 +416,7 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
 
         const dupe = (recent ?? []).find(r => (r.message ?? '') === textContent);
         if (dupe) {
-          appended = dupe; // reuse existing row
+          appended = dupe;
         } else {
           const { data, error } = await supabaseAdmin
             .from('zeta_conversation_log')
@@ -381,6 +462,9 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
     });
   } catch (err: any) {
     console.error('❌ /api/chat error:', err?.message ?? err);
-    return NextResponse.json({ reply: '⚠️ Zeta had an internal error.', error: String(err?.message ?? err) }, { status: 500 });
+    return NextResponse.json(
+      { reply: '⚠️ Zeta had an internal error.', error: String(err?.message ?? err) },
+      { status: 500 }
+    );
   }
 }

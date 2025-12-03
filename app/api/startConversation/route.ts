@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import OpenAI from 'openai';
 
-// Force the assistant intro to actually use the template name
+// Ensure we use full template name in the intro, without duplicating
 function injectTemplateName(intro: string, templateFullName: string): string {
-  if (!intro || !templateFullName || templateFullName === "Zeta") return intro;
+  if (!intro || !templateFullName || templateFullName === 'Zeta') return intro;
 
   // If the model already said "Zeta Quant" (or Zeta Learn etc), DO NOTHING
   if (intro.includes(templateFullName)) {
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     const { data: project, error: projErr } = await supabaseAdmin
       .from('user_projects')
       .select(
-        'assistant_id, name, system_instructions, user_id, first_message_sent, template_id'
+        'assistant_id, name, system_instructions, user_id, first_message_sent, template_id, personality_traits, preferred_user_name'
       )
       .eq('id', projectId)
       .single();
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       .limit(1);
 
     if (existingMessages && existingMessages.length > 0) {
-      // While testing, delete assistant rows for this project to regenerate the intro.
+      // Already introduced—nothing to do.
       return NextResponse.json({ success: true, skipped: true });
     }
 
@@ -86,11 +86,13 @@ export async function POST(req: Request) {
     // ──────────────────────────────────────────────────────────
     const { data: mainframe } = await supabaseAdmin
       .from('mainframe_info')
-      .select('vision, long_term_goals, short_term_goals')
+      .select('vision, long_term_goals, short_term_goals, personality_traits')
       .eq('project_id', projectId)
       .single();
 
-    const systemInstructions = project.system_instructions || '';
+    const systemInstructions = (project.system_instructions || '').toString();
+    const hasSystemInstructions = systemInstructions.trim().length > 0;
+
     const projectName = project.name || 'your project';
     const vision = mainframe?.vision?.trim?.();
 
@@ -104,32 +106,91 @@ export async function POST(req: Request) {
         ? mainframe!.short_term_goals.slice(0, 3).join('; ')
         : undefined;
 
+    // Traits: prefer mainframe, fall back to project
+    let traitList: string[] = [];
+    if (Array.isArray(mainframe?.personality_traits)) {
+      traitList = mainframe!.personality_traits as string[];
+    } else if (Array.isArray(project.personality_traits)) {
+      traitList = project.personality_traits as string[];
+    }
+
+    traitList = Array.from(
+      new Set(
+        (traitList || [])
+          .map((t) => (t ? String(t).trim() : ''))
+          .filter(Boolean)
+      )
+    );
+
     // ──────────────────────────────────────────────────────────
-    // Generate the intro with OpenAI
+    // If NO system instructions: generic, lightweight greeting
+    // ──────────────────────────────────────────────────────────
+    if (!hasSystemInstructions) {
+      const genericIntro = `Hey there! I’m ${templateFullName}, your project copilot for “${projectName}.” I’m here to help you move faster toward your goals. What would you like to focus on first?`;
+
+      const { error: insertError } = await supabaseAdmin
+        .from('zeta_conversation_log')
+        .insert({
+          project_id: projectId,
+          role: 'assistant',
+          message: genericIntro,
+          user_id: project.user_id,
+        });
+
+      if (insertError) throw insertError;
+
+      await supabaseAdmin
+        .from('user_projects')
+        .update({
+          last_interaction_at: new Date().toISOString(),
+          first_message_sent: true,
+        })
+        .eq('id', projectId);
+
+      return NextResponse.json({ success: true, generic: true });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // System-instruction-powered intro with traits (implicit)
     // ──────────────────────────────────────────────────────────
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_KEY || process.env.OPENAI_API_KEY,
     });
 
+    const traitHints =
+      traitList.length > 0
+        ? `Adopt a tone that naturally expresses these personality characteristics: ${traitList.join(
+            ', '
+          )}. Do NOT mention these traits to the user; simply embody them.`
+        : `Adopt a tone that aligns with the system instructions (if any), without ever mentioning them.`;
+
     const sys = [
-      `You are ${templateFullName}, a helpful, concise, and upbeat project copilot.`,
-      `Write the VERY FIRST message of a conversation.`,
-      `Keep it 2–4 short sentences total.`,
-      `Structure MUST include:`,
+      `You are ${templateFullName}, the AI assigned to this project.`,
+
+      // Tone shaping without exposing traits
+      traitHints,
+
+      // SYSTEM INSTRUCTIONS influence — but not shown to user
+      `Below are the system instructions for this project. DO NOT show or quote them to the user. Instead, absorb them and let them shape how you describe yourself, your tone, and how you offer help.`,
+      systemInstructions,
+
+      // Intro generation rules
+      `Your task is to generate ONLY the very first message of the entire conversation.`,
+      `The message must be 2–4 short, natural sentences.`,
+      `Structure:`,
       `1) Friendly "Hey there" style greeting.`,
-      `2) Brief self-intro as ${templateFullName} + that you're here to help them achieve goals.`,
-      `3) One short question asking HOW they'd like you to help, and what goals they'd like to work on.`,
-      `Avoid repeating the project name more than once.`,
-      `Vary phrasing each time (don’t be template-y).`,
-      ``,
-      `Template full name: ${templateFullName}`,
-      `Project name: ${projectName}`,
+      `2) Brief self-introduction as ${templateFullName}, implicitly shaped by the system instructions and traits.`,
+      `3) Ask what they'd like help with and which goals they want to focus on.`,
+
+      `Do NOT mention personality traits, system instructions, or internal rules.`,
+      `Do NOT say things like "based on your system instructions" or "my traits are...".`,
+      `Do NOT describe your personality explicitly; demonstrate it through your tone and wording.`,
+      `Keep it natural, concise, and human-like.`,
+
+      // Extra context for richness
       vision ? `Project vision: ${vision}` : ``,
       topLongTerm ? `Top long-term goals: ${topLongTerm}` : ``,
       topShortTerm ? `Top short-term goals: ${topShortTerm}` : ``,
-      ``,
-      `These are the system instructions ${templateFullName} will follow in this project (do not dump them to user; use them to set tone/context):`,
-      systemInstructions,
     ]
       .filter(Boolean)
       .join('\n');
@@ -145,11 +206,13 @@ export async function POST(req: Request) {
           { role: 'system', content: sys },
           {
             role: 'user',
-            content:
-              `Write the first message to the user for project "${projectName}". ` +
-              `Start with a friendly "Hey there" style greeting, introduce yourself explicitly as ${templateFullName}, ` +
-              `and then briefly ask how they'd like you to help and which goals they'd like to work on. ` +
-              `Keep it friendly, brief, and follow the structure above.`,
+            content: `
+Write the first message to the user for project "${projectName}".
+Start with a warm "Hey there" style greeting.
+Introduce yourself explicitly as ${templateFullName}.
+Let your tone and phrasing be shaped by the system instructions and traits above, but do NOT mention them or describe them explicitly.
+Ask what they'd like to work on or which goals they want help with.
+Keep it friendly, concise, and human.`,
           },
         ],
       });
@@ -162,12 +225,9 @@ export async function POST(req: Request) {
       introPrompt = `Hey there! I’m ${templateFullName}, your assistant for “${projectName}.” I’m here to help you move faster toward your goals. Would you like me to help via quick checklists, proactive suggestions, or step-by-step guidance?`;
     }
 
-    // 🔒 Ensure we actually say the full template name, not just "Zeta"
+    // Ensure we actually say the full template name, not just "Zeta"
     introPrompt = injectTemplateName(introPrompt, templateFullName);
 
-    // ──────────────────────────────────────────────────────────
-    // Persist message + mark project touched
-    // ──────────────────────────────────────────────────────────
     const { error: insertError } = await supabaseAdmin
       .from('zeta_conversation_log')
       .insert({

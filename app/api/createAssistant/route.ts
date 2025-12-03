@@ -154,6 +154,7 @@ export async function POST(req: Request) {
       vision,
       personalityTraits = [],
       initiativeCadence = 'daily',
+      templateId, // ✅ NEW: accept templateId for saving on user_projects
     } = body;
 
     if (!process.env.OPENAI_KEY) {
@@ -170,7 +171,11 @@ export async function POST(req: Request) {
     }
 
     const cleanTraits: string[] = Array.isArray(personalityTraits)
-      ? [...new Set(personalityTraits.map((t: any) => String(t).toLowerCase().trim()).filter((t: string) => /^[a-z][a-z -]{0,23}$/.test(t)))]
+      ? [...new Set(
+          personalityTraits
+            .map((t: any) => String(t).toLowerCase().trim())
+            .filter((t: string) => /^[a-z][a-z -]{0,23}$/.test(t))
+        )]
       : [];
 
     const allowedCadence = new Set(['hourly', 'daily', 'weekly']);
@@ -283,12 +288,10 @@ export async function POST(req: Request) {
                 items: {
                   type: 'object',
                   properties: {
-                    // generation
                     filename: { type: 'string' },
                     mime: { type: 'string', enum: ['text/markdown', 'text/plain', 'application/json'] },
                     content: { type: 'string' },
                     description: { type: 'string' },
-                    // deletion
                     delete: { type: 'boolean' },
                     file_url: { type: 'string' },
                     path: { type: 'string' },
@@ -350,36 +353,40 @@ export async function POST(req: Request) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 5) Update project with assistant/thread + default autonomy policy
+    // 5) ✅ Update project with assistant/thread + config
+    //    (Removed vision here; vision belongs in mainframe_info, not user_projects)
     {
       const { error } = await supabaseAdmin
         .from('user_projects')
         .update({
           assistant_id: assistantId,
           preferred_user_name: preferredNameToSave,
-          vision: vision || null,
           thread_id: threadId,
           model_id: modelId,
           personality_traits: cleanTraits,
           initiative_cadence: cadence,
           autonomy_policy: 'auto',
+          system_instructions: systemInstructions?.trim() || null, // ✅ now stored
+          template_id: templateId ?? null,                         // ✅ template wired
         })
         .eq('id', projectId);
+
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 6) Ensure mainframe_info row exists & set required fields (✅ sets current_date)
+    // 6) Ensure mainframe_info row exists & set required fields (vision lives here)
     {
       const isoNow = new Date().toISOString();
       const today = isoNow.slice(0, 10); // YYYY-MM-DD
 
       const payload = {
-        id: projectId,                                // PK
-        project_id: projectId,                        // keep if your table has it
+        id: projectId,
+        project_id: projectId,
         preferred_user_name: preferredNameToSave || null,
         personality_traits: cleanTraits ?? [],
-        current_date: today,                          // ✅ satisfies NOT NULL
+        current_date: today,
         updated_at: isoNow,
+        vision: vision || null,
       };
 
       const { data: mfiRow } = await supabaseAdmin
@@ -398,8 +405,16 @@ export async function POST(req: Request) {
     // 7) Seed goals (best-effort)
     {
       const { error } = await supabaseAdmin.from('goals').insert([
-        { project_id: projectId, goal_type: 'short_term', description: 'Create a couple short-term goals for Zeta to help you with!' },
-        { project_id: projectId, goal_type: 'long_term', description: 'Describe 1-2 of your long-term goals for Zeta to help with!' },
+        {
+          project_id: projectId,
+          goal_type: 'short_term',
+          description: 'Create a couple short-term goals for Zeta to help you with!',
+        },
+        {
+          project_id: projectId,
+          goal_type: 'long_term',
+          description: 'Describe 1-2 of your long-term goals for Zeta to help with!',
+        },
       ]);
       if (error) console.warn('seed goals warning:', error.message);
     }

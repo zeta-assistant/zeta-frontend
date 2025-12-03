@@ -69,6 +69,15 @@ export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Prop
 
     setSubmitting(true);
     try {
+      // 🔹 combined traits (base + custom, de-duped)
+      const combinedTraits = Array.from(
+        new Set(
+          [...traits, ...customTraits]
+            .map((t) => t.trim())
+            .filter(Boolean)
+        )
+      );
+
       // 🔹 Look up template_id from zeta_templates by slug
       let templateId: string | null = null;
       if (templateSlug) {
@@ -85,26 +94,81 @@ export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Prop
         }
       }
 
-      const { data, error } = await supabase
+      // 🔹 1) Insert project (base fields)
+      const { data: inserted, error: insertErr } = await supabase
         .from('user_projects')
         .insert({
           user_id: user.id,
           name: projectName || title || 'Zeta Project',
-          template_id: templateId,          // 🔹 this is the key line
-          // you can store these later if you want:
-          // preferred_name: preferredUserName || null,
-          // initiative_cadence: initiativeCadence,
+          template_id: templateId,
+          preferred_user_name: preferredUserName.trim() || null,
+          initiative_cadence: initiativeCadence,
         })
         .select('id')
         .single();
 
-      if (error) {
-        alert(error.message || 'Error creating project');
+      if (insertErr) {
+        console.error('user_projects insert error:', insertErr);
+        alert(insertErr.message || 'Error creating project');
         return;
       }
 
-      const projectId = data?.id;
-      if (!projectId) return;
+      const projectId = inserted?.id;
+      if (!projectId) {
+        console.error('No projectId returned from insert');
+        alert('Project created but no ID returned.');
+        return;
+      }
+
+      // 🔹 2) Explicitly update system_instructions + personality_traits
+      const cleanSystem = systemInstructions.trim() || null;
+      const traitsToSave = combinedTraits.length ? combinedTraits : null;
+
+      const { error: updateErr } = await supabase
+        .from('user_projects')
+        .update({
+          system_instructions: cleanSystem,
+          personality_traits: traitsToSave,
+        })
+        .eq('id', projectId);
+
+      if (updateErr) {
+        console.error('user_projects update(system_instructions/personality_traits) error:', updateErr);
+        alert(
+          `Project created, but failed to save system_instructions / personality_traits:\n` +
+          JSON.stringify(updateErr, null, 2)
+        );
+      } else {
+        // 🔹 3) Re-fetch the row JUST to verify what Supabase stored (debug)
+        const { data: verifyRow, error: verifyErr } = await supabase
+          .from('user_projects')
+          .select('id, system_instructions, personality_traits')
+          .eq('id', projectId)
+          .maybeSingle();
+
+        if (verifyErr) {
+          console.warn('Verification select error:', verifyErr);
+        } else {
+          console.log('✅ user_projects row after save:', verifyRow);
+        }
+      }
+
+      // 🔹 4) Also push traits into mainframe_info so Zeta can see them immediately
+      if (combinedTraits.length > 0) {
+        const { error: mfError } = await supabase
+          .from('mainframe_info')
+          .upsert(
+            {
+              project_id: projectId,
+              personality_traits: combinedTraits,
+            },
+            { onConflict: 'project_id' }
+          );
+
+        if (mfError) {
+          console.warn('Failed to upsert mainframe_info personality_traits', mfError);
+        }
+      }
 
       startTransition(() => router.push(`/dashboard/${projectId}`));
     } finally {
