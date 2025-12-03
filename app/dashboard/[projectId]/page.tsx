@@ -91,6 +91,9 @@ export default function DashboardPage() {
   const params = useParams();
   const projectId = params.projectId as string;
 
+  // 🔹 which template this project is using (slug from zeta_templates)
+  const [templateSlug, setTemplateSlug] = useState<string | null>(null);
+
   const isImage = (name: string) => /\.(png|jpe?g|webp|gif)$/i.test(name);
 
   const buildFilesMarkdown = (atts: Uploaded[]) => {
@@ -110,13 +113,16 @@ export default function DashboardPage() {
   }, [projectId]);
 
   const checkSessionAndProject = async () => {
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
     if (sessionError || !session?.user?.email) return router.push('/login');
     setUserEmail(session.user.email);
 
     const { data: project, error: projectError } = await supabase
       .from('user_projects')
-      .select('name, user_id, assistant_id, thread_id')
+      .select('name, user_id, assistant_id, thread_id, template_id')
       .eq('id', projectId)
       .single();
 
@@ -128,6 +134,19 @@ export default function DashboardPage() {
     setProjectName(project.name);
     setAssistantId(project.assistant_id);
     setThreadId(project.thread_id ?? null);
+
+    // 🔹 get slug for this template (zeta-chef, zeta-writer, etc.)
+    if (project.template_id) {
+      const { data: template, error: templateError } = await supabase
+        .from('zeta_templates')
+        .select('slug')
+        .eq('id', project.template_id)
+        .single();
+
+      if (!templateError && template?.slug) {
+        setTemplateSlug(template.slug);
+      }
+    }
 
     const { data: history } = await supabase
       .from('zeta_conversation_log')
@@ -160,10 +179,16 @@ export default function DashboardPage() {
           .order('timestamp', { ascending: true });
 
         if (updated && updated.length > 0) {
-          setMessages(updated.map((m) => ({ role: m.role, content: m.message })));
+          setMessages(
+            updated.map((m) => ({ role: m.role, content: m.message }))
+          );
         } else {
           setMessages([
-            { role: 'assistant', content: '⚠️ Zeta failed to respond. Try typing something to get started.' },
+            {
+              role: 'assistant',
+              content:
+                '⚠️ Zeta failed to respond. Try typing something to get started.',
+            },
           ]);
         }
       }, 3000);
@@ -207,20 +232,32 @@ export default function DashboardPage() {
 
     const sentText = input;
     if (hasText) {
-      setMessages((prev) => [...prev, { role: 'user', content: sentText, timestamp: Date.now() }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: sentText, timestamp: Date.now() },
+      ]);
     }
     if (hasFiles) {
       const filesMsg = buildFilesMarkdown(attachments);
-      setMessages((prev) => [...prev, { role: 'user', content: filesMsg, timestamp: Date.now() }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: filesMsg, timestamp: Date.now() },
+      ]);
     }
     setInput('');
 
     try {
-      const { data: { session }, error } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
       if (error || !session?.access_token || !session?.user?.id) {
         clearTimeout(timeoutId);
         setSendingMessage(false);
-        setMessages((prev) => [...prev, { role: 'assistant', content: '❌ Not logged in properly.' }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: '❌ Not logged in properly.' },
+        ]);
         return;
       }
 
@@ -274,12 +311,18 @@ export default function DashboardPage() {
         timestamp: new Date().toISOString(),
       });
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: assistantReply }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: assistantReply },
+      ]);
     } catch (err: any) {
       clearTimeout(timeoutId);
       if (didTimeout && err.name === 'AbortError') return;
       console.error('❌ Message error:', err);
-      setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ Failed to send message.' }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '⚠️ Failed to send message.' },
+      ]);
     } finally {
       setSendingMessage(false);
     }
@@ -330,6 +373,22 @@ export default function DashboardPage() {
 
   const PANEL_H = 'calc(100vh - 110px)';
 
+  // 🔹 decide thinking image: default, chef, writer
+  const getThinkingSrc = () => {
+    if (templateSlug === 'zeta-chef') return '/templates/zeta-chef-thinking.png';
+    if (templateSlug === 'zeta-writer')
+      return '/templates/zeta-writer-thinking.png';
+    return '/zeta-thinking.svg';
+  };
+
+  // 🔹 decide idle image based on template
+  const getIdleSrc = () => {
+    if (templateSlug === 'zeta-chef') return '/templates/zeta-chef.png';
+    if (templateSlug === 'zeta-writer') return '/templates/zeta-writer.png';
+    if (templateSlug) return `/templates/${templateSlug}.png`; // zeta-learn, zeta-quant, etc.
+    return '/templates/zeta.png'; // fallback (fixes /zeta.png 404)
+  };
+
   return (
     <>
       {/* MOBILE: header + tabs + center panel only */}
@@ -372,9 +431,10 @@ export default function DashboardPage() {
               style={{ height: PANEL_H }}
             >
               <img
-                src={sendingMessage ? '/zeta-thinking.svg' : '/zeta-avatar.svg'}
-                alt={sendingMessage ? 'Zeta Thinking' : 'Zeta Mascot'}
-                className="w-[250px] absolute top-0 left-1/2 -translate-x-1/2"
+                src={sendingMessage ? getThinkingSrc() : getIdleSrc()}
+                alt="Zeta Avatar"
+                className="w-[250px] absolute top-0 left-1/2 -translate-x-1/2 mix-blend-multiply"
+                style={{ background: 'none' }}
               />
 
               <div className="absolute top-4 left-[300px] z-30 flex flex-col gap-2 items-center">
@@ -424,19 +484,34 @@ export default function DashboardPage() {
                   "
                 >
                   <div className="min-w-0">
-                    <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                    <ChatboardTab
+                      activeMainTab={activeMainTab}
+                      setActiveMainTab={setActiveMainTab}
+                    />
                   </div>
                   <div className="min-w-0">
-                    <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                    <WorkspaceTabs
+                      activeMainTab={activeMainTab}
+                      setActiveMainTab={setActiveMainTab}
+                    />
                   </div>
                   <div className="min-w-0">
-                    <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                    <PlannerTabs
+                      activeMainTab={activeMainTab}
+                      setActiveMainTab={setActiveMainTab}
+                    />
                   </div>
                   <div className="min-w-0">
-                    <IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                    <IntelligenceTabs
+                      activeMainTab={activeMainTab}
+                      setActiveMainTab={setActiveMainTab}
+                    />
                   </div>
                   <div className="min-w-0">
-                    <FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
+                    <FunctionsTabs
+                      activeMainTab={activeMainTab}
+                      setActiveMainTab={setActiveMainTab}
+                    />
                   </div>
                 </div>
               </div>
@@ -465,15 +540,27 @@ export default function DashboardPage() {
               )}
 
               {activeMainTab === 'discussions' && (
-                <DiscussionsPanel key={`discussions-${refreshNonce}`} fontSize={fontSize} />
+                <DiscussionsPanel
+                  key={`discussions-${refreshNonce}`}
+                  fontSize={fontSize}
+                />
               )}
 
               {/* 🌐 Connections */}
               {activeMainTab === 'connections' && (
-                <ConnectionsPanel key={`connections-${refreshNonce}`} projectId={projectId} />
+                <ConnectionsPanel
+                  key={`connections-${refreshNonce}`}
+                  projectId={projectId}
+                />
               )}
 
-              {activeMainTab === 'logs' && <LogsPanel key="Logs" fontSize={fontSize} projectId={projectId} />}
+              {activeMainTab === 'logs' && (
+                <LogsPanel
+                  key="Logs"
+                  fontSize={fontSize}
+                  projectId={projectId}
+                />
+              )}
 
               {activeMainTab === 'files' && (
                 <FilesPanel
@@ -484,40 +571,91 @@ export default function DashboardPage() {
                 />
               )}
 
-              {activeMainTab === 'apis' && <ApisPanel key={`apis-${refreshNonce}`} fontSize={fontSize} projectId={projectId} />}
+              {activeMainTab === 'apis' && (
+                <ApisPanel
+                  key={`apis-${refreshNonce}`}
+                  fontSize={fontSize}
+                  projectId={projectId}
+                />
+              )}
 
-              {activeMainTab === 'calendar' && <CalendarPanel key={`calendar-${refreshNonce}`} fontSize={fontSize} />}
+              {activeMainTab === 'calendar' && (
+                <CalendarPanel
+                  key={`calendar-${refreshNonce}`}
+                  fontSize={fontSize}
+                />
+              )}
 
-              {activeMainTab === 'goals' && <GoalsPanel key={`goals-${refreshNonce}`} fontSize="base" projectId={projectId} />}
+              {activeMainTab === 'goals' && (
+                <GoalsPanel
+                  key={`goals-${refreshNonce}`}
+                  fontSize="base"
+                  projectId={projectId}
+                />
+              )}
 
               {activeMainTab === 'notifications' && (
-                <NotificationsPanel key={`notifications-${refreshNonce}`} projectId={projectId} />
+                <NotificationsPanel
+                  key={`notifications-${refreshNonce}`}
+                  projectId={projectId}
+                />
               )}
 
-              {activeMainTab === 'tasks' && <TasksPanel key={`tasks-${refreshNonce}`} fontSize={fontSize} userName={userName} />}
+              {activeMainTab === 'tasks' && (
+                <TasksPanel
+                  key={`tasks-${refreshNonce}`}
+                  fontSize={fontSize}
+                  userName={userName}
+                />
+              )}
 
               {activeMainTab === 'thoughts' && (
-                <ThoughtsPanel key={`thoughts-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
+                <ThoughtsPanel
+                  key={`thoughts-${refreshNonce}`}
+                  projectId={projectId}
+                  fontSize={fontSize}
+                />
               )}
 
-              {activeMainTab === 'timeline' && <TimelinePanel key={`timeline-${refreshNonce}`} projectId={projectId} />}
+              {activeMainTab === 'timeline' && (
+                <TimelinePanel
+                  key={`timeline-${refreshNonce}`}
+                  projectId={projectId}
+                />
+              )}
 
               {activeMainTab === 'functions' && (
-                <FunctionsPanel key={`functions-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
+                <FunctionsPanel
+                  key={`functions-${refreshNonce}`}
+                  projectId={projectId}
+                  fontSize={fontSize}
+                />
               )}
 
               {activeMainTab === 'newfunction' && (
-                <NewFunctionPanel key={`newfunction-${refreshNonce}`} projectId={projectId} fontSize={fontSize} />
+                <NewFunctionPanel
+                  key={`newfunction-${refreshNonce}`}
+                  projectId={projectId}
+                  fontSize={fontSize}
+                />
               )}
 
               {activeMainTab === 'workshop' && (
-                <WorkshopPanel key={`workshop-${refreshNonce}`} projectId={projectId} fontSize="base" />
+                <WorkshopPanel
+                  key={`workshop-${refreshNonce}`}
+                  projectId={projectId}
+                  fontSize="base"
+                />
               )}
             </div>
 
             {/* Right sidebar */}
             <div className="w-[380px] shrink-0" style={{ height: PANEL_H }}>
-              <ZetaRightSidePanel key={`right-${refreshNonce}`} userEmail={userEmail} projectId={projectId} />
+              <ZetaRightSidePanel
+                key={`right-${refreshNonce}`}
+                userEmail={userEmail}
+                projectId={projectId}
+              />
             </div>
           </div>
         </div>

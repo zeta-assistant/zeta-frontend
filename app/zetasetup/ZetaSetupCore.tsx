@@ -21,10 +21,12 @@ const BASE_TRAITS = [
 type Props = {
   title: string;
   blurb: string;
-  logo?: string; // kept so existing calls with { logo } still type-check
+  logo?: string;
+  /** slug from zeta_templates, e.g. "zeta-build", "zeta-learn" */
+  templateSlug?: string;
 };
 
-export default function ZetaSetupCore({ title, blurb }: Props) {
+export default function ZetaSetupCore({ title, blurb, logo, templateSlug }: Props) {
   const router = useRouter();
   const user = useUser();
 
@@ -67,11 +69,28 @@ export default function ZetaSetupCore({ title, blurb }: Props) {
 
     setSubmitting(true);
     try {
+      // 🔹 Look up template_id from zeta_templates if templateSlug was provided
+      let template_id: string | null = null;
+      if (templateSlug) {
+        const { data: template, error: templateError } = await supabase
+          .from('zeta_templates')
+          .select('id')
+          .eq('slug', templateSlug)
+          .single();
+
+        if (!templateError && template?.id) {
+          template_id = template.id;
+        } else {
+          console.error('Template lookup failed', templateError);
+        }
+      }
+
       const { data, error } = await supabase
         .from('user_projects')
         .insert({
           user_id: user.id,
           name: projectName || 'Zeta Project',
+          template_id, // ✅ save it here
         })
         .select('id')
         .single();
@@ -107,7 +126,7 @@ export default function ZetaSetupCore({ title, blurb }: Props) {
         {/* LEFT AVATAR (desktop only, no glow) */}
         <div className="hidden lg:flex flex-col items-center pt-10 w-40 shrink-0">
           <Image
-            src="/zeta-avatar.svg"
+            src={logo || '/templates/zeta.png'}
             alt="Zeta Left"
             width={150}
             height={150}
@@ -283,7 +302,7 @@ export default function ZetaSetupCore({ title, blurb }: Props) {
         {/* RIGHT AVATAR (desktop only, no glow) */}
         <div className="hidden lg:flex flex-col items-center pt-10 w-40 shrink-0">
           <Image
-            src="/zeta-avatar.svg"
+            src={logo || '/templates/zeta.png'}
             alt="Zeta Right"
             width={150}
             height={150}
