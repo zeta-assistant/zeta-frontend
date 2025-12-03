@@ -17,7 +17,7 @@ import MemoryView from './Icons/MemoryView';
 import { SectionCard } from './Icons/common';
 
 /* ─────────────────────────────────────────────────────────
-   Helpers (shared)
+   Types + helpers
 ────────────────────────────────────────────────────────── */
 export type FileDoc = {
   file_url: string;
@@ -27,7 +27,13 @@ export type FileDoc = {
   storage_key?: string;
 };
 
-type BuiltInFolder = 'uploaded' | 'generated' | 'converter' | 'generator' | 'interpreter' | 'memory';
+type BuiltInFolder =
+  | 'uploaded'
+  | 'generated'
+  | 'converter'
+  | 'generator'
+  | 'interpreter'
+  | 'memory';
 type FolderId = BuiltInFolder | `custom:${string}`;
 type CustomFolder = { id: `custom:${string}`; name: string };
 
@@ -49,10 +55,11 @@ function stripOuterFences(text: string) {
   return m ? m[1] : text;
 }
 
-/** remove common leading indentation (spaces or tabs) across non-empty lines */
+/** remove common leading indentation across non-empty lines */
 function deindentBlock(text: string) {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
-  let i = 0, j = lines.length - 1;
+  let i = 0,
+    j = lines.length - 1;
   while (i <= j && !lines[i].trim()) i++;
   while (j >= i && !lines[j].trim()) j--;
   const slice = lines.slice(i, j + 1);
@@ -102,20 +109,11 @@ function downloadUrl(url: string, fallbackName = 'download') {
   a.remove();
 }
 
-function looksLikeMarkdownText(text: string) {
-  let score = 0;
-  if (/^#{1,6}\s/m.test(text)) score++;
-  if (/^\s*[-*+]\s+\S/m.test(text)) score++;
-  if (/^\s*\d+\.\s+\S/m.test(text)) score++;
-  if (/\*\*[^*]+\*\*/m.test(text) || /_[^_]+_/m.test(text)) score++;
-  if (/```[\s\S]*?```/m.test(text) || /`[^`]+`/m.test(text)) score++;
-  if (/\[[^\]]+\]\([^)]+\)/m.test(text)) score++;
-  return score >= 2;
-}
-const isTextLike = (name: string) => /\.(md|markdown|txt|csv|json)$/i.test(name || '');
+const isTextLike = (name: string) =>
+  /\.(md|markdown|txt|csv|json)$/i.test(name || '');
 
 /* ─────────────────────────────────────────────────────────
-   Safe paragraph (pre inside p fix) + MD components
+   Markdown components
 ────────────────────────────────────────────────────────── */
 function ParagraphSmart({
   children,
@@ -126,15 +124,18 @@ function ParagraphSmart({
     if (!React.isValidElement(child)) return false;
     const el = child as React.ReactElement<any>;
     const type = el.type as any;
-    const isPre = type === 'pre' || (typeof type === 'string' && type.toLowerCase() === 'pre');
-    const cls = typeof el.props?.className === 'string' ? el.props.className : '';
+    const isPre =
+      type === 'pre' || (typeof type === 'string' && type.toLowerCase() === 'pre');
+    const cls =
+      typeof el.props?.className === 'string' ? el.props.className : '';
     const childText =
       typeof el.props?.children === 'string'
         ? el.props.children
         : Array.isArray(el.props?.children)
         ? el.props.children.join('')
         : '';
-    const looksBlockyCode = /(^|\s)language-/.test(cls) || /\r?\n/.test(childText);
+    const looksBlockyCode =
+      /(^|\s)language-/.test(cls) || /\r?\n/.test(childText);
     return isPre || looksBlockyCode;
   });
 
@@ -147,17 +148,42 @@ function ParagraphSmart({
 }
 
 const mdComponents: Components = {
-  h1: ({ node, ...props }) => <h1 className="text-cyan-50 text-2xl font-semibold mb-3" {...props} />,
-  h2: ({ node, ...props }) => <h2 className="text-cyan-50 text-xl font-semibold mt-5 mb-2" {...props} />,
-  h3: ({ node, ...props }) => <h3 className="text-cyan-50 text-lg font-semibold mt-4 mb-1.5" {...props} />,
+  h1: ({ node, ...props }) => (
+    <h1 className="text-cyan-50 text-2xl font-semibold mb-3" {...props} />
+  ),
+  h2: ({ node, ...props }) => (
+    <h2 className="text-cyan-50 text-xl font-semibold mt-5 mb-2" {...props} />
+  ),
+  h3: ({ node, ...props }) => (
+    <h3 className="text-cyan-50 text-lg font-semibold mt-4 mb-1.5" {...props} />
+  ),
   p: (props: any) => <ParagraphSmart {...props} />,
-  ul: ({ node, ...props }) => <ul className="list-disc pl-5 my-2 space-y-1 marker:text-cyan-300" {...props} />,
-  ol: ({ node, ...props }) => <ol className="list-decimal pl-5 my-2 space-y-1 marker:text-cyan-300" {...props} />,
-  li: ({ node, ...props }) => <li className="text-cyan-50/90" {...props} />,
-  em: ({ node, ...props }) => <em className="text-cyan-100/90" {...props} />,
-  strong: ({ node, ...props }) => <strong className="text-cyan-50" {...props} />,
+  ul: ({ node, ...props }) => (
+    <ul
+      className="list-disc pl-5 my-2 space-y-1 marker:text-cyan-300"
+      {...props}
+    />
+  ),
+  ol: ({ node, ...props }) => (
+    <ol
+      className="list-decimal pl-5 my-2 space-y-1 marker:text-cyan-300"
+      {...props}
+    />
+  ),
+  li: ({ node, ...props }) => (
+    <li className="text-cyan-50/90" {...props} />
+  ),
+  em: ({ node, ...props }) => (
+    <em className="text-cyan-100/90" {...props} />
+  ),
+  strong: ({ node, ...props }) => (
+    <strong className="text-cyan-50" {...props} />
+  ),
   blockquote: ({ node, ...props }) => (
-    <blockquote className="border-l-2 border-cyan-500/50 pl-3 my-3 text-cyan-100/80 italic" {...props} />
+    <blockquote
+      className="border-l-2 border-cyan-500/50 pl-3 my-3 text-cyan-100/80 italic"
+      {...props}
+    />
   ),
   hr: () => <hr className="my-4 border-cyan-600/40" />,
   code: (props) => {
@@ -200,6 +226,7 @@ function ModalPortal({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
   if (!mounted) return null;
+  if (typeof document === 'undefined') return null;
   return createPortal(children, document.body);
 }
 
@@ -217,13 +244,26 @@ function Modal({
   if (!open) return null;
   return (
     <ModalPortal>
-      <div className="fixed inset-0 z-[2147483647] grid place-items-center bg-black/55 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div
+        className="fixed inset-0 z-[2147483647] grid place-items-center bg-black/55 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+      >
         <div className="w-[min(720px,92vw)] max-h-[85vh] rounded-2xl border border-cyan-500/40 bg-cyan-950/90 shadow-2xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-cyan-600/40 bg-cyan-950/90 sticky top-0">
-            <div className="text-cyan-50 font-medium truncate pr-3">{title}</div>
-            <button onClick={onClose} className="text-xs px-2 py-1 rounded-md border border-cyan-600/60 bg-cyan-800/60 hover:bg-cyan-700/60">Close</button>
+            <div className="text-cyan-50 font-medium truncate pr-3">
+              {title}
+            </div>
+            <button
+              onClick={onClose}
+              className="text-xs px-2 py-1 rounded-md border border-cyan-600/60 bg-cyan-800/60 hover:bg-cyan-700/60"
+            >
+              Close
+            </button>
           </div>
-          <div className="p-5 overflow-auto max-h-[calc(85vh-52px)] pr-2">{children}</div>
+          <div className="p-5 overflow-auto max-h-[calc(85vh-52px)] pr-2">
+            {children}
+          </div>
         </div>
       </div>
     </ModalPortal>
@@ -231,7 +271,7 @@ function Modal({
 }
 
 /* ─────────────────────────────────────────────────────────
-   Error Boundary (prevents total white-screen)
+   Error Boundary (for inner views)
 ────────────────────────────────────────────────────────── */
 class ViewErrorBoundary extends React.Component<
   { children: React.ReactNode; label: string },
@@ -251,7 +291,10 @@ class ViewErrorBoundary extends React.Component<
   render() {
     if (!this.state.hasError) return this.props.children;
     return (
-      <SectionCard title={`${this.props.label} crashed`} subtitle="Something went wrong">
+      <SectionCard
+        title={`${this.props.label} crashed`}
+        subtitle="Something went wrong"
+      >
         <div className="text-red-200 text-sm">
           {this.state.message || 'Unknown error.'}
         </div>
@@ -260,17 +303,26 @@ class ViewErrorBoundary extends React.Component<
   }
 }
 
-/* ╔════════════════════════════════════════════════════════╗
-   ║                       PAYWALL UI                       ║
-   ╚════════════════════════════════════════════════════════╝ */
-function Paywall({ feature, onUpgrade }: { feature: 'interpreter' | 'converter'; onUpgrade: () => void }) {
+/* ─────────────────────────────────────────────────────────
+   Paywall UI
+────────────────────────────────────────────────────────── */
+function Paywall({
+  feature,
+  onUpgrade,
+}: {
+  feature: 'interpreter' | 'converter';
+  onUpgrade: () => void;
+}) {
   const label = feature === 'interpreter' ? 'File Interpreter' : 'File Converter';
   return (
     <SectionCard
       title={`${label} — Premium`}
       subtitle="Unlock with Zeta Pro"
       right={
-        <button onClick={onUpgrade} className="text-xs px-2 py-1 rounded-md border border-amber-500/70 bg-amber-500/20 hover:bg-amber-500/30 text-amber-100">
+        <button
+          onClick={onUpgrade}
+          className="text-xs px-2 py-1 rounded-md border border-amber-500/70 bg-amber-500/20 hover:bg-amber-500/30 text-amber-100"
+        >
           Upgrade
         </button>
       }
@@ -281,12 +333,15 @@ function Paywall({ feature, onUpgrade }: { feature: 'interpreter' | 'converter';
           <span>This feature is available on the Premium plan.</span>
         </div>
         <ul className="list-disc pl-5 text-cyan-100/90 space-y-1">
-          <li>AI summaries & insights on your files</li>
+          <li>AI summaries &amp; insights on your files</li>
           <li>Fast, reliable conversions (PNG ⇄ JPG ⇄ WEBP, +more)</li>
           <li>Higher limits and priority compute</li>
         </ul>
         <div className="pt-2">
-          <button onClick={onUpgrade} className="px-3 py-1.5 rounded-md border border-amber-500 bg-amber-500 text-indigo-900 font-semibold text-sm hover:opacity-90">
+          <button
+            onClick={onUpgrade}
+            className="px-3 py-1.5 rounded-md border border-amber-500 bg-amber-500 text-indigo-900 font-semibold text-sm hover:opacity-90"
+          >
             Upgrade to Premium
           </button>
         </div>
@@ -295,19 +350,19 @@ function Paywall({ feature, onUpgrade }: { feature: 'interpreter' | 'converter';
   );
 }
 
-/* ─────────────────────────────────────────────────────────
-   Main component
-────────────────────────────────────────────────────────── */
+/* ╔════════════════════════════════════════════════════════╗
+   ║                     MAIN COMPONENT                     ║
+   ╚════════════════════════════════════════════════════════╝ */
 export default function FilesPanel({
   projectId: projectIdProp,
   fontSize,
   recentDocs = [],
 }: {
-  projectId?: string; // optional – can come from route
+  projectId?: string;
   fontSize: 'sm' | 'base' | 'lg';
   recentDocs?: FileDoc[];
 }) {
-  const route = useParams<{ projectId?: string }>() as { projectId?: string } | null;
+  const params = useParams() as Record<string, string | string[] | undefined> | null;
   const [projectId, setProjectId] = useState<string | null>(projectIdProp ?? null);
 
   // documents state
@@ -325,32 +380,80 @@ export default function FilesPanel({
   const [plan, setPlan] = useState<Plan>('loading');
   const isPremium = plan === 'premium' || plan === 'pro';
   const isFree = plan === 'free';
-  const [showPaywall, setShowPaywall] = useState<false | 'interpreter' | 'converter'>(false);
+  const [showPaywall, setShowPaywall] = useState<false | 'interpreter' | 'converter'>(
+    false,
+  );
 
-  // resolve projectId: props → URL (+ query fallback)
+  // Generated file preview
+  const [genPreviewOpen, setGenPreviewOpen] = useState(false);
+  const [genPreviewTitle, setGenPreviewTitle] = useState('');
+  const [genPreviewUrl, setGenPreviewUrl] = useState<string | null>(null);
+  const [genPreviewText, setGenPreviewText] = useState<string | null>(null);
+  const [genPreviewLoading, setGenPreviewLoading] = useState(false);
+  const [genPreviewError, setGenPreviewError] = useState<string | null>(null);
+
+  const textSize =
+    fontSize === 'sm' ? 'text-sm' : fontSize === 'lg' ? 'text-lg' : 'text-base';
+
+  useEffect(() => setDocs(recentDocs), [recentDocs]);
+
+  // safe param getter
+  const getParam = (key: string): string | null => {
+    if (!params) return null;
+    const raw = params[key];
+    if (!raw) return null;
+    if (Array.isArray(raw)) return raw[0] ?? null;
+    return raw;
+  };
+
+  // resolve projectId: props → URL params → query
   useEffect(() => {
-    if (projectIdProp) { setProjectId(projectIdProp); return; }
-    const all = (route ?? {}) as Record<string, string | undefined>;
-    const fromUrl =
-      all.projectId?.trim() ||
-      all.id?.trim() ||
-      all.pid?.trim() ||
-      new URLSearchParams(window.location.search).get('projectId')?.trim();
-    if (fromUrl) setProjectId(fromUrl);
-  }, [projectIdProp, route]);
+    if (projectIdProp) {
+      setProjectId(projectIdProp);
+      return;
+    }
+
+    try {
+      const fromParams =
+        getParam('projectId') ?? getParam('id') ?? getParam('pid') ?? null;
+
+      let fromQuery: string | null = null;
+      if (typeof window !== 'undefined') {
+        const sp = new URLSearchParams(window.location.search);
+        fromQuery = sp.get('projectId');
+      }
+
+      const finalId = (fromParams || fromQuery || '').trim();
+      if (finalId) setProjectId(finalId);
+    } catch (err) {
+      console.warn('[FilesPanel] projectId resolution error:', err);
+    }
+  }, [projectIdProp, params]);
 
   // DEV override (?forcePremium=1 or localStorage flag)
   useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    const force = sp.get('forcePremium') === '1' || localStorage.getItem('zeta_force_premium') === '1';
-    if (force) setPlan('premium');
+    try {
+      if (typeof window === 'undefined') return;
+      const sp = new URLSearchParams(window.location.search);
+      const force =
+        sp.get('forcePremium') === '1' ||
+        (typeof localStorage !== 'undefined' &&
+          localStorage.getItem('zeta_force_premium') === '1');
+      if (force) setPlan('premium');
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   // Fetch plan strictly from mainframe_info.plan by project_id
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
-      if (!projectId) { if (!cancelled) setPlan('loading'); return; }
+      if (!projectId) {
+        if (!cancelled) setPlan('loading');
+        return;
+      }
       try {
         const { data, error } = await supabase
           .from('mainframe_info')
@@ -364,7 +467,10 @@ export default function FilesPanel({
           return;
         }
         if (!data) {
-          console.warn('[FilesPanel] no mainframe_info row for project', projectId);
+          console.warn(
+            '[FilesPanel] no mainframe_info row for project',
+            projectId,
+          );
           if (!cancelled) setPlan('free');
           return;
         }
@@ -375,23 +481,18 @@ export default function FilesPanel({
         if (!cancelled) setPlan('free');
       }
     })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   // close paywall if plan flips to premium
-  useEffect(() => { if (isPremium && showPaywall) setShowPaywall(false); }, [isPremium, showPaywall]);
+  useEffect(() => {
+    if (isPremium && showPaywall) setShowPaywall(false);
+  }, [isPremium, showPaywall]);
 
-  // Generated file preview state
-  const [genPreviewOpen, setGenPreviewOpen] = useState(false);
-  const [genPreviewTitle, setGenPreviewTitle] = useState('');
-  const [genPreviewUrl, setGenPreviewUrl] = useState<string | null>(null);
-  const [genPreviewText, setGenPreviewText] = useState<string | null>(null);
-  const [genPreviewLoading, setGenPreviewLoading] = useState(false);
-  const [genPreviewError, setGenPreviewError] = useState<string | null>(null);
-
-  const textSize = fontSize === 'sm' ? 'text-sm' : fontSize === 'lg' ? 'text-lg' : 'text-base';
-  useEffect(() => setDocs(recentDocs), [recentDocs]);
-
+  // helpers for Supabase storage
   const toStoragePath = (urlOrPath: string) => {
     if (!urlOrPath) return '';
     if (urlOrPath.startsWith('http')) {
@@ -411,12 +512,20 @@ export default function FilesPanel({
 
   // ───────── Data loads ─────────
   async function loadDocs() {
-    if (!projectId) { setDocs([]); return; }
+    if (!projectId) {
+      setDocs([]);
+      return;
+    }
     setLoading(true);
     try {
-      const res = await fetch(`/api/project-files?project_id=${projectId}&limit=100`);
-      const { rows } = await res.json();
-      const list: FileDoc[] = (rows || []).map((r: any) => ({
+      const res = await fetch(
+        `/api/project-files?project_id=${encodeURIComponent(
+          projectId,
+        )}&limit=100`,
+      );
+      const json = await res.json().catch(() => ({}));
+      const rows = (json as any).rows ?? [];
+      const list: FileDoc[] = rows.map((r: any) => ({
         file_name: r.file_name,
         file_url: r.file_url,
         storage_key: r.storage_key ?? undefined,
@@ -425,7 +534,7 @@ export default function FilesPanel({
       }));
       setDocs(list);
     } catch (e) {
-      console.warn('loadDocs error:', (e as any)?.message || e);
+      console.warn('loadDocs error:', e);
       setDocs([]);
     } finally {
       setLoading(false);
@@ -433,14 +542,18 @@ export default function FilesPanel({
   }
 
   async function loadMemoryCount() {
-    if (!projectId) { setMemoryCount(0); return; }
+    if (!projectId) {
+      setMemoryCount(0);
+      return;
+    }
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id;
       let q = supabase
         .from('zeta_daily_memory')
         .select('*', { count: 'exact', head: true })
         .eq('project_id', projectId);
-      if (user?.id) q = q.eq('user_id', user.id);
+      if (userId) q = q.eq('user_id', userId);
       const { count } = await q;
       setMemoryCount(count || 0);
     } catch {
@@ -449,29 +562,54 @@ export default function FilesPanel({
   }
 
   async function loadGenerated() {
-    if (!projectId) { setGenDocs([]); return; }
+    if (!projectId) {
+      setGenDocs([]);
+      return;
+    }
     setLoadingGen(true);
     try {
       const { data: items, error } = await supabase.storage
         .from('project-docs')
-        .list(`${projectId}/generated`, { limit: 1000, sortBy: { column: 'name', order: 'desc' } });
+        .list(`${projectId}/generated`, {
+          limit: 1000,
+          sortBy: { column: 'name', order: 'desc' },
+        });
 
       if (error?.message?.includes('does not exist')) {
         setGenDocs([]);
         return;
       }
 
-      const list: FileDoc[] = (items || []).map((it) => ([
-        'png','jpg','jpeg','webp','pdf','md','markdown','txt','csv','json'
-      ].includes(it.name.split('.').pop()?.toLowerCase() || '')
-        ? {
+      const list: FileDoc[] = (items || [])
+        .map((it) => {
+          const ext = it.name.split('.').pop()?.toLowerCase();
+          const ok =
+            ext &&
+            [
+              'png',
+              'jpg',
+              'jpeg',
+              'webp',
+              'pdf',
+              'md',
+              'markdown',
+              'txt',
+              'csv',
+              'json',
+            ].includes(ext);
+          if (!ok) return null;
+          return {
             file_name: it.name,
             file_url: publicUrlForPath(`${projectId}/generated/${it.name}`),
             created_at: null,
             created_by: 'zeta' as const,
-          }
-        : null)).filter(Boolean) as FileDoc[];
+          };
+        })
+        .filter(Boolean) as FileDoc[];
       setGenDocs(list);
+    } catch (e) {
+      console.warn('loadGenerated error:', e);
+      setGenDocs([]);
     } finally {
       setLoadingGen(false);
     }
@@ -485,35 +623,60 @@ export default function FilesPanel({
     (async () => {
       try {
         if (!projectId) return;
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user?.id) { setCustomFolders([]); return; }
+        const { data: auth } = await supabase.auth.getUser();
+        const userId = auth?.user?.id;
+        if (!userId) {
+          setCustomFolders([]);
+          return;
+        }
 
         const { data, error } = await supabase
           .from('created_folders')
           .select('id,name,created_at')
           .eq('project_id', projectId)
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .order('created_at', { ascending: true });
 
         if (error) throw error;
 
-        const rows = (data ?? []).map((r) => ({ id: `custom:${r.id}` as const, name: r.name }));
+        const rows =
+          data?.map((r) => ({ id: `custom:${r.id}` as const, name: r.name })) ??
+          [];
         setCustomFolders(rows);
-        try { localStorage.setItem(storageKey, JSON.stringify(rows)); } catch {}
-      } catch {
         try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(storageKey, JSON.stringify(rows));
+          }
+        } catch {
+          /* ignore */
+        }
+      } catch (e) {
+        console.warn('[FilesPanel] custom folders fetch failed, using cache:', e);
+        try {
+          if (typeof localStorage === 'undefined') {
+            setCustomFolders([]);
+            return;
+          }
           const raw = localStorage.getItem(storageKey);
           const cached = raw ? (JSON.parse(raw) as CustomFolder[]) : [];
           setCustomFolders(cached);
-        } catch { setCustomFolders([]); }
+        } catch {
+          setCustomFolders([]);
+        }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   useEffect(() => {
-    try { if (projectId) localStorage.setItem(storageKey, JSON.stringify(customFolders)); } catch {}
-  }, [customFolders, projectId]);
+    try {
+      if (projectId && typeof localStorage !== 'undefined') {
+        localStorage.setItem(storageKey, JSON.stringify(customFolders));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [customFolders, projectId, storageKey]);
 
   // initial loads once we have a projectId
   useEffect(() => {
@@ -530,14 +693,21 @@ export default function FilesPanel({
       .channel(`documents:${projectId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'documents', filter: `project_id=eq.${projectId}` },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'documents',
+          filter: `project_id=eq.${projectId}`,
+        },
         () => {
           loadDocs();
           loadGenerated();
-        }
+        },
       )
       .subscribe();
-    return () => void supabase.removeChannel(channel);
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [projectId]);
 
   // Delete from storage AND DB so it doesn't come back.
@@ -560,8 +730,8 @@ export default function FilesPanel({
       });
 
       const payload = await res.json().catch(() => ({}));
-      if (!res.ok || payload?.error) {
-        throw new Error(payload?.error || `HTTP ${res.status}`);
+      if (!res.ok || (payload as any)?.error) {
+        throw new Error((payload as any)?.error || `HTTP ${res.status}`);
       }
 
       await loadDocs();
@@ -576,18 +746,26 @@ export default function FilesPanel({
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [showRenameModal, setShowRenameModal] = useState(false);
-  const [renameFolderId, setRenameFolderId] = useState<`custom:${string}` | null>(null);
+  const [renameFolderId, setRenameFolderId] =
+    useState<`custom:${string}` | null>(null);
   const [renameName, setRenameName] = useState('');
 
-  const openFolderModal = () => { setNewFolderName(''); setShowFolderModal(true); };
+  const openFolderModal = () => {
+    setNewFolderName('');
+    setShowFolderModal(true);
+  };
 
   const createFolder = async () => {
     if (!projectId) return;
     const name = newFolderName.trim();
     if (!name) return;
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.id) { alert('Not signed in.'); return; }
+    const { data: auth } = await supabase.auth.getUser();
+    const userId = auth?.user?.id;
+    if (!userId) {
+      alert('Not signed in.');
+      return;
+    }
 
     const tempId = `custom:temp-${Date.now().toString(36)}` as const;
     setCustomFolders((f) => [...f, { id: tempId, name }]);
@@ -598,13 +776,15 @@ export default function FilesPanel({
     try {
       const { data, error } = await supabase
         .from('created_folders')
-        .insert({ project_id: projectId, user_id: user.id, name })
+        .insert({ project_id: projectId, user_id: userId, name })
         .select('id,name')
         .single();
       if (error) throw error;
 
       const realId = `custom:${data.id}` as const;
-      setCustomFolders((prev) => prev.map((f) => (f.id === tempId ? { id: realId, name: data.name } : f)));
+      setCustomFolders((prev) =>
+        prev.map((f) => (f.id === tempId ? { id: realId, name: data.name } : f)),
+      );
       if (view === tempId) setView(realId);
     } catch (e: any) {
       setCustomFolders((prev) => prev.filter((f) => f.id !== tempId));
@@ -613,12 +793,18 @@ export default function FilesPanel({
     }
   };
 
-  const getCustomName = (id: `custom:${string}`) => customFolders.find((f) => f.id === id)?.name ?? 'Folder';
+  const getCustomName = (id: `custom:${string}`) =>
+    customFolders.find((f) => f.id === id)?.name ?? 'Folder';
 
   function deleteCustomFolder(id: `custom:${string}`) {
     if (!projectId) return;
     const name = getCustomName(id);
-    if (!confirm(`Delete folder "${name}"? This only removes the UI folder (not your files).`)) return;
+    if (
+      !confirm(
+        `Delete folder "${name}"? This only removes the UI folder (not your files).`,
+      )
+    )
+      return;
 
     const uuid = id.replace('custom:', '');
     const prev = customFolders;
@@ -627,18 +813,19 @@ export default function FilesPanel({
 
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user?.id) throw new Error('Not signed in');
+        const { data: auth } = await supabase.auth.getUser();
+        const userId = auth?.user?.id;
+        if (!userId) throw new Error('Not signed in');
 
         const { error } = await supabase
           .from('created_folders')
           .delete()
           .eq('id', uuid)
           .eq('project_id', projectId)
-          .eq('user_id', user.id);
+          .eq('user_id', userId);
         if (error) throw error;
       } catch (e: any) {
-        setCustomFolders(prev); // rollback
+        setCustomFolders(prev);
         alert(`Delete failed: ${e?.message ?? e}`);
       }
     })();
@@ -653,26 +840,34 @@ export default function FilesPanel({
     if (!projectId) return;
     const id = renameFolderId;
     const next = renameName.trim();
-    if (!id || !next) { setShowRenameModal(false); return; }
+    if (!id || !next) {
+      setShowRenameModal(false);
+      return;
+    }
 
     const uuid = id.replace('custom:', '');
     const prevName = getCustomName(id);
-    setCustomFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name: next } : f)));
+    setCustomFolders((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, name: next } : f)),
+    );
     setShowRenameModal(false);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user?.id) throw new Error('Not signed in');
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id;
+      if (!userId) throw new Error('Not signed in');
 
       const { error } = await supabase
         .from('created_folders')
         .update({ name: next })
         .eq('id', uuid)
         .eq('project_id', projectId)
-        .eq('user_id', user.id);
+        .eq('user_id', userId);
       if (error) throw error;
     } catch (e: any) {
-      setCustomFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name: prevName } : f)));
+      setCustomFolders((prev) =>
+        prev.map((f) => (f.id === id ? { ...f, name: prevName } : f)),
+      );
       alert(`Rename failed: ${e?.message ?? e}`);
     }
   }
@@ -687,8 +882,11 @@ export default function FilesPanel({
     setGenPreviewLoading(true);
     try {
       if (isTextLike(doc.file_name)) {
-        const storagePath = toStoragePath(doc.file_url) || `${projectId}/generated/${doc.file_name}`;
-        const { data, error } = await supabase.storage.from('project-docs').download(storagePath);
+        const storagePath =
+          toStoragePath(doc.file_url) || `${projectId}/generated/${doc.file_name}`;
+        const { data, error } = await supabase.storage
+          .from('project-docs')
+          .download(storagePath);
         if (error) throw error;
 
         const rawText = await data.text();
@@ -711,14 +909,17 @@ export default function FilesPanel({
     setView(v);
   };
 
-  // If we still don't have a projectId, show a tiny hint UI
+  /* If we *still* don't have a projectId, show hint UI instead of blank */
   if (!projectId) {
     return (
-      <div className={`relative h-full ${textSize}`}>
-        <div className="p-6 text-cyan-100">
+      <div className={`relative h-full min-h-[320px] ${textSize}`}>
+        <div className="absolute inset-0 bg-[radial-gradient(60rem_40rem_at_20%_0%,rgba(125,211,252,0.10),transparent_60%),radial-gradient(50rem_30rem_at_80%_20%,rgba(20,184,166,0.12),transparent_55%),linear-gradient(180deg,#063750_0%,#053244_70%,#042836_100%)]" />
+        <div className="absolute inset-0 pointer-events-none [background:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:22px_22px] opacity-40" />
+        <div className="relative z-10 p-6 text-cyan-100">
           <div className="text-sm opacity-90">No project selected.</div>
           <div className="text-xs opacity-70 mt-1">
-            I tried props → URL and couldn’t find a <code>project_id</code>.
+            I tried props, route params and <code>?projectId=</code> and couldn’t
+            find a value.
           </div>
         </div>
       </div>
@@ -752,7 +953,9 @@ export default function FilesPanel({
       {/* content */}
       <div
         className="relative z-10 pt-6 pb-10 px-6"
-        onClick={(e) => { if (e.currentTarget === e.target) setSelected(null); }}
+        onClick={(e) => {
+          if (e.currentTarget === e.target) setSelected(null);
+        }}
       >
         {view === null && (
           <DesktopGrid
@@ -801,7 +1004,10 @@ export default function FilesPanel({
         {/* Premium-gated views */}
         {view === 'converter' &&
           (isFree ? (
-            <Paywall feature="converter" onUpgrade={() => (window.location.href = '/billing')} />
+            <Paywall
+              feature="converter"
+              onUpgrade={() => (window.location.href = '/billing')}
+            />
           ) : (
             <ViewErrorBoundary label="File Converter">
               <ConverterView projectId={projectId} />
@@ -816,7 +1022,10 @@ export default function FilesPanel({
 
         {view === 'interpreter' &&
           (isFree ? (
-            <Paywall feature="interpreter" onUpgrade={() => (window.location.href = '/billing')} />
+            <Paywall
+              feature="interpreter"
+              onUpgrade={() => (window.location.href = '/billing')}
+            />
           ) : (
             <ViewErrorBoundary label="File Interpreter">
               <InterpreterView projectId={projectId} />
@@ -850,13 +1059,19 @@ export default function FilesPanel({
               </div>
             }
           >
-            <p className="text-cyan-200/90 italic">This folder is empty.</p>
+            <p className="text-cyan-200/90 italic">
+              This folder is empty (UI only).
+            </p>
           </SectionCard>
         )}
       </div>
 
       {/* New Folder modal */}
-      <Modal open={showFolderModal} title="Create New Folder" onClose={() => setShowFolderModal(false)}>
+      <Modal
+        open={showFolderModal}
+        title="Create New Folder"
+        onClose={() => setShowFolderModal(false)}
+      >
         <div className="space-y-4">
           <label className="block text-sm text-cyan-100">
             Folder name
@@ -887,7 +1102,11 @@ export default function FilesPanel({
       </Modal>
 
       {/* Rename Folder modal */}
-      <Modal open={showRenameModal} title="Rename Folder" onClose={() => setShowRenameModal(false)}>
+      <Modal
+        open={showRenameModal}
+        title="Rename Folder"
+        onClose={() => setShowRenameModal(false)}
+      >
         <div className="space-y-4">
           <label className="block text-sm text-cyan-100">
             New name
@@ -918,10 +1137,18 @@ export default function FilesPanel({
       </Modal>
 
       {/* Generated file preview modal */}
-      <Modal open={genPreviewOpen} title={genPreviewTitle} onClose={() => setGenPreviewOpen(false)}>
+      <Modal
+        open={genPreviewOpen}
+        title={genPreviewTitle}
+        onClose={() => setGenPreviewOpen(false)}
+      >
         <div className="space-y-3">
-          {genPreviewLoading && <div className="text-xs text-cyan-200">Loading…</div>}
-          {genPreviewError && <div className="text-xs text-red-200">❌ {genPreviewError}</div>}
+          {genPreviewLoading && (
+            <div className="text-xs text-cyan-200">Loading…</div>
+          )}
+          {genPreviewError && (
+            <div className="text-xs text-red-200">❌ {genPreviewError}</div>
+          )}
           {(genPreviewUrl || genPreviewText) && (
             <div className="flex items-center justify-end gap-2">
               {genPreviewUrl && (
@@ -935,7 +1162,9 @@ export default function FilesPanel({
                     Open ↗
                   </a>
                   <button
-                    onClick={() => downloadUrl(genPreviewUrl!, genPreviewTitle || 'file')}
+                    onClick={() =>
+                      downloadUrl(genPreviewUrl!, genPreviewTitle || 'file')
+                    }
                     className="text-xs px-2 py-1 rounded-md border border-cyan-600/60 bg-cyan-800/60 hover:bg-cyan-700/60"
                   >
                     Download
@@ -944,7 +1173,13 @@ export default function FilesPanel({
               )}
               {genPreviewText && (
                 <button
-                  onClick={async () => { try { await navigator.clipboard.writeText(genPreviewText); } catch {} }}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(genPreviewText);
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
                   className="text-xs px-2 py-1 rounded-md border border-cyan-600/60 bg-cyan-800/60 hover:bg-cyan-700/60"
                 >
                   Copy text
@@ -954,28 +1189,42 @@ export default function FilesPanel({
           )}
           {genPreviewText ? (
             <div className="rounded-lg border border-cyan-600/40 bg-cyan-950/60 p-4 leading-7">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={mdComponents}
+              >
                 {genPreviewText}
               </ReactMarkdown>
             </div>
           ) : genPreviewUrl ? (
             <div className="rounded-md border border-cyan-600/40 bg-cyan-950/40 overflow-hidden">
-              <iframe src={genPreviewUrl} className="w-full h-[70vh]" title={genPreviewTitle} />
+              <iframe
+                src={genPreviewUrl}
+                className="w-full h-[70vh]"
+                title={genPreviewTitle}
+              />
             </div>
           ) : null}
         </div>
       </Modal>
 
       {/* Paywall modal (icon click) */}
-      <Modal open={!!showPaywall} title="Premium Feature" onClose={() => setShowPaywall(false)}>
-        <Paywall feature={(showPaywall || 'interpreter') as 'interpreter' | 'converter'} onUpgrade={() => (window.location.href = '/billing')} />
+      <Modal
+        open={!!showPaywall}
+        title="Premium Feature"
+        onClose={() => setShowPaywall(false)}
+      >
+        <Paywall
+          feature={(showPaywall || 'interpreter') as 'interpreter' | 'converter'}
+          onUpgrade={() => (window.location.href = '/billing')}
+        />
       </Modal>
     </div>
   );
 }
 
 /* ─────────────────────────────────────────────────────────
-   Small presentational bits reused locally
+   Desktop grid + icons
 ────────────────────────────────────────────────────────── */
 function DesktopGrid({
   uploadedCount,
@@ -1019,31 +1268,76 @@ function DesktopGrid({
     onRename?: () => void;
     locked?: boolean;
   }> = [
-    { id: 'uploaded', icon: '📁', title: 'Uploaded Files', subtitle: pluralize(uploadedCount), onOpen: () => onOpen('uploaded') },
-    { id: 'generated', icon: '✨', title: 'Generated Files', subtitle: pluralize(generatedCount), onOpen: () => onOpen('generated') },
+    {
+      id: 'uploaded',
+      icon: '📁',
+      title: 'Uploaded Files',
+      subtitle: pluralize(uploadedCount),
+      onOpen: () => onOpen('uploaded'),
+    },
+    {
+      id: 'generated',
+      icon: '✨',
+      title: 'Generated Files',
+      subtitle: pluralize(generatedCount),
+      onOpen: () => onOpen('generated'),
+    },
     {
       id: 'converter',
       icon: '🔁',
       title: 'File Converter',
-      subtitle: isPremium ? 'PNG ⇄ JPG ⇄ WEBP' : plan === 'loading' ? 'Checking…' : 'Premium',
-      onOpen: () => (isFree ? onShowPaywall('converter') : onOpen('converter')),
+      subtitle: isPremium
+        ? 'PNG ⇄ JPG ⇄ WEBP'
+        : plan === 'loading'
+        ? 'Checking…'
+        : 'Premium',
+      onOpen: () =>
+        isFree ? onShowPaywall('converter') : onOpen('converter'),
       locked: isFree,
     },
-    { id: 'generator', icon: '🧩', title: 'File Generator', subtitle: 'Docgen', onOpen: () => onOpen('generator') },
+    {
+      id: 'generator',
+      icon: '🧩',
+      title: 'File Generator',
+      subtitle: 'Docgen',
+      onOpen: () => onOpen('generator'),
+    },
     {
       id: 'interpreter',
       icon: '📝',
       title: 'File Interpreter',
-      subtitle: isPremium ? 'Summarize files' : plan === 'loading' ? 'Checking…' : 'Premium',
-      onOpen: () => (isFree ? onShowPaywall('interpreter') : onOpen('interpreter')),
+      subtitle: isPremium
+        ? 'Summarize files'
+        : plan === 'loading'
+        ? 'Checking…'
+        : 'Premium',
+      onOpen: () =>
+        isFree ? onShowPaywall('interpreter') : onOpen('interpreter'),
       locked: isFree,
     },
-    { id: 'memory', icon: '🧠', title: 'Memory Files', subtitle: pluralize(memoryCount), onOpen: () => onOpen('memory') },
+    {
+      id: 'memory',
+      icon: '🧠',
+      title: 'Memory Files',
+      subtitle: pluralize(memoryCount),
+      onOpen: () => onOpen('memory'),
+    },
     ...customFolders.map((f) => ({
-      id: f.id, icon: '📁', title: f.name, subtitle: 'Empty',
-      onOpen: () => onOpen(f.id), onDelete: () => onDeleteFolder(f.id), onRename: () => onRenameFolder(f.id),
+      id: f.id,
+      icon: '📁',
+      title: f.name,
+      subtitle: 'Empty',
+      onOpen: () => onOpen(f.id),
+      onDelete: () => onDeleteFolder(f.id),
+      onRename: () => onRenameFolder(f.id),
     })),
-    { id: 'new-folder', icon: '➕', title: 'New Folder', subtitle: 'Create a local folder (UI)', onOpen: onNewFolder },
+    {
+      id: 'new-folder',
+      icon: '➕',
+      title: 'New Folder',
+      subtitle: 'Create a local folder (UI)',
+      onOpen: onNewFolder,
+    },
   ];
 
   return (
@@ -1056,7 +1350,6 @@ function DesktopGrid({
           subtitle={it.subtitle}
           selected={selectedId === it.id}
           onClick={() => {
-            // single click opens immediately, and also marks selected for visual feedback
             setSelected(it.id);
             it.onOpen();
           }}
@@ -1091,8 +1384,13 @@ function DesktopIcon({
   return (
     <div
       tabIndex={0}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      onKeyDown={(e) => { if (e.key === 'Enter') onClick(); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onClick();
+      }}
       className="group select-none w-36 focus:outline-none transition-transform hover:-translate-y-0.5"
       onContextMenu={(e) => {
         if (!onDelete && !onRename) return;
@@ -1105,12 +1403,15 @@ function DesktopIcon({
     >
       <div
         className={`relative mx-auto h-24 w-24 grid place-items-center rounded-xl border
-        ${selected ? 'bg-cyan-600/30 border-cyan-200' : 'bg-cyan-900/40 border-cyan-600/40 group-hover:border-cyan-400'}
+        ${
+          selected
+            ? 'bg-cyan-600/30 border-cyan-200'
+            : 'bg-cyan-900/40 border-cyan-600/40 group-hover:border-cyan-400'
+        }
         shadow-md transition`}
       >
         <div className="text-5xl">{icon}</div>
 
-        {/* Lock badge (only when explicitly free) */}
         {locked && (
           <div className="absolute -top-2 -right-2 h-7 px-2 rounded-full border border-amber-300/70 bg-amber-400/90 text-indigo-900 text-[10px] font-bold grid place-items-center shadow">
             🔒 PREMIUM
@@ -1121,7 +1422,10 @@ function DesktopIcon({
           <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
             {onRename && (
               <button
-                onClick={(e) => { e.stopPropagation(); onRename(); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRename();
+                }}
                 title="Rename"
                 className="h-6 w-6 grid place-items-center rounded-full border border-cyan-400/60 bg-cyan-900/80 text-[10px]"
               >
@@ -1130,7 +1434,10 @@ function DesktopIcon({
             )}
             {onDelete && (
               <button
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
                 title="Delete"
                 className="h-6 w-6 grid place-items-center rounded-full border border-rose-600/80 bg-rose-700/90 text-white text-[10px]"
               >
@@ -1141,8 +1448,16 @@ function DesktopIcon({
         )}
       </div>
       <div className="mt-3 text-center">
-        <div className={`text-cyan-50 text-[13px] leading-4 ${selected ? 'font-semibold' : ''}`}>{title}</div>
-        {subtitle && <div className="text-xs text-cyan-200 mt-0.5">{subtitle}</div>}
+        <div
+          className={`text-cyan-50 text-[13px] leading-4 ${
+            selected ? 'font-semibold' : ''
+          }`}
+        >
+          {title}
+        </div>
+        {subtitle && (
+          <div className="text-xs text-cyan-200 mt-0.5">{subtitle}</div>
+        )}
       </div>
     </div>
   );

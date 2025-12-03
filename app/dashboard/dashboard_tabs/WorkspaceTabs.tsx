@@ -11,9 +11,10 @@ type Props = {
 export default function WorkspaceTabs({ activeMainTab, setActiveMainTab }: Props) {
   const [open, setOpen] = useState(false);
 
+  // NOTE: keys match MainTab values / parent switch
   const workspaceTabs = [
     { key: 'logs', label: 'Logs' },
-    { key: 'desktop', label: 'Desktop' },
+    { key: 'files', label: 'Desktop' }, // 👈 key stays 'files', label is 'Desktop'
     { key: 'apis', label: 'APIs' },
   ];
 
@@ -33,10 +34,12 @@ export default function WorkspaceTabs({ activeMainTab, setActiveMainTab }: Props
               key={tab.key}
               onClick={() => {
                 setActiveMainTab(tab.key as MainTab);
-                setOpen(false); // Close dropdown after click
+                setOpen(false);
               }}
               className={`block w-full text-left text-sm px-4 py-2 hover:bg-purple-700 hover:text-white ${
-                activeMainTab === tab.key ? 'bg-purple-600 text-white' : 'text-purple-300'
+                activeMainTab === tab.key
+                  ? 'bg-purple-600 text-white'
+                  : 'text-purple-300'
               }`}
             >
               {tab.label}
