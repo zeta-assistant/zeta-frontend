@@ -1,3 +1,4 @@
+// app/api/chat/route.ts
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
@@ -22,14 +23,30 @@ type ProjectFileRow = { file_name: string; file_url: string; created_at: string 
 type RecentUserInput = { timestamp?: string; created_at?: string; author?: string | null; content: string };
 
 /* ───────────────── helpers ───────────────── */
+
 function labelForStep(k: OnboardingKey) {
   switch (k) {
-    case 'vision': return 'Project vision';
-    case 'long_term_goals': return 'Long-term goals';
-    case 'short_term_goals': return 'Short-term goals';
-    case 'telegram': return 'Connect Telegram';
+    case 'vision':
+      return 'Project vision';
+    case 'long_term_goals':
+      return 'Long-term goals';
+    case 'short_term_goals':
+      return 'Short-term goals';
+    case 'telegram':
+      return 'Connect Telegram';
   }
 }
+
+function stepIndexFromKey(step: OnboardingKey): number {
+  switch (step) {
+    case 'vision': return 1;
+    case 'long_term_goals': return 2;
+    case 'short_term_goals': return 3;
+    case 'telegram': return 4;
+    default: return 0;
+  }
+}
+
 function isOnboardingQuestion(input?: string) {
   if (!input) return false;
   const s = input.toLowerCase();
@@ -42,12 +59,38 @@ function isOnboardingQuestion(input?: string) {
       /\bprogress\b/.test(s))
   );
 }
+
+function isSkipOnboardingRequest(input?: string) {
+  if (!input) return false;
+  const s = input.trim().toLowerCase();
+  return (
+    s === 'skip' ||
+    s === 'skip this' ||
+    s === 'skip for now' ||
+    s === 'skip step' ||
+    s === 'idk' ||
+    s === "i don't know" ||
+    s === "i dont know"
+  );
+}
+
+// 🔧 NEW: fuzzy "done" detector so phrases like "ok should be done now" work
+function isDoneOnboardingRequest(input?: string) {
+  if (!input) return false;
+  const s = input.toLowerCase();
+  return /\b(done|finished|complete(d)?|all\s*done|all\s*set|set\s*up|configured|hooked\s*up)\b/.test(s);
+}
+
 function parseFilesIntent(message?: string) {
   if (!message) return { wantsFiles: false, query: '' };
   const m = message.match(/^\/files(?:\s+(.*))?$/i);
   return m ? { wantsFiles: true, query: (m[1] || '').trim() } : { wantsFiles: false, query: '' };
 }
-async function fetchProjectFiles(projectId: string, opts?: { search?: string; limit?: number }): Promise<ProjectFileRow[]> {
+
+async function fetchProjectFiles(
+  projectId: string,
+  opts?: { search?: string; limit?: number }
+): Promise<ProjectFileRow[]> {
   const { search = '', limit = 20 } = opts || {};
   let q = supabaseAdmin
     .from('documents')
@@ -60,7 +103,10 @@ async function fetchProjectFiles(projectId: string, opts?: { search?: string; li
   if (error) throw error;
   return (data ?? []) as ProjectFileRow[];
 }
-async function readBody(req: Request): Promise<{ message: string; projectId: string; modelId?: string; verbosity?: 'short'|'normal'|'long' }> {
+
+async function readBody(
+  req: Request
+): Promise<{ message: string; projectId: string; modelId?: string; verbosity?: 'short' | 'normal' | 'long' }> {
   try {
     if (req.headers.get('content-type')?.includes('application/json')) {
       return await req.json();
@@ -79,6 +125,7 @@ async function readBody(req: Request): Promise<{ message: string; projectId: str
     };
   }
 }
+
 async function safeGetSharedContext(projectId: string): Promise<{ mainframeInfo: any; recentUserInputs: RecentUserInput[] }> {
   try {
     const ctx = await getSharedContext(projectId);
@@ -95,10 +142,11 @@ async function safeGetSharedContext(projectId: string): Promise<{ mainframeInfo:
       .order('timestamp', { ascending: false })
       .limit(5);
     const recentUserInputs =
-      (uil ?? []).map(r => ({ content: r.content, timestamp: r.timestamp, author: r.author ?? 'user' })) as RecentUserInput[];
+      (uil ?? []).map((r) => ({ content: r.content, timestamp: r.timestamp, author: r.author ?? 'user' })) as RecentUserInput[];
     return { mainframeInfo: {}, recentUserInputs };
   }
 }
+
 async function handleRequiredActions(
   threadId: string,
   runId: string,
@@ -137,7 +185,11 @@ async function handleRequiredActions(
             body: JSON.stringify({ projectId, policy: autonomyPolicy, plan: args }),
           });
           let out: any;
-          try { out = await res.json(); } catch { out = { ok: res.ok }; }
+          try {
+            out = await res.json();
+          } catch {
+            out = { ok: res.ok };
+          }
           tool_outputs.push({ tool_call_id: tc.id, output: JSON.stringify(out) });
         }
       } else {
@@ -149,6 +201,7 @@ async function handleRequiredActions(
   }
   await openai.beta.threads.runs.submitToolOutputs(runId, { thread_id: threadId, tool_outputs });
 }
+
 function clampShort(text: string) {
   const parts = text.split(/(?<=[.!?])\s+/).filter(Boolean);
   const firstTwo = parts.slice(0, 2).join(' ');
@@ -156,7 +209,65 @@ function clampShort(text: string) {
   return words.length <= 60 ? firstTwo : words.slice(0, 60).join(' ') + '…';
 }
 
+/**
+ * Normalise vision text so we *don't* store stuff like
+ * "The project aims to learn..." and instead just:
+ * "Learn all of ancient history."
+ */
+function normalizeVisionText(raw: string): string {
+  let v = raw.trim();
+
+  // strip surrounding quotes
+  v = v.replace(/^["']+|["']+$/g, '');
+
+  // strip leading boilerplate phrases
+  v = v
+    .replace(/^the project aims to\s*/i, '')
+    .replace(/^the project aim is to\s*/i, '')
+    .replace(/^the aim of this project is to\s*/i, '')
+    .replace(/^the goal is to\s*/i, '')
+    .replace(/^my (project )?vision is to\s*/i, '')
+    .replace(/^i (?:want|would like) to\s*/i, '')
+    .replace(/^to\s+/i, '')
+    .trim();
+
+  if (!v) return '';
+
+  // Capitalise first letter
+  v = v.charAt(0).toUpperCase() + v.slice(1);
+
+  // Ensure it ends with basic punctuation
+  if (!/[.!?]$/.test(v)) v += '.';
+
+  return v;
+}
+
+/**
+ * Strip legacy assistant disclaimers about not being able
+ * to save goals/vision, plus old 📌 blocks.
+ */
+function stripLegacyGoalWarning(text: string) {
+  const cleaned = text
+    // Old 📌 blocks
+    .replace(/📌[\s\S]*?(?=\n—|$)/g, '')
+    // "It looks like I can't save your project vision directly..."
+    .replace(
+      /It looks like I (?:currently )?can't save your project vision directly[\s\S]*?(?=\n—|$)/gi,
+      ''
+    )
+    // "It seems there was/is an issue with updating your X goals..."
+    .replace(
+      /It seems there (?:was|is) an issue with updating your (?:long-term|short-term) goals[\s\S]*?(?=\n—|$)/gi,
+      ''
+    )
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return cleaned;
+}
+
 /* ───────────────── route ───────────────── */
+
 export async function POST(req: Request) {
   try {
     const body = await readBody(req);
@@ -165,15 +276,15 @@ export async function POST(req: Request) {
     const now = new Date();
     const nowISO = now.toISOString();
 
-    const model = AVAILABLE_MODELS.find(m => m.id === modelId);
+    const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
     if (!model) {
       return NextResponse.json({ reply: '⚠️ Invalid model selected.' }, { status: 400 });
     }
 
-    // get project & owner
+    // get project & owner (also grabbing onboarding_status)
     const { data: projRow, error: projErr } = await supabaseAdmin
       .from('user_projects')
-      .select('assistant_id, preferred_user_name, autonomy_policy, user_id, name')
+      .select('assistant_id, preferred_user_name, autonomy_policy, user_id, name, onboarding_status')
       .eq('id', projectId)
       .single();
 
@@ -197,11 +308,10 @@ export async function POST(req: Request) {
 
     const ownerUserId: string = projRow.user_id as string;
     const autonomyPolicy: AutonomyPolicy = (projRow?.autonomy_policy as AutonomyPolicy) ?? 'auto';
+    const projectOnboardingStatus: number = (projRow as any).onboarding_status ?? 0;
 
     /* ──────────────────────────────────────────────
        Ensure we ALWAYS have an assistant_id
-       If missing, create a minimal fallback assistant,
-       save it to user_projects, and keep going.
     ─────────────────────────────────────────────── */
     let assistantId = projRow.assistant_id as string | null;
 
@@ -212,7 +322,7 @@ export async function POST(req: Request) {
         name: projRow.name ? `${projRow.name} (fallback)` : 'Zeta Fallback',
         model: modelId === 'gpt-4o' ? 'gpt-4o' : 'gpt-4',
         instructions:
-          'You are Zeta, an AI assistant for this project. Respond clearly, helpfully, and concisely. If something seems misconfigured, gently mention it.',
+          'You are Zeta, an AI assistant for this project. Respond clearly, helpfully, and concisely.',
         tools: [{ type: 'file_search' }],
       });
 
@@ -235,7 +345,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // thread
+    // thread management
     const { data: existingThread } = await supabaseAdmin
       .from('threads')
       .select('*')
@@ -246,8 +356,7 @@ export async function POST(req: Request) {
 
     const expired =
       existingThread?.expired ||
-      (existingThread?.last_active &&
-        now.getTime() - new Date(existingThread.last_active).getTime() > 1000 * 60 * 60);
+      (existingThread?.last_active && now.getTime() - new Date(existingThread.last_active).getTime() > 1000 * 60 * 60);
 
     let threadId = existingThread?.thread_id as string | undefined;
     if (!existingThread || !existingThread.thread_id || expired) {
@@ -273,34 +382,12 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     const mfComplete = mf?.onboarding_complete === true;
+
     const statusNum = await deriveOnboardingStatus(projectId);
     const onboardingActive = mfComplete ? false : await shouldUseOnboarding(projectId);
     const nextStep = onboardingActive ? await getNextOnboardingStep(projectId) : null;
 
-    if (isOnboardingQuestion(message)) {
-      if (nextStep) {
-        return NextResponse.json({
-          status: 'onboarding',
-          onboarding: true,
-          step: nextStep,
-          onboarding_status: statusNum,
-          reply: `You're on onboarding step ${Math.min(Math.max(statusNum + 1, 1), 4)} of 4: **${labelForStep(
-            nextStep
-          )}**.\n${getCurrentStepPrompt(nextStep)}`,
-          threadId,
-        });
-      }
-      return NextResponse.json({
-        status: 'onboarding',
-        onboarding: false,
-        step: 'complete',
-        onboarding_status: statusNum,
-        reply: 'Onboarding is complete (4/4). ✅',
-        threadId,
-      });
-    }
-
-    // log user input (best-effort)
+    // ✅ log user input ASAP so even early-return flows (skip, "what step") have a server-side timestamp
     try {
       await supabaseAdmin.from('user_input_log').insert({
         project_id: projectId,
@@ -313,20 +400,170 @@ export async function POST(req: Request) {
       console.error('⚠️ user_input_log insert failed (continuing):', e);
     }
 
+    // ─────────────────────────────
+    // "skip" only skips the CURRENT step
+    // plus "done" can finish Telegram step
+    // ─────────────────────────────
+    if (
+      onboardingActive &&
+      nextStep &&
+      (isSkipOnboardingRequest(message) ||
+        (nextStep === 'telegram' && isDoneOnboardingRequest(message)))
+    ) {
+      const skippedStep = nextStep;
+      const skippedLabel = labelForStep(skippedStep);
+      const skippedIndex = stepIndexFromKey(skippedStep);
+
+      // New status: mark this step as complete (or keep higher status if already ahead)
+      let newStatus = projectOnboardingStatus;
+      if (newStatus < skippedIndex) newStatus = skippedIndex;
+
+      // Determine what comes after the skipped step
+      let nextAfterSkip: OnboardingKey | 'complete';
+      switch (skippedStep) {
+        case 'vision':
+          nextAfterSkip = 'long_term_goals';
+          break;
+        case 'long_term_goals':
+          nextAfterSkip = 'short_term_goals';
+          break;
+        case 'short_term_goals':
+          nextAfterSkip = 'telegram';
+          break;
+        case 'telegram':
+        default:
+          nextAfterSkip = 'complete';
+          break;
+      }
+
+      const onboardingNowComplete = nextAfterSkip === 'complete' || newStatus >= 4;
+
+      try {
+        // Update onboarding_status (+ onboarding_complete in user_projects when fully done)
+        const updatePayload: any = {
+          onboarding_status: onboardingNowComplete ? 4 : newStatus,
+        };
+        if (onboardingNowComplete) {
+          updatePayload.onboarding_complete = true;
+        }
+
+        await supabaseAdmin
+          .from('user_projects')
+          .update(updatePayload)
+          .eq('id', projectId);
+
+        // Only mark fully complete if we skipped the last step
+        if (onboardingNowComplete) {
+          await supabaseAdmin
+            .from('mainframe_info')
+            .update({ onboarding_complete: true, updated_at: nowISO })
+            .eq('project_id', projectId);
+        }
+
+        // Log the skipped step
+        await supabaseAdmin.from('system_logs').insert({
+          project_id: projectId,
+          actor: 'user',
+          event: 'onboarding.skip_step',
+          details: {
+            skipped_step: skippedStep,
+            new_status: onboardingNowComplete ? 4 : newStatus,
+            via: 'chat',
+            message,
+          },
+        });
+
+        // Build conversational reply
+        let reply: string;
+        if (onboardingNowComplete) {
+          reply =
+            "All good — we’ll skip the Telegram step and call setup done. " +
+            "You can always connect Telegram later from the APIs panel if you’d like.";
+        } else {
+          const nextLabel = labelForStep(nextAfterSkip as OnboardingKey);
+          reply =
+            `No worries, we can skip **${skippedLabel}** for now.\n` +
+            `Next up, let’s talk about **${nextLabel}**.\n` +
+            getCurrentStepPrompt(nextAfterSkip as OnboardingKey);
+        }
+
+        // Append assistant row so it shows in chat history
+        let appended: any = null;
+        try {
+          const { data, error } = await supabaseAdmin
+            .from('zeta_conversation_log')
+            .insert({
+              id: crypto.randomUUID(),
+              user_id: ownerUserId,
+              project_id: projectId,
+              thread_id: threadId,
+              role: 'assistant',
+              message: reply,
+              timestamp: new Date().toISOString(),
+              content_type: 'plain',
+              metadata: { source: 'onboarding-skip-step', skipped_step: skippedStep },
+            })
+            .select()
+            .single();
+          if (error) throw error;
+          appended = data;
+        } catch (e) {
+          console.error('❌ Failed to insert assistant row for onboarding skip-step:', e);
+        }
+
+        return NextResponse.json({
+          reply,
+          threadId,
+          appended,
+          onboarding: !onboardingNowComplete,
+          step: onboardingNowComplete ? 'complete' : nextAfterSkip,
+          onboarding_status: onboardingNowComplete ? 4 : newStatus,
+        });
+      } catch (e) {
+        console.error('❌ Failed to apply onboarding skip-step:', e);
+        // fall through to normal flow on error
+      }
+    }
+
+    // If user explicitly asks "what onboarding step am I on?"
+    if (isOnboardingQuestion(message)) {
+      if (nextStep) {
+        return NextResponse.json({
+          status: 'onboarding',
+          onboarding: true,
+          step: nextStep,
+          onboarding_status: statusNum,
+          reply: `We’re still in the setup flow — you’re around step ${Math.min(
+            Math.max((statusNum as number) + 1, 1),
+            4
+          )} of 4.\nRight now we’re on **${labelForStep(nextStep)}**.\n${getCurrentStepPrompt(nextStep)}`,
+          threadId,
+        });
+      }
+      return NextResponse.json({
+        status: 'onboarding',
+        onboarding: false,
+        step: 'complete',
+        onboarding_status: statusNum,
+        reply: 'Setup is all done (4/4). ✅',
+        threadId,
+      });
+    }
+
     const { mainframeInfo, recentUserInputs } = await safeGetSharedContext(projectId);
 
     const { wantsFiles, query } = parseFilesIntent(message);
     let filesContext: ProjectFileRow[] = [];
     if (wantsFiles) {
       const files = await fetchProjectFiles(projectId, { search: query, limit: 20 });
-      filesContext = files.map(f => ({ file_name: f.file_name, file_url: f.file_url, created_at: f.created_at }));
+      filesContext = files.map((f) => ({ file_name: f.file_name, file_url: f.file_url, created_at: f.created_at }));
     }
 
     const inputsFormatted =
       !recentUserInputs || (recentUserInputs as RecentUserInput[]).length === 0
         ? 'None'
         : (recentUserInputs as RecentUserInput[])
-            .map(u => `- [${u.created_at ?? u.timestamp ?? ''}] ${u.author ?? 'user'}: ${u.content ?? ''}`)
+            .map((u) => `- [${u.created_at ?? u.timestamp ?? ''}] ${u.author ?? 'user'}: ${u.content ?? ''}`)
             .join('\n');
 
     const filesFormatted =
@@ -334,7 +571,7 @@ export async function POST(req: Request) {
         ? wantsFiles
           ? 'No matching files.'
           : 'Not requested.'
-        : filesContext.map(f => `- ${f.file_name} — ${f.file_url} (${f.created_at})`).join('\n');
+        : filesContext.map((f) => `- ${f.file_name} — ${f.file_url} (${f.created_at})`).join('\n');
 
     const verbosityInstruction =
       body.verbosity === 'short'
@@ -392,12 +629,309 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
       textContent = anyAssistant ? extractText(anyAssistant) : '⚠️ No reply.';
     }
 
-    if (onboardingActive && nextStep) {
-      textContent += `\n\n—\nWe still need to finish onboarding (status ${statusNum}/4).\nNext step: **${labelForStep(
-        nextStep
-      )}**.\n${getCurrentStepPrompt(nextStep)}`;
+    /* ──────────────────────────────────────────────
+       SPECIAL: auto-capture vision / goals
+    ─────────────────────────────────────────────── */
+
+    let visionCaptured = false;
+    let longTermGoalsCaptured = false;
+    let shortTermGoalsCaptured = false;
+
+    // STEP 1: VISION (onboarding_status === 0)
+    if (projectOnboardingStatus === 0 && message?.trim()) {
+      const trimmed = message.trim();
+
+      // ⛔ Don't auto-complete vision on tiny / vague messages.
+      // e.g. "i like history" should NOT count as full project vision.
+      const minLenForAutoVision = 40;
+      const hasVisionKeywords = /\b(vision|goal|aim|plan|project|want to|would like to|my focus is|my aim is)\b/i.test(
+        trimmed
+      );
+
+      if (trimmed.length < minLenForAutoVision || !hasVisionKeywords) {
+        // Not clearly a full vision statement -> leave onboarding at step 1 (Vision)
+        // Zeta will explicitly ask for the vision using the onboarding prompt.
+      } else {
+        try {
+          const completion = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            response_format: { type: 'json_object' },
+            messages: [
+              {
+                role: 'system',
+                content:
+                  'You are a strict JSON parser. Given the user message, decide if it clearly states the VISION for their project. ' +
+                  'Return JSON with two keys: "has_vision" (boolean) and "vision" (string). ' +
+                  '"vision" should be a single clear sentence or short paragraph summarising what they want this project to achieve overall.',
+              },
+              {
+                role: 'user',
+                content: `User's latest message:\n"""${message}"""`,
+              },
+            ],
+          });
+
+          const raw = completion.choices?.[0]?.message?.content || '{}';
+          let parsed: any = {};
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            parsed = {};
+          }
+
+          if (parsed.has_vision && typeof parsed.vision === 'string' && parsed.vision.trim().length > 0) {
+            const normalized = normalizeVisionText(parsed.vision);
+            if (normalized) {
+              const isoNowVision = new Date().toISOString();
+              const todayVision = isoNowVision.slice(0, 10);
+
+              // user_projects
+              try {
+                await supabaseAdmin
+                  .from('user_projects')
+                  .update({ vision: normalized, onboarding_status: 1 })
+                  .eq('id', projectId);
+              } catch (e: any) {
+                console.error('⚠️ vision user_projects update error:', e?.message ?? e);
+              }
+
+              // mainframe_info
+              try {
+                await supabaseAdmin
+                  .from('mainframe_info')
+                  .update({
+                    vision: normalized,
+                    updated_at: isoNowVision,
+                    current_date: todayVision,
+                  })
+                  .eq('project_id', projectId);
+              } catch (e: any) {
+                console.error('⚠️ vision mainframe_info update error:', e?.message ?? e);
+              }
+
+              visionCaptured = true;
+              textContent = "Nice — I’ve saved that as your project vision.";
+            }
+          }
+        } catch (e: any) {
+          console.error('⚠️ vision extraction failed:', e?.message ?? e);
+        }
+      }
     }
-    if (verbosity === 'short' && !/```|\\\[|\\\(|\$\$/.test(textContent)) textContent = clampShort(textContent);
+
+    // STEP 2: LONG-TERM GOALS (onboarding_status === 1)
+    if (projectOnboardingStatus === 1 && message?.trim()) {
+      try {
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a strict JSON parser. Given the user message, decide if it clearly states one or more LONG-TERM goals for their project ' +
+                '(goals that describe what they want to achieve over months or years, not today or this week). ' +
+                'Return JSON with two keys: "has_long_term_goals" (boolean) and "goals" (array of strings). ' +
+                '"goals" should be short, clear sentences in the user\'s voice.',
+            },
+            {
+              role: 'user',
+              content: `User's latest message:\n"""${message}"""`,
+            },
+          ],
+        });
+
+        const raw = completion.choices?.[0]?.message?.content || '{}';
+        let parsed: any = {};
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = {};
+        }
+
+        const goalsRaw = Array.isArray(parsed.goals) ? parsed.goals : [];
+        const goals: string[] = goalsRaw
+          .map((g: any) => String(g || '').trim())
+          .filter((g: string) => g.length > 0);
+
+        if (parsed.has_long_term_goals && goals.length > 0) {
+          const isoNowLT = new Date().toISOString();
+
+          try {
+            await supabaseAdmin
+              .from('long_term_goals')
+              .insert(
+                goals.map((g) => ({
+                  project_id: projectId,
+                  description: g,
+                }))
+              );
+          } catch (e: any) {
+            console.error('⚠️ long_term_goals insert error:', e?.message ?? e);
+          }
+
+          try {
+            await supabaseAdmin
+              .from('mainframe_info')
+              .update({
+                long_term_goals: goals,
+                updated_at: isoNowLT,
+              })
+              .eq('project_id', projectId);
+          } catch (e: any) {
+            console.error('⚠️ mainframe_info long_term_goals update error:', e?.message ?? e);
+          }
+
+          try {
+            await supabaseAdmin
+              .from('user_projects')
+              .update({
+                long_term_goals: goals,
+                onboarding_status: 2,
+              })
+              .eq('id', projectId);
+          } catch (e: any) {
+            console.error('⚠️ user_projects long_term_goals/update(2) error:', e?.message ?? e);
+          }
+
+          longTermGoalsCaptured = true;
+          textContent = 'Great — I’ve saved those as your long-term goals.';
+        }
+      } catch (e: any) {
+        console.error('⚠️ long-term goals extraction failed:', e?.message ?? e);
+      }
+    }
+
+    // STEP 3: SHORT-TERM GOALS (onboarding_status === 2)
+    if (projectOnboardingStatus === 2 && message?.trim()) {
+      try {
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a strict JSON parser. Given the user message, decide if it clearly states one or more SHORT-TERM goals for their project ' +
+                '(goals for today, this week, or the next few weeks). ' +
+                'Return JSON with two keys: "has_short_term_goals" (boolean) and "goals" (array of strings). ' +
+                '"goals" should be short, clear sentences in the user\'s voice.',
+            },
+            {
+              role: 'user',
+              content: `User's latest message:\n"""${message}"""`,
+            },
+          ],
+        });
+
+        const raw = completion.choices?.[0]?.message?.content || '{}';
+        let parsed: any = {};
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = {};
+        }
+
+        const goalsRaw = Array.isArray(parsed.goals) ? parsed.goals : [];
+        const goals: string[] = goalsRaw
+          .map((g: any) => String(g || '').trim())
+          .filter((g: string) => g.length > 0);
+
+        if (parsed.has_short_term_goals && goals.length > 0) {
+          const isoNowST = new Date().toISOString();
+
+          try {
+            await supabaseAdmin
+              .from('short_term_goals')
+              .insert(
+                goals.map((g) => ({
+                  project_id: projectId,
+                  description: g,
+                }))
+              );
+          } catch (e: any) {
+            console.error('⚠️ short_term_goals insert error:', e?.message ?? e);
+          }
+
+          try {
+            await supabaseAdmin
+              .from('mainframe_info')
+              .update({
+                short_term_goals: goals,
+                updated_at: isoNowST,
+              })
+              .eq('project_id', projectId);
+          } catch (e: any) {
+            console.error('⚠️ mainframe_info short_term_goals update error:', e?.message ?? e);
+          }
+
+          try {
+            await supabaseAdmin
+              .from('user_projects')
+              .update({
+                short_term_goals: goals,
+                onboarding_status: 3,
+              })
+              .eq('id', projectId);
+          } catch (e: any) {
+            console.error('⚠️ user_projects short_term_goals/update(3) error:', e?.message ?? e);
+          }
+
+          shortTermGoalsCaptured = true;
+          textContent = 'Awesome — I’ve saved those as your short-term goals.';
+        }
+      } catch (e: any) {
+        console.error('⚠️ short-term goals extraction failed:', e?.message ?? e);
+      }
+    }
+
+    // Effective onboarding display status for THIS reply
+    let effectiveStatusNum: number = statusNum as unknown as number;
+    let effectiveNextStep: OnboardingKey | null = nextStep;
+
+    if (projectOnboardingStatus === 0 && nextStep === 'vision') {
+      if (visionCaptured) {
+        effectiveStatusNum = Math.max(effectiveStatusNum, 1);
+        effectiveNextStep = 'long_term_goals';
+      } else {
+        effectiveStatusNum = Math.max(effectiveStatusNum, 0);
+        effectiveNextStep = 'vision';
+      }
+    }
+
+    if (projectOnboardingStatus === 1 && nextStep === 'long_term_goals') {
+      if (longTermGoalsCaptured) {
+        effectiveStatusNum = Math.max(effectiveStatusNum, 2);
+        effectiveNextStep = 'short_term_goals';
+      } else {
+        effectiveStatusNum = Math.max(effectiveStatusNum, 1);
+        effectiveNextStep = 'long_term_goals';
+      }
+    }
+
+    if (projectOnboardingStatus === 2 && nextStep === 'short_term_goals') {
+      if (shortTermGoalsCaptured) {
+        effectiveStatusNum = Math.max(effectiveStatusNum, 3);
+        effectiveNextStep = 'telegram';
+      } else {
+        effectiveStatusNum = Math.max(effectiveStatusNum, 2);
+        effectiveNextStep = 'short_term_goals';
+      }
+    }
+
+    // Add generic onboarding hint if still active
+    if (onboardingActive && effectiveNextStep) {
+      textContent += `\n\n—\nWe’re still finishing setup (roughly step ${effectiveStatusNum + 1} of 4).\n` +
+        `Next up is **${labelForStep(effectiveNextStep)}**.\n` +
+        getCurrentStepPrompt(effectiveNextStep);
+    }
+
+    // Strip any old “can’t save your goals/vision” disclaimers
+    textContent = stripLegacyGoalWarning(textContent);
+
+    if (verbosity === 'short' && !/```|\\\[|\\\(|\$\$/.test(textContent)) {
+      textContent = clampShort(textContent);
+    }
 
     // ─── Idempotent assistant insert to avoid duplicates ───
     let appended: any = null;
@@ -414,7 +948,7 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
           .order('timestamp', { ascending: false })
           .limit(10);
 
-        const dupe = (recent ?? []).find(r => (r.message ?? '') === textContent);
+        const dupe = (recent ?? []).find((r) => (r.message ?? '') === textContent);
         if (dupe) {
           appended = dupe;
         } else {
@@ -457,8 +991,8 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
       threadId,
       appended,
       onboarding: onboardingActive,
-      step: nextStep || 'complete',
-      onboarding_status: statusNum,
+      step: effectiveNextStep || 'complete',
+      onboarding_status: effectiveStatusNum,
     });
   } catch (err: any) {
     console.error('❌ /api/chat error:', err?.message ?? err);

@@ -5,23 +5,31 @@ import OpenAI from 'openai';
 /* ──────────────────────────────────────────────────────────
    Steps & Status (0–4)
 ─────────────────────────────────────────────────────────── */
-export const ONBOARDING_STEPS = ['vision','long_term_goals','short_term_goals','telegram'] as const;
-export type OnboardingKey = typeof ONBOARDING_STEPS[number];
+export const ONBOARDING_STEPS = ['vision', 'long_term_goals', 'short_term_goals', 'telegram'] as const;
+export type OnboardingKey = (typeof ONBOARDING_STEPS)[number];
 export type OnboardingStatus = 0 | 1 | 2 | 3 | 4;
 
 function maxStatus(a: OnboardingStatus, b: OnboardingStatus): OnboardingStatus {
   return (a >= b ? a : b) as OnboardingStatus;
 }
 
-export function getStepIndex(step: OnboardingKey): number { return ONBOARDING_STEPS.indexOf(step) + 1; }
-export function getStepByIndex(index: number): OnboardingKey | null { return ONBOARDING_STEPS[index - 1] ?? null; }
+export function getStepIndex(step: OnboardingKey): number {
+  return ONBOARDING_STEPS.indexOf(step) + 1;
+}
+export function getStepByIndex(index: number): OnboardingKey | null {
+  return ONBOARDING_STEPS[index - 1] ?? null;
+}
 
 export function getCurrentStepPrompt(step: OnboardingKey): string {
   const prompts: Record<OnboardingKey, string> = {
-    vision: 'To get started, can you describe your vision for this project?',
-    long_term_goals: 'What are your long-term goals with this project?',
-    short_term_goals: 'What are your short-term or immediate goals?',
-    telegram: "Connect your Telegram to receive important notifications. Let me know once it's done or type **'skip'**.",
+    vision:
+      "First up is your project vision. In a couple of sentences, what do you ultimately want this project to achieve? If you're unsure for now, you can type **'skip'** and come back to this later.",
+    long_term_goals:
+      "Next is your Long-term goals. Over the next few months or years, what would you love this project to achieve? If you're unsure for now, you can type **'skip'** and we’ll move on.",
+    short_term_goals:
+      "Now let’s set some Short-term goals. What are your priorities for today, this week, or the next few weeks? If you're unsure, you can type **'skip'** and we’ll continue.",
+    telegram:
+      "Last step: connect your Telegram so I can send you important notifications. Once it’s linked, tell me it’s done — or type **'skip'** if you’d rather set this up later.",
   };
   return prompts[step];
 }
@@ -29,8 +37,8 @@ export function getCurrentStepPrompt(step: OnboardingKey): string {
 /* ──────────────────────────────────────────────────────────
    Log helpers
 ─────────────────────────────────────────────────────────── */
-type LogRow = { created_at: string; actor: 'user'|'zeta'; event: string; details: any; };
-type LatestLogOpts = { event?: string; events?: string[]; detailsContains?: Record<string, string>; };
+type LogRow = { created_at: string; actor: 'user' | 'zeta'; event: string; details: any };
+type LatestLogOpts = { event?: string; events?: string[]; detailsContains?: Record<string, string> };
 
 async function latestLog(projectId: string, opts: LatestLogOpts): Promise<LogRow | null> {
   let q = supabaseAdmin
@@ -45,7 +53,10 @@ async function latestLog(projectId: string, opts: LatestLogOpts): Promise<LogRow
   if (opts.detailsContains) q = q.contains('details', opts.detailsContains);
 
   const { data, error } = await q;
-  if (error) { console.error('latestLog error', error); return null; }
+  if (error) {
+    console.error('latestLog error', error);
+    return null;
+  }
   return (data && data[0]) || null;
 }
 
@@ -75,9 +86,12 @@ function hasText(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
 }
 function countItems(v: unknown): number {
-  if (Array.isArray(v)) return v.filter(x => typeof x === 'string' && x.trim()).length;
+  if (Array.isArray(v)) return v.filter((x) => typeof x === 'string' && x.trim()).length;
   if (typeof v === 'string') {
-    return v.split(/\n|\\n|•|-|\*/g).map(s => s.trim().replace(/^[-•*]\s*/, '')).filter(Boolean).length;
+    return v
+      .split(/\n|\\n|•|-|\*/g)
+      .map((s) => s.trim().replace(/^[-•*]\s*/, ''))
+      .filter(Boolean).length;
   }
   return 0;
 }
@@ -85,16 +99,12 @@ function countItems(v: unknown): number {
 export async function deriveOnboardingStatus(projectId: string): Promise<OnboardingStatus> {
   const { data: proj, error: projErr } = await supabaseAdmin
     .from('user_projects')
-    .select('vision, long_term_goals, short_term_goals, telegram_connected')
+    .select('vision, long_term_goals, short_term_goals, telegram_connected, onboarding_status')
     .eq('id', projectId)
     .single();
   if (projErr) console.error('deriveOnboardingStatus: failed to load project', projErr);
 
-  let statusFromData: OnboardingStatus = 0;
-  if (hasText(proj?.vision)) statusFromData = 1;
-  if (countItems(proj?.long_term_goals) > 0) statusFromData = maxStatus(statusFromData, 2);
-  if (countItems(proj?.short_term_goals) > 0) statusFromData = maxStatus(statusFromData, 3);
-  if (proj?.telegram_connected === true) statusFromData = 4;
+  const prevStatus: OnboardingStatus = (proj?.onboarding_status ?? 0) as OnboardingStatus;
 
   const [visionLog, ltLog, stLog, telegramLog] = await Promise.all([
     latestLog(projectId, { event: 'project.vision.update' }),
@@ -103,13 +113,33 @@ export async function deriveOnboardingStatus(projectId: string): Promise<Onboard
     latestLog(projectId, { event: 'api.connect', detailsContains: { provider: 'Telegram', status: 'connected' } }),
   ]);
 
-  let statusFromLogs: OnboardingStatus = 0;
-  if (visionLog) statusFromLogs = 1;
-  if (ltLog) statusFromLogs = maxStatus(statusFromLogs, 2);
-  if (stLog) statusFromLogs = maxStatus(statusFromLogs, 3);
-  if (telegramLog) statusFromLogs = 4;
+  // Start from zero, then layer on what we know.
+  let status: OnboardingStatus = 0;
 
-  return maxStatus(statusFromData, statusFromLogs);
+  // ✅ VISION:
+  // - Count as done if we have an explicit vision log (user actually set/confirmed it)
+  // - OR if a previous run already had status ≥ 1 **and** a non-empty vision saved.
+  // - This prevents template-seeded / default vision from auto-skipping step 1.
+  if (visionLog || (prevStatus >= 1 && hasText(proj?.vision))) {
+    status = 1;
+  }
+
+  // ✅ LONG-TERM GOALS:
+  if (countItems(proj?.long_term_goals) > 0 || ltLog) {
+    status = maxStatus(status, 2);
+  }
+
+  // ✅ SHORT-TERM GOALS:
+  if (countItems(proj?.short_term_goals) > 0 || stLog) {
+    status = maxStatus(status, 3);
+  }
+
+  // ✅ TELEGRAM:
+  if (proj?.telegram_connected === true || telegramLog) {
+    status = 4;
+  }
+
+  return status;
 }
 
 export async function syncOnboardingStatus(projectId: string): Promise<OnboardingStatus> {
@@ -132,7 +162,7 @@ export async function syncOnboardingStatus(projectId: string): Promise<Onboardin
 }
 
 export async function shouldUseOnboarding(projectId: string): Promise<boolean> {
-  // NEW: prefer the flag if present
+  // Prefer the flag if present
   const { data: mf } = await supabaseAdmin
     .from('mainframe_info')
     .select('onboarding_complete')
@@ -148,11 +178,16 @@ export async function shouldUseOnboarding(projectId: string): Promise<boolean> {
 export async function getNextOnboardingStep(projectId: string): Promise<OnboardingKey | null> {
   const status = await deriveOnboardingStatus(projectId);
   switch (status) {
-    case 0: return 'vision';
-    case 1: return 'long_term_goals';
-    case 2: return 'short_term_goals';
-    case 3: return 'telegram';
-    default: return null;
+    case 0:
+      return 'vision';
+    case 1:
+      return 'long_term_goals';
+    case 2:
+      return 'short_term_goals';
+    case 3:
+      return 'telegram';
+    default:
+      return null;
   }
 }
 
@@ -161,7 +196,7 @@ export async function getProgressIndex(projectId: string): Promise<number> {
 }
 
 /* ──────────────────────────────────────────────────────────
-   Shared context (now reads user_input_log.timestamp)
+   Shared context (reads user_input_log.timestamp)
 ─────────────────────────────────────────────────────────── */
 export type SharedContext = {
   mainframeInfo: any | null;
@@ -194,7 +229,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY });
 function parseBullets(text: string, maxItems: number): string[] {
   return (text || '')
     .split(/\n|\\n|•|-|\*/g)
-    .map(s => s.trim().replace(/^[-•*]\s*/, ''))
+    .map((s) => s.trim().replace(/^[-•*]\s*/, ''))
     .filter(Boolean)
     .slice(0, maxItems);
 }
@@ -223,7 +258,8 @@ export async function handleUserResponse(
     console.error('user_input_log insert failed', e);
   }
 
-  // Allow skip, but do NOT mark Telegram as connected on skip
+  // Allow skip, but do NOT mark Telegram as connected on skip.
+  // (Skipping a step is handled in /api/chat; here we just avoid writing data.)
   if (lc === 'skip') {
     await syncOnboardingStatus(projectId);
     return;
@@ -266,7 +302,9 @@ export async function handleUserResponse(
     if (currentStep === 'vision') {
       await supabaseAdmin.from('user_projects').update({ vision: processed }).eq('id', projectId);
       await supabaseAdmin.from('system_logs').insert({
-        project_id: projectId, actor: 'user', event: 'project.vision.update',
+        project_id: projectId,
+        actor: 'user',
+        event: 'project.vision.update',
         details: { excerpt: processed.slice(0, 140) },
       });
       await syncOnboardingStatus(projectId);
@@ -277,14 +315,18 @@ export async function handleUserResponse(
     const items = parseBullets(processed, max);
     const value = items.join('\n');
 
-    await supabaseAdmin.from('user_projects')
+    await supabaseAdmin
+      .from('user_projects')
       // @ts-ignore dynamic key write
       .update({ [currentStep]: value })
       .eq('id', projectId);
 
     const goalEvent = currentStep === 'short_term_goals' ? 'project.goals.short.update' : 'project.goals.long.update';
     await supabaseAdmin.from('system_logs').insert({
-      project_id: projectId, actor: 'user', event: goalEvent, details: { count: items.length },
+      project_id: projectId,
+      actor: 'user',
+      event: goalEvent,
+      details: { count: items.length },
     });
 
     await syncOnboardingStatus(projectId);
@@ -297,10 +339,15 @@ export async function handleUserResponse(
 ─────────────────────────────────────────────────────────── */
 export function nextStepFromStatus(status: OnboardingStatus): OnboardingKey | null {
   switch (status) {
-    case 0: return 'vision';
-    case 1: return 'long_term_goals';
-    case 2: return 'short_term_goals';
-    case 3: return 'telegram';
-    default: return null;
+    case 0:
+      return 'vision';
+    case 1:
+      return 'long_term_goals';
+    case 2:
+      return 'short_term_goals';
+    case 3:
+      return 'telegram';
+    default:
+      return null;
   }
 }
