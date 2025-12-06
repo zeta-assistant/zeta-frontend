@@ -1,6 +1,12 @@
 'use client';
 
-import React, { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  useMemo,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -99,7 +105,6 @@ function chooseLatestAny(opts: {
   const mf = opts.mf ?? {};
   const candidates: Array<{ text: string; at: string | null; kind: BadgeKind }> = [];
 
-  // Prefer the authoritative snapshot in mainframe_info (with timestamps)
   if (mf.latest_outreach_chat && mf.latest_outreach_chat_at) {
     candidates.push({ text: String(mf.latest_outreach_chat), at: String(mf.latest_outreach_chat_at), kind: 'MESSAGE' });
   }
@@ -110,7 +115,6 @@ function chooseLatestAny(opts: {
     candidates.push({ text: String(mf.latest_notification), at: String(mf.latest_notification_at), kind: 'NOTIFICATION' });
   }
 
-  // Fallback to recent logs (kept for resilience)
   for (const r of opts.logs ?? []) {
     let kind: BadgeKind | null = null;
     if (r.event === 'zeta.outreach') kind = 'MESSAGE';
@@ -134,6 +138,26 @@ function chooseLatestAny(opts: {
 
   const top = candidates[0];
   return { text: top.text, kind: top.kind, at: top.at };
+}
+
+/* ---------- long-token formatting for notification bubble ---------- */
+const MAX_RUN_TOKEN = 40;
+const ZWS = '\u200b';
+
+function formatNotificationText(text: string | null | undefined): string {
+  if (!text) return '';
+  return text
+    .split(/\s+/)
+    .map((token) => {
+      // allow wrapping on underscores
+      let t = token.replace(/_/g, `_${ZWS}`);
+      // truncate truly huge tokens
+      if (t.length > MAX_RUN_TOKEN) {
+        t = t.slice(0, MAX_RUN_TOKEN - 1) + '…';
+      }
+      return t;
+    })
+    .join(' ');
 }
 
 /* ---------- date helpers ---------- */
@@ -186,6 +210,12 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
 
   const userInitials = userEmail?.slice(0, 2).toUpperCase() ?? '??';
+
+  /* ---------- formatted notification text (handles long tokens) ---------- */
+  const displayNotification = useMemo(
+    () => formatNotificationText(latestNotification),
+    [latestNotification]
+  );
 
   /* -------------------- Fetch Memory ---------------------- */
   useEffect(() => {
@@ -325,7 +355,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
 
     const t = setInterval(run, 30_000);
 
-    // ── Realtime: logs (as before)
     const chLogs = supabase
       .channel(`logs_rhs_${projectId}`)
       .on(
@@ -342,7 +371,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       )
       .subscribe();
 
-    // ── Realtime: custom_notifications → update local "latest" immediately
     const chNotifications = supabase
       .channel(`custom_notifications_${projectId}`)
       .on(
@@ -354,7 +382,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
           if (!text) return;
           const at = (row.sent_at || row.created_at || new Date().toISOString()).toString();
           const kind: BadgeKind = row.type === 'outreach' ? 'MESSAGE' : 'NOTIFICATION';
-          // only replace if it’s newer
           const curTs = latestAt ? Date.parse(latestAt) : -Infinity;
           const newTs = Date.parse(at);
           if (newTs > curTs) {
@@ -366,7 +393,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       )
       .subscribe();
 
-    // ── Realtime: thoughts inserts
     const chThoughts = supabase
       .channel(`thoughts_${projectId}`)
       .on(
@@ -388,7 +414,6 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
       )
       .subscribe();
 
-    // ── Realtime: mainframe_info updates (authoritative snapshot)
     const chMF = supabase
       .channel(`mf_${projectId}`)
       .on(
@@ -680,8 +705,8 @@ export default function CurrentMemoryPanel({ userEmail, projectId }: Props) {
                     {latestAt ? `${timeAgo(latestAt)}` : '—'}
                   </span>
                 </p>
-                <p className="leading-snug whitespace-pre-wrap">
-                  {latestNotification ?? '—'}
+                <p className="leading-snug whitespace-pre-wrap break-words">
+                  {displayNotification || '—'}
                 </p>
               </div>
             </div>

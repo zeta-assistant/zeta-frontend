@@ -34,20 +34,16 @@ const PANEL_W = 'w-[320px]';
    Helpers
 ─────────────────────────────────────────────────────────── */
 function getFunctionsBase() {
-  // Prefer your configured URL; fall back to anon env if needed.
   const base =
     process.env.NEXT_PUBLIC_SUPABASE_URL ??
-    // If you *really* need a hardcoded fallback, put it here:
     'https://inprydzukperccgtxgvx.supabase.co';
   return `${base}/functions/v1`;
 }
 
-/** Simple safe alert (avoids crashing SSR) */
 function safeAlert(msg: string) {
   if (typeof window !== 'undefined') alert(msg);
 }
 
-/** Session refresher used by resilient fetch */
 async function refreshSessionIfNeeded() {
   try {
     const { data } = await supabase.auth.getSession();
@@ -61,6 +57,27 @@ async function refreshSessionIfNeeded() {
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** ⛏️ Shorten / soften long run-on tokens for the Thoughts bubble */
+const MAX_RUN_TOKEN = 40;
+function cleanThoughtForDisplay(text: string | null): string {
+  if (!text) return '';
+  const zws = '\u200b'; // zero-width space so long words can wrap
+
+  return text
+    .split(/\s+/)
+    .map((token) => {
+      // allow wraps on snake_case / file_names
+      let t = token.replace(/_/g, `_${zws}`);
+
+      // hard cap truly huge tokens with ellipsis
+      if (t.length > MAX_RUN_TOKEN) {
+        t = t.slice(0, MAX_RUN_TOKEN - 1) + '…';
+      }
+      return t;
+    })
+    .join(' ');
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -101,10 +118,8 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
   const [latestThought, setLatestThought] = useState<string | null>(null);
   const [loadingThought, setLoadingThought] = useState<boolean>(true);
 
-  // Custom level titles for this project
   const [titles, setTitles] = useState<TitlesMap>(defaultTitlesMap);
 
-  // XP progress (shared lib) — we'll override titles using `titles` map
   const [prog, setProg] = useState({
     level: 1,
     title: defaultTitlesMap[1],
@@ -128,8 +143,9 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
 
     const fetchLatestThought = async (attempt = 1): Promise<void> => {
       if (cancelled) return;
-      // cancel any inflight from prior tick
-      try { currentAbort?.abort(); } catch {}
+      try {
+        currentAbort?.abort();
+      } catch {}
       currentAbort = new AbortController();
 
       await refreshSessionIfNeeded();
@@ -147,17 +163,14 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
         if (cancelled) return;
 
         if (error) {
-          // Non-fatal: warn instead of error so Next dev overlay stays quiet.
           console.warn('Latest thought fetch warn:', error);
           setLatestThought(null);
 
-          // light retry for transient hiccups
           if (attempt === 1) {
             await sleep(800);
             return fetchLatestThought(2);
           }
         } else {
-          // `data` can be null when there are no rows — that's fine.
           setLatestThought(data?.content ?? null);
         }
       } catch (e: any) {
@@ -175,11 +188,9 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
       }
     };
 
-    // Initial load + safety poll every 60s
     fetchLatestThought();
     pollId = window.setInterval(fetchLatestThought, 60_000);
 
-    // Realtime subscription (auto refresh on any change for this project)
     const channel = supabase
       .channel(`thoughts-latest-${projectId}`)
       .on(
@@ -197,8 +208,12 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     return () => {
       cancelled = true;
       if (pollId) clearInterval(pollId);
-      try { supabase.removeChannel(channel); } catch {}
-      try { currentAbort?.abort(); } catch {}
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
+      try {
+        currentAbort?.abort();
+      } catch {}
     };
   }, [projectId]);
 
@@ -220,7 +235,6 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
         if (cancelled) return;
 
         if (error) {
-          // Table might not exist yet; keep defaults
           setTitles(defaultTitlesMap);
           return;
         }
@@ -237,10 +251,8 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     }
 
     loadTitles();
-    // Re-check occasionally in case another tab changes titles
     pollId = window.setInterval(loadTitles, 60_000);
 
-    // Realtime on title edits (nice-to-have)
     const channel = supabase
       .channel(`level-titles-${projectId}`)
       .on(
@@ -284,20 +296,25 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     }
 
     loadXP();
-    // Soft poll to keep in sync even without explicit events
     pollId = window.setInterval(loadXP, 60_000);
-
-    // If you have a relevant log/event table, you can attach realtime here too.
 
     return () => {
       cancelled = true;
       if (pollId) clearInterval(pollId);
     };
-  }, [projectId, titles]); // <= re-run when titles change
+  }, [projectId, titles]);
 
   const thoughtText =
     latestThought ??
-    (loadingThought ? 'Loading Zeta’s latest thought…' : 'No thoughts yet. Generate one to kick things off.');
+    (loadingThought
+      ? 'Loading Zeta’s latest thought…'
+      : 'No thoughts yet. Generate one to kick things off.');
+
+  // 🔍 Final formatted text for display (handles long run-on tokens)
+  const displayThought = useMemo(
+    () => cleanThoughtForDisplay(thoughtText),
+    [thoughtText]
+  );
 
   const maxed = prog.remaining === 0 && prog.level >= LEVELS.length;
   const pct = Math.min(100, Math.max(0, prog.pct));
@@ -325,7 +342,7 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
         <div className="h-2.5 rounded-full bg-blue-900 overflow-hidden">
           <div
             className="h-2.5 bg-gradient-to-r from-amber-300 to-purple-400"
-            style={{ width: `${Math.min(100, Math.max(0, prog.pct))}%` }}
+            style={{ width: `${pct}%` }}
           />
         </div>
 
@@ -338,9 +355,14 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
       </div>
 
       {/* 🧠 Zeta’s Thoughts */}
-      <div className={`${PANEL_W} shrink-0 bg-indigo-100 text-indigo-900 px-4 py-3 rounded-2xl shadow border border-indigo-300 text-sm`}>
+      <div
+        className={`${PANEL_W} shrink-0 bg-indigo-100 text-indigo-900 px-4 py-3 rounded-2xl shadow border border-indigo-300 text-sm`}
+      >
         <p className="font-bold mb-2">💭 Zeta’s Thoughts</p>
-        <p className="text-sm whitespace-pre-wrap">{thoughtText}</p>
+        {/* break-words so it wraps nicely even if something sneaks through */}
+        <p className="text-sm whitespace-pre-wrap break-words">
+          {displayThought}
+        </p>
       </div>
 
       {/* 📝 Daily Tasks */}
@@ -350,7 +372,6 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
         </div>
       </div>
 
-      {/* (Optional) Functions panel or other modules */}
       {/* <FunctionsPanel projectId={projectId} /> */}
     </div>
   );

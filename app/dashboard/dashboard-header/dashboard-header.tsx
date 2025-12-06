@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Clock from '@/components/Clock';
 import RefreshButton from '../dashboard_buttons/refresh_button/refresh_button';
@@ -17,6 +17,106 @@ type Props = {
   onRefresh?: () => Promise<void>;
   refreshing?: boolean;
 };
+
+/* ---------------- Help Button (inline) ---------------- */
+
+function HelpButton() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+
+    function handleClick(e: MouseEvent) {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    window.addEventListener('mousedown', handleClick);
+    return () => window.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const goToSupport = () => {
+    setOpen(false);
+    router.push('/support'); // 🔗 direct link to support page
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      {/* ? icon button */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-indigo-300 bg-white/90 text-sm font-bold text-indigo-700 shadow-sm hover:bg-indigo-50 hover:text-indigo-900 transition-colors"
+        aria-label="Help & support"
+      >
+        ?
+      </button>
+
+      {open && (
+        <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-xs shadow-lg z-50">
+          <div className="mb-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Need help?
+            </div>
+            <div className="text-sm font-bold text-slate-900">
+              Help & Support
+            </div>
+          </div>
+
+          <div className="space-y-2 max-h-52 overflow-y-auto">
+            <button
+              type="button"
+              className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
+            >
+              <div className="font-semibold text-slate-800">FAQ</div>
+              <div className="mt-0.5 text-[10px] text-slate-500">
+                Common questions about using Zeta & the dashboard.
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
+            >
+              <div className="font-semibold text-slate-800">Quick start</div>
+              <div className="mt-0.5 text-[10px] text-slate-500">
+                How to use chats, files, memory, and tasks.
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
+            >
+              <div className="font-semibold text-slate-800">
+                Tips & workflows
+              </div>
+              <div className="mt-0.5 text-[10px] text-slate-500">
+                Recommended flows and power-user tricks.
+              </div>
+            </button>
+          </div>
+
+          <div className="mt-3 border-t border-slate-100 pt-2 flex items-center justify-between">
+            <span className="text-[10px] text-slate-500">Still stuck?</span>
+            <button
+              type="button"
+              onClick={goToSupport}
+              className="rounded-full bg-indigo-600 px-3 py-1 text-[10px] font-semibold text-white hover:bg-indigo-700 transition-colors"
+            >
+              Open support
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Centered, pretty plan pill */
 function PlanPill({
@@ -45,7 +145,7 @@ function PlanPill({
         text: 'text-emerald-100',
         ping: 'bg-emerald-300',
         dot: 'bg-emerald-400',
-        
+        emoji: '⭐',
         label: 'User Subscription',
       };
 
@@ -57,15 +157,28 @@ function PlanPill({
         'inline-flex items-center gap-2 px-3 py-1.5 rounded-full',
         'backdrop-blur-sm bg-white/10 shadow-sm border',
         tone.border,
-        'ring-1', tone.ring,
-        'transition-colors duration-200', tone.hover,
-        'text-xs font-semibold', tone.text,
+        'ring-1',
+        tone.ring,
+        'transition-colors duration-200',
+        tone.hover,
+        'text-xs font-semibold',
+        tone.text,
       ].join(' ')}
     >
       {/* animated status dot */}
       <span className="relative flex h-2.5 w-2.5">
-        <span className={['absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping', tone.ping].join(' ')} />
-        <span className={['relative inline-flex h-2.5 w-2.5 rounded-full', tone.dot].join(' ')} />
+        <span
+          className={[
+            'absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping',
+            tone.ping,
+          ].join(' ')}
+        />
+        <span
+          className={[
+            'relative inline-flex h-2.5 w-2.5 rounded-full',
+            tone.dot,
+          ].join(' ')}
+        />
       </span>
       <span aria-hidden className="leading-none">{tone.emoji}</span>
       <span>{tone.label}</span>
@@ -134,13 +247,22 @@ export default function DashboardHeader({
                 Choose Agent
               </div>
               <div className="hover:bg-indigo-300 px-4 py-2 cursor-pointer text-center font-medium">
-                ⚡ Zeta <span className="text-xs text-gray-600 ml-1">(currently selected)</span>
+                ⚡ Zeta{' '}
+                <span className="text-xs text-gray-600 ml-1">
+                  (currently selected)
+                </span>
               </div>
               <div className="hover:bg-indigo-300 px-4 py-2 cursor-not-allowed text-center opacity-60">
-                📚 Theta <span className="text-xs text-gray-600 ml-1">coming soon...</span>
+                📚 Theta{' '}
+                <span className="text-xs text-gray-600 ml-1">
+                  coming soon...
+                </span>
               </div>
               <div className="hover:bg-indigo-300 px-4 py-2 cursor-not-allowed text-center opacity-60 rounded-b-xl">
-                ❤️ Delta <span className="text-xs text-gray-600 ml-1">coming soon...</span>
+                ❤️ Delta{' '}
+                <span className="text-xs text-gray-600 ml-1">
+                  coming soon...
+                </span>
               </div>
             </div>
           )}
@@ -174,12 +296,15 @@ export default function DashboardHeader({
               )}
             </div>
 
-            {/* MIDDLE: perfectly centered plan pill */}
+            {/* MIDDLE: centered plan pill */}
             <div className="flex-1 flex justify-center">
-              <PlanPill plan={plan} onClick={() => router.push('/settings')} />
+              <PlanPill
+                plan={plan}
+                onClick={() => router.push('/settings')}
+              />
             </div>
 
-            {/* RIGHT: Refresh / Projects / Logout */}
+            {/* RIGHT: Refresh / Help / Projects / Logout */}
             <div className="flex gap-2 items-center">
               <RefreshButton
                 variant="inline"
@@ -187,6 +312,7 @@ export default function DashboardHeader({
                 refreshing={refreshing ?? false}
                 className="!text-xs"
               />
+              <HelpButton />
               <button
                 onClick={() => router.push('/projects')}
                 className="text-xs bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-md"
