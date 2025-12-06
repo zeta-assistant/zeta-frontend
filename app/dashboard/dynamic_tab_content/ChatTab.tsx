@@ -438,23 +438,23 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 };
     merged.forEach(pushOrMerge);
 
-    out.sort((a, b) => {
+  out.sort((a, b) => {
   const ta = toDateOrNow(a).getTime();
   const tb = toDateOrNow(b).getTime();
   const pa = sourcePriority[a?.source ?? 'base'] ?? 0;
   const pb = sourcePriority[b?.source ?? 'base'] ?? 0;
 
-  // 1️⃣ Primary: strict chronological order
+  // 1) Primary: chronological order
   if (ta !== tb) return ta - tb;
 
-  // 2️⃣ Same timestamp: prefer more authoritative source (live > base > user_input_log > outreach > optimistic)
-  if (pa !== pb) return pa - pb;
-
-  // 3️⃣ Then role (user before assistant, only when time + source equal)
-  const rr = roleRank(a?.role) - roleRank(b?.role);
+  // 2) Same exact timestamp: prefer user before assistant
+  const rr = roleRank(a?.role) - roleRank(b?.role); // user(0) < assistant(1)
   if (rr !== 0) return rr;
 
-  // 4️⃣ Finally, stable-ish tie-breaker on having a real DB id
+  // 3) Then more "authoritative" source
+  if (pa !== pb) return pa - pb;
+
+  // 4) Finally, stable-ish tie-breaker on having a real DB id
   const aIdReal =
     !!a?.id && !String(a.id).startsWith('temp-') && !String(a.id).startsWith('uil-') ? 1 : 0;
   const bIdReal =
@@ -462,6 +462,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
   return aIdReal - bIdReal;
 });
+
 
 
     return out;

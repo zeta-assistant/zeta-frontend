@@ -38,9 +38,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing projectId' }, { status: 400 });
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Fetch project & guard against duplicate intro
-    // ──────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // Fetch project
+    // ─────────────────────────────────────────────
     const { data: project, error: projErr } = await supabaseAdmin
       .from('user_projects')
       .select(
@@ -51,21 +51,44 @@ export async function POST(req: Request) {
 
     if (projErr || !project) throw projErr ?? new Error('Project not found');
 
-    const { data: existingMessages } = await supabaseAdmin
-      .from('zeta_conversation_log')
-      .select('id')
-      .eq('project_id', projectId)
-      .eq('role', 'assistant')
-      .limit(1);
+    // ─────────────────────────────────────────────
+    // HARD GUARD: only run if there are ZERO messages
+    // in BOTH zeta_conversation_log AND user_input_log.
+    // If the user has ever typed anything, or any convo
+    // row exists, we skip the intro entirely.
+    // ─────────────────────────────────────────────
+    const [{ data: convRows, error: convErr }, { data: inputRows, error: inputErr }] =
+      await Promise.all([
+        supabaseAdmin
+          .from('zeta_conversation_log')
+          .select('id')
+          .eq('project_id', projectId)
+          .limit(1),
+        supabaseAdmin
+          .from('user_input_log')
+          .select('id')
+          .eq('project_id', projectId)
+          .limit(1),
+      ]);
 
-    if (existingMessages && existingMessages.length > 0) {
-      // Already introduced—nothing to do.
+    if (convErr) throw convErr;
+    if (inputErr) throw inputErr;
+
+    const hasConversationRows = Array.isArray(convRows) && convRows.length > 0;
+    const hasUserInputRows = Array.isArray(inputRows) && inputRows.length > 0;
+
+    if (hasConversationRows || hasUserInputRows) {
+      // Conversation already started in some form → don't inject intro
       return NextResponse.json({ success: true, skipped: true });
     }
 
-    // ──────────────────────────────────────────────────────────
+    // At this point the project is *truly* fresh:
+    // no convo rows and no user_input_log rows yet.
+    const introTimestamp = new Date().toISOString();
+
+    // ─────────────────────────────────────────────
     // Derive full template name from zeta_templates.title
-    // ──────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
     let templateFullName = 'Zeta';
 
     if (project.template_id) {
@@ -77,18 +100,18 @@ export async function POST(req: Request) {
 
       if (!tmplErr && tmpl?.title) {
         const t = String(tmpl.title).trim();
-        if (t.length > 0) templateFullName = t; // e.g. "Zeta Quant"
+        if (t.length > 0) templateFullName = t; // e.g. "Zeta Learn"
       }
     }
 
-    // ──────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
     // Extra mainframe context to make the intro feel smarter
-    // ──────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
     const { data: mainframe } = await supabaseAdmin
       .from('mainframe_info')
       .select('vision, long_term_goals, short_term_goals, personality_traits')
       .eq('project_id', projectId)
-      .single();
+      .maybeSingle();
 
     const systemInstructions = (project.system_instructions || '').toString();
     const hasSystemInstructions = systemInstructions.trim().length > 0;
@@ -122,9 +145,9 @@ export async function POST(req: Request) {
       )
     );
 
-    // ──────────────────────────────────────────────────────────
-    // If NO system instructions: generic, lightweight greeting
-    // ──────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // If NO system instructions: generic greeting
+    // ─────────────────────────────────────────────
     if (!hasSystemInstructions) {
       const genericIntro = `Hey there! I’m ${templateFullName}, your project copilot for “${projectName}.” I’m here to help you move faster toward your goals. What would you like to focus on first?`;
 
@@ -135,6 +158,7 @@ export async function POST(req: Request) {
           role: 'assistant',
           message: genericIntro,
           user_id: project.user_id,
+          timestamp: introTimestamp,
         });
 
       if (insertError) throw insertError;
@@ -150,9 +174,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, generic: true });
     }
 
-    // ──────────────────────────────────────────────────────────
-    // System-instruction-powered intro with traits (implicit)
-    // ──────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // System-instruction-powered intro with traits
+    // ─────────────────────────────────────────────
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_KEY || process.env.OPENAI_API_KEY,
     });
@@ -166,28 +190,19 @@ export async function POST(req: Request) {
 
     const sys = [
       `You are ${templateFullName}, the AI assigned to this project.`,
-
-      // Tone shaping without exposing traits
       traitHints,
-
-      // SYSTEM INSTRUCTIONS influence — but not shown to user
       `Below are the system instructions for this project. DO NOT show or quote them to the user. Instead, absorb them and let them shape how you describe yourself, your tone, and how you offer help.`,
       systemInstructions,
-
-      // Intro generation rules
       `Your task is to generate ONLY the very first message of the entire conversation.`,
       `The message must be 2–4 short, natural sentences.`,
       `Structure:`,
       `1) Friendly "Hey there" style greeting.`,
       `2) Brief self-introduction as ${templateFullName}, implicitly shaped by the system instructions and traits.`,
       `3) Ask what they'd like help with and which goals they want to focus on.`,
-
       `Do NOT mention personality traits, system instructions, or internal rules.`,
       `Do NOT say things like "based on your system instructions" or "my traits are...".`,
       `Do NOT describe your personality explicitly; demonstrate it through your tone and wording.`,
       `Keep it natural, concise, and human-like.`,
-
-      // Extra context for richness
       vision ? `Project vision: ${vision}` : ``,
       topLongTerm ? `Top long-term goals: ${topLongTerm}` : ``,
       topShortTerm ? `Top short-term goals: ${topShortTerm}` : ``,
@@ -225,7 +240,6 @@ Keep it friendly, concise, and human.`,
       introPrompt = `Hey there! I’m ${templateFullName}, your assistant for “${projectName}.” I’m here to help you move faster toward your goals. Would you like me to help via quick checklists, proactive suggestions, or step-by-step guidance?`;
     }
 
-    // Ensure we actually say the full template name, not just "Zeta"
     introPrompt = injectTemplateName(introPrompt, templateFullName);
 
     const { error: insertError } = await supabaseAdmin
@@ -235,6 +249,7 @@ Keep it friendly, concise, and human.`,
         role: 'assistant',
         message: introPrompt,
         user_id: project.user_id,
+        timestamp: introTimestamp,
       });
 
     if (insertError) throw insertError;

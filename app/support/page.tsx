@@ -20,42 +20,69 @@ export default function SupportPage() {
     subject: '',
     message: '',
   });
+  const [userId, setUserId] = useState<string | null>(null);
+  const [files, setFiles] = useState<FileList | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [ok, setOk] = useState<null | string>(null);
   const [err, setErr] = useState<null | string>(null);
 
-  // Prefill name/email if the user is logged in
+  // Prefill name/email + capture UID if logged in
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
       const u = data?.session?.user;
       if (!u) return;
+
       const name =
         (u.user_metadata?.user_name as string) ||
         (u.user_metadata?.username as string) ||
         (u.email?.split('@')[0] as string) ||
         '';
-      setForm((f) => ({ ...f, name, email: u.email ?? f.email }));
+
+      setForm((f) => ({
+        ...f,
+        name,
+        email: u.email ?? f.email,
+      }));
+      setUserId(u.id);
     })();
   }, []);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitting(true);
     setOk(null);
     setErr(null);
+
     try {
+      const formData = new FormData();
+      formData.append('name', form.name);
+      formData.append('email', form.email);
+      formData.append('subject', form.subject);
+      formData.append('message', form.message);
+      if (userId) formData.append('user_id', userId);
+
+      if (files && files.length > 0) {
+        Array.from(files).forEach((file) => {
+          formData.append('files', file);
+        });
+      }
+
       const res = await fetch('/api/support', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: formData, // let browser set multipart boundary
       });
+
       const json = await res.json().catch(() => ({}));
+
       if (!res.ok || json?.success === false) {
         throw new Error(json?.error || 'Failed to send message');
       }
+
       setOk('Thanks! Your message has been sent.');
-      setForm({ name: form.name, email: form.email, subject: '', message: '' });
+      // Keep name/email, clear subject/message & files
+      setForm((f) => ({ ...f, subject: '', message: '' }));
+      setFiles(null);
     } catch (e: any) {
       setErr(e?.message || 'Something went wrong.');
     } finally {
@@ -72,18 +99,25 @@ export default function SupportPage() {
           <span className="text-lg font-semibold text-gray-800">Pantheon</span>
         </Link>
         <nav className="flex items-center gap-6">
-          <Link href="/projects" className="text-gray-700 hover:text-indigo-600">Projects</Link>
-          <Link href="/settings" className="text-gray-700 hover:text-indigo-600">Account</Link>
+          <Link href="/projects" className="text-gray-700 hover:text-indigo-600">
+            Projects
+          </Link>
+          <Link href="/settings" className="text-gray-700 hover:text-indigo-600">
+            Account
+          </Link>
         </nav>
       </header>
 
       <section className="max-w-3xl mx-auto px-6 py-10">
         <h1 className="text-3xl font-bold text-gray-900">Support</h1>
         <p className="mt-2 text-gray-600">
-          Send feedback, report an issue, or ask for help. We usually reply within 24h.
+          Send feedback, report an issue, or ask for help. You can also attach screenshots or files.
         </p>
 
-        <form onSubmit={onSubmit} className="mt-6 bg-white rounded-2xl p-6 shadow ring-1 ring-black/5 space-y-4">
+        <form
+          onSubmit={onSubmit}
+          className="mt-6 bg-white rounded-2xl p-6 shadow ring-1 ring-black/5 space-y-4"
+        >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-gray-600 mb-1">Name</label>
@@ -130,8 +164,31 @@ export default function SupportPage() {
             />
           </div>
 
-          {ok && <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">{ok}</div>}
-          {err && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">{err}</div>}
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">
+              Attach files (screenshots, logs, etc.)
+            </label>
+            <input
+              type="file"
+              multiple
+              onChange={(e) => setFiles(e.target.files)}
+              className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-indigo-700 hover:file:bg-indigo-100"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              You can upload multiple files. Max file size depends on your Supabase Storage limits.
+            </p>
+          </div>
+
+          {ok && (
+            <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2">
+              {ok}
+            </div>
+          )}
+          {err && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {err}
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <button
@@ -144,7 +201,6 @@ export default function SupportPage() {
               {submitting ? 'Sending…' : 'Send message'}
             </button>
 
-            {/* Optional: link to start a Zeta help chat for logged-in users */}
             <Link
               href="/dashboard/help"
               className="text-sm px-3 py-2 rounded-md border text-gray-700 hover:bg-gray-50"
