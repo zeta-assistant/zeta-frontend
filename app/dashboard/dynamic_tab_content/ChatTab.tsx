@@ -444,28 +444,17 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   const pa = sourcePriority[a?.source ?? 'base'] ?? 0;
   const pb = sourcePriority[b?.source ?? 'base'] ?? 0;
 
-  // If they're within ~1.5s of each other, treat as one "turn"
-  // and always show the USER message before the ASSISTANT reply.
-  const diff = ta - tb;
-  if (Math.abs(diff) < 1500) {
-    const rr = roleRank(a?.role) - roleRank(b?.role); // user(0) < assistant(1)
-    if (rr !== 0) return rr;
-
-    // If same role, fall back to source priority
-    if (pa !== pb) return pa - pb;
-  }
-
-  // Otherwise, normal chronological ordering
+  // 1️⃣ Primary: strict chronological order
   if (ta !== tb) return ta - tb;
 
-  // Same timestamp: prefer more "authoritative" source
+  // 2️⃣ Same timestamp: prefer more authoritative source (live > base > user_input_log > outreach > optimistic)
   if (pa !== pb) return pa - pb;
 
-  // Then role (user before assistant)
+  // 3️⃣ Then role (user before assistant, only when time + source equal)
   const rr = roleRank(a?.role) - roleRank(b?.role);
   if (rr !== 0) return rr;
 
-  // Finally, stable-ish tie-breaker on having a real DB id
+  // 4️⃣ Finally, stable-ish tie-breaker on having a real DB id
   const aIdReal =
     !!a?.id && !String(a.id).startsWith('temp-') && !String(a.id).startsWith('uil-') ? 1 : 0;
   const bIdReal =
