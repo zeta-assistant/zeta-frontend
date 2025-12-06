@@ -4,8 +4,16 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 function SmartImg({
-  srcs, alt, size = 64, className = '',
-}: { srcs: string[]; alt: string; size?: number; className?: string }) {
+  srcs,
+  alt,
+  size = 64,
+  className = '',
+}: {
+  srcs: string[];
+  alt: string;
+  size?: number;
+  className?: string;
+}) {
   const [i, setI] = useState(0);
   const src = srcs[Math.min(i, srcs.length - 1)];
   return (
@@ -28,14 +36,15 @@ export default function LoginCard() {
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
 
-  const [fpOpen, setFpOpen] = useState(false);
-  const [fpEmail, setFpEmail] = useState('');
+  // Forgot-password state
   const [fpMsg, setFpMsg] = useState<string | null>(null);
   const [fpErr, setFpErr] = useState<string | null>(null);
   const [fpBusy, setFpBusy] = useState(false);
 
   const handleLogin = async () => {
     setAuthError(null);
+    setFpMsg(null);
+    setFpErr(null);
     setLoading(true);
 
     const { data: authData, error } = await supabase.auth.signInWithPassword({
@@ -65,7 +74,9 @@ export default function LoginCard() {
       });
 
       const contentType = res.headers.get('content-type');
-      const data = contentType?.includes('application/json') ? await res.json() : null;
+      const data = contentType?.includes('application/json')
+        ? await res.json()
+        : null;
 
       if (!res.ok) {
         setAuthError(data?.error || 'Failed to create or fetch project.');
@@ -90,15 +101,27 @@ export default function LoginCard() {
   const sendResetEmail = async () => {
     setFpMsg(null);
     setFpErr(null);
+
+    if (!email.trim()) {
+      setFpErr('Please enter your email above first.');
+      return;
+    }
+
     setFpBusy(true);
 
     try {
       const redirectTo = `${window.location.origin}/reset-password`;
-      const { error } = await supabase.auth.resetPasswordForEmail(fpEmail.trim(), { redirectTo });
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        { redirectTo }
+      );
+
       if (error) {
         setFpErr(error.message);
       } else {
-        setFpMsg('If an account exists for this email, a reset link has been sent.');
+        setFpMsg(
+          'If an account exists for this email, a reset link has been sent.'
+        );
       }
     } catch (e: any) {
       setFpErr(e?.message || 'Failed to send reset email.');
@@ -120,12 +143,17 @@ export default function LoginCard() {
           />
         </div>
 
-        <h3 className="text-2xl font-semibold text-[#0f1b3d] text-center">Welcome back</h3>
+        <h3 className="text-2xl font-semibold text-[#0f1b3d] text-center">
+          Welcome back
+        </h3>
         <p className="text-base text-[#0f1b3d]/60 mb-8 text-center">
           Sign in to access your projects and agents.
         </p>
 
-        <label className="block text-sm font-medium text-[#0f1b3d]/70 mb-1" htmlFor="email">
+        <label
+          className="block text-sm font-medium text-[#0f1b3d]/70 mb-1"
+          htmlFor="email"
+        >
           Email
         </label>
         <input
@@ -139,7 +167,10 @@ export default function LoginCard() {
           autoComplete="email"
         />
 
-        <label className="block text-sm font-medium text-[#0f1b3d]/70 mb-1" htmlFor="password">
+        <label
+          className="block text-sm font-medium text-[#0f1b3d]/70 mb-1"
+          htmlFor="password"
+        >
           Password
         </label>
         <div className="relative mb-1">
@@ -165,15 +196,26 @@ export default function LoginCard() {
         <div className="mt-2 flex items-center justify-between">
           <button
             type="button"
-            onClick={() => { setFpOpen(true); setFpEmail(email || ''); }}
-            className="text-sm text-[#2555ff] hover:underline"
+            onClick={sendResetEmail}
+            disabled={fpBusy}
+            className="text-sm text-[#2555ff] hover:underline disabled:opacity-60"
           >
-            Forgot password?
+            {fpBusy ? 'Sending reset link…' : 'Forgot password?'}
           </button>
-          <a href="/reset-password" className="text-sm text-[#0f1b3d]/60 hover:underline">
+          <a
+            href="/reset-password"
+            className="text-sm text-[#0f1b3d]/60 hover:underline"
+          >
             I already have a reset link
           </a>
         </div>
+
+        {fpMsg && (
+          <div className="mt-2 text-xs text-green-700">{fpMsg}</div>
+        )}
+        {fpErr && (
+          <div className="mt-2 text-xs text-red-700">{fpErr}</div>
+        )}
 
         {authError && (
           <div className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-4 py-3">
@@ -185,7 +227,9 @@ export default function LoginCard() {
           onClick={handleLogin}
           disabled={loading}
           className={`mt-6 w-full rounded-lg px-5 py-3 text-lg font-medium text-white transition shadow hover:shadow-lg ${
-            loading ? 'bg-[#93a8ff] cursor-not-allowed' : 'bg-[#2555ff] hover:bg-[#1e47d9]'
+            loading
+              ? 'bg-[#93a8ff] cursor-not-allowed'
+              : 'bg-[#2555ff] hover:bg-[#1e47d9]'
           }`}
         >
           {loading ? 'Logging in…' : 'Log In'}
@@ -209,9 +253,14 @@ export default function LoginCard() {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-base text-[#2555ff] hover:text-[#1e47d9] transition font-medium"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-              fill="currentColor" className="h-6 w-6" aria-hidden="true">
-              <path d="M7.75 2h8.5A5.75 5.75 0 0 1 22 7.75v8.5A5.75 5.75 0 0 1 16.25 22h-8.5A5.75 5.75 0 0 1 2 16.25v-8.5A5.75 5.75 0 0 1 7.75 2zm0 1.5A4.25 4.25 0 0 0 3.5 7.75v8.5A4.25 4.25 0 0 0 7.75 20.5h8.5a4.25 4.25 0 0 0 4.25-4.25v-8.5A4.25 4.25 0 0 0 16.25 3.5h-8.5zm4.25 3a5.75 5.75 0 1 1 0 11.5 5.75 5.75 0 0 1 0-11.5zm0 1.5a4.25 4.25 0 1 0 0 8.5 4.25 4.25 0 0 0 0-8.5zm5.25-.88a1.13 1.13 0 1 1-2.25 0 1.13 1.13 0 0 1 2.25 0z"/>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className="h-6 w-6"
+              aria-hidden="true"
+            >
+              <path d="M7.75 2h8.5A5.75 5.75 0 0 1 22 7.75v8.5A5.75 5.75 0 0 1 16.25 22h-8.5A5.75 5.75 0 0 1 2 16.25v-8.5A5.75 5.75 0 0 1 7.75 2zm0 1.5A4.25 4.25 0 0 0 3.5 7.75v8.5A4.25 4.25 0 0 0 7.75 20.5h8.5a4.25 4.25 0 0 0 4.25-4.25v-8.5A4.25 4.25 0 0 0 16.25 3.5h-8.5zm4.25 3a5.75 5.75 0 1 1 0 11.5 5.75 5.75 0 0 1 0-11.5zm0 1.5a4.25 4.25 0 1 0 0 8.5 4.25 4.25 0 0 0 0-8.5zm5.25-.88a1.13 1.13 0 1 1-2.25 0 1.13 1.13 0 0 1 2.25 0z" />
             </svg>
             Follow us on Instagram
           </a>
