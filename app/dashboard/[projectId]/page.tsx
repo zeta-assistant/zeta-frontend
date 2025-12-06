@@ -438,21 +438,25 @@ export default function DashboardPage() {
               />
 
               <div className="absolute top-4 left-[300px] z-30 flex flex-col gap-2 items-center">
-                <SettingsButton
-                  projectId={String(projectId)}
-                  selectedModelId={selectedModelId}
-                  setSelectedModelId={setSelectedModelId}
-                />
-                <ThoughtButton projectId={projectId} />
-                <MessageButton projectId={projectId} />
-                <UploadButton
-                  projectId={projectId}
-                  onUploaded={async () => {
-                    await fetchRecentDocs();
-                    setRefreshNonce((n) => n + 1);
-                  }}
-                />
-              </div>
+  <SettingsButton
+    projectId={String(projectId)}
+    selectedModelId={selectedModelId}
+    setSelectedModelId={setSelectedModelId}
+    avatarSrc={getIdleSrc()}          // already used for the dashboard avatar
+    templateSlug={templateSlug ?? undefined}  // 🔹 NEW: pass slug through
+  />
+  <ThoughtButton projectId={projectId} />
+  <MessageButton projectId={projectId} />
+  <UploadButton
+    projectId={projectId}
+    onUploaded={async () => {
+      await fetchRecentDocs();
+      setRefreshNonce((n) => n + 1);
+    }}
+  />
+</div>
+
+
 
               <ZetaLeftSidePanel key={`left-${refreshNonce}`} projectId={projectId} />
             </div>

@@ -3,26 +3,30 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-
-// --- XP logic shared with TimelinePanel ---
 import {
   computeXP,
   levelProgress,
-  LEVELS,
   type MetricCounts as XPMetrics,
-  getXPCounts, // fallback
+  getXPCounts,
 } from '@/lib/XP';
 
 type XPState = {
   level: number;
-  pct: number;        // 0..100
-  remaining: number;  // XP to next
-  current: number;    // XP inside current level
-  next: number;       // XP required for current level
-  total: number;      // lifetime XP
+  pct: number;
+  remaining: number;
+  current: number;
+  next: number;
+  total: number;
 };
 
-const ZERO_XP: XPState = { level: 1, pct: 0, remaining: 100, current: 0, next: 100, total: 0 };
+const ZERO_XP: XPState = {
+  level: 1,
+  pct: 0,
+  remaining: 100,
+  current: 0,
+  next: 100,
+  total: 0,
+};
 
 const ZERO_COUNTS: XPMetrics = {
   user_messages: 0,
@@ -61,7 +65,11 @@ function formatDateAU(iso?: string | null) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' });
+  return d.toLocaleDateString('en-AU', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 }
 
 function normalizeTraits(raw: unknown): string[] {
@@ -81,11 +89,35 @@ function normalizeTraits(raw: unknown): string[] {
   return [];
 }
 
+// 🔹 Map templateSlug → title + tagline
+function deriveTemplateLabel(slug?: string | null) {
+  if (!slug) {
+    return {
+      displayName: 'Zeta',
+      companion: 'Your AI companion',
+    };
+  }
+
+  const core = slug.startsWith('zeta-') ? slug.slice(5) : slug; // learn, trainer, build...
+  const pretty = core.charAt(0).toUpperCase() + core.slice(1);
+
+  let noun = 'AI';
+  if (core === 'learn') noun = 'learning';
+  else if (core === 'trainer') noun = 'training';
+  else if (core === 'build') noun = 'building';
+  // add more later: e.g. if (core === 'chef') noun = 'kitchen';
+
+  return {
+    displayName: `Zeta ${pretty}`,          // e.g. Zeta Learn
+    companion: `Your ${noun} companion`,    // e.g. Your learning companion
+  };
+}
+
 export async function savePreferredNameForProject(
   projectId: string,
   preferredName: string | null | undefined,
   onClose?: () => void,
-  setSaving?: (saving: boolean) => void
+  setSaving?: (saving: boolean) => void,
 ) {
   if (!projectId) return;
   setSaving?.(true);
@@ -114,12 +146,11 @@ export async function savePreferredNameForProject(
     if (!updRow) {
       alert(
         `Update returned no row (HTTP ${status}). This is usually RLS or an id mismatch.\n` +
-          `projectId=${projectId}\nuserId=${userId}`
+          `projectId=${projectId}\nuserId=${userId}`,
       );
       return;
     }
 
-    // mirror preferred name to mainframe_info (still fine to keep this)
     const MF_COL = 'preferred_user_name';
     const { data: existingRow, error: checkErr } = await supabase
       .from('mainframe_info')
@@ -168,10 +199,14 @@ export default function SettingsButton({
   projectId,
   selectedModelId,
   setSelectedModelId,
+  avatarSrc,
+  templateSlug,
 }: {
   projectId: string;
   selectedModelId: string;
   setSelectedModelId: (val: string) => void;
+  avatarSrc?: string;
+  templateSlug?: string | null;
 }) {
   const [showModal, setShowModal] = useState(false);
   const [preferredName, setPreferredName] = useState('');
@@ -182,11 +217,12 @@ export default function SettingsButton({
   const [xp, setXP] = useState<XPState>(ZERO_XP);
   const [plan, setPlan] = useState<string | null>(null);
 
-  // Prefill when opening (created_at, plan, preferred name, traits from user_projects; XP via RPC)
+  const avatar = avatarSrc || '/zeta.png';
+  const { displayName, companion } = deriveTemplateLabel(templateSlug);
+
   useEffect(() => {
     if (!showModal || !projectId) return;
     (async () => {
-      // 1) user_projects: created_at, plan, preferred_user_name, personality_traits
       const { data: proj, error: projErr } = await supabase
         .from('user_projects')
         .select('created_at, plan, preferred_user_name, personality_traits')
@@ -205,19 +241,21 @@ export default function SettingsButton({
         setPersonalityTraits([]);
       }
 
-      // 2) XP — mirror TimelinePanel exactly (RPC → fallback → compute)
       try {
         let serverCounts: Partial<XPMetrics> | null = null;
         try {
-          const { data, error } = await supabase.rpc('fetch_xp_counts', { p_project_id: projectId });
-          if (!error && data) serverCounts = typeof data === 'string' ? JSON.parse(data) : data;
+          const { data, error } = await supabase.rpc('fetch_xp_counts', {
+            p_project_id: projectId,
+          });
+          if (!error && data) {
+            serverCounts = typeof data === 'string' ? JSON.parse(data) : data;
+          }
         } catch {
           serverCounts = null;
         }
 
         const counts: Partial<XPMetrics> = serverCounts ?? (await getXPCounts(projectId));
-        const prog = progressFromCounts(counts);
-        setXP(prog);
+        setXP(progressFromCounts(counts));
       } catch (e) {
         console.warn('XP prefill (settings) failed, defaulting to ZERO:', e);
         setXP(ZERO_XP);
@@ -225,7 +263,6 @@ export default function SettingsButton({
     })();
   }, [showModal, projectId]);
 
-  // Unlock when plan is premium or pro
   const modelLocked = !(plan && ['premium', 'pro'].includes(String(plan).toLowerCase()));
 
   return (
@@ -262,8 +299,8 @@ export default function SettingsButton({
                 <div className="flex items-start gap-3">
                   <div className="relative w-16 h-16 rounded-2xl overflow-hidden ring-1 ring-indigo-200 shadow">
                     <Image
-                      src="/zeta.png"
-                      alt="Zeta"
+                      src={avatar}
+                      alt="Zeta avatar"
                       fill
                       sizes="64px"
                       className="object-cover"
@@ -271,9 +308,9 @@ export default function SettingsButton({
                     />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-sm text-indigo-700/90">Your AI companion</div>
+                    <div className="text-xs text-indigo-700/90">{companion}</div>
                     <div className="font-semibold text-indigo-900 leading-tight flex items-center gap-2">
-                      Zeta
+                      {displayName}
                       <span className="text-[11px] font-bold px-2 py-[2px] rounded-full border border-indigo-300 bg-white shadow-sm">
                         Level {xp.level}
                       </span>
@@ -304,10 +341,6 @@ export default function SettingsButton({
                     <div
                       className="h-full bg-indigo-500 transition-all"
                       style={{ width: `${Math.max(0, Math.min(100, xp.pct))}%` }}
-                      role="progressbar"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={Math.max(0, Math.min(100, xp.pct))}
                     />
                   </div>
                   <div className="mt-1 text-[11px] text-indigo-700/80">
@@ -317,9 +350,11 @@ export default function SettingsButton({
                   </div>
                 </div>
 
-                {/* Personality traits (from user_projects) */}
+                {/* Personality traits */}
                 <div className="mt-4">
-                  <div className="text-xs font-semibold text-indigo-800 mb-1">Personality traits</div>
+                  <div className="text-xs font-semibold text-indigo-800 mb-1">
+                    Personality traits
+                  </div>
                   {personalityTraits.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {personalityTraits.map((t) => (
@@ -337,16 +372,14 @@ export default function SettingsButton({
                 </div>
               </div>
 
-              {/* Right: Settings form */}
+              {/* Right side form */}
               <div className="rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm">
-                {/* Model select (Premium/Pro) */}
                 <div>
                   <label className="block text-sm font-semibold mb-1 flex items-center gap-2">
                     🧠 Choose Intelligence Engine
                     {modelLocked && (
                       <span
-                        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide
-                                   text-yellow-800 bg-yellow-100 border border-yellow-300 rounded-full px-2 py-0.5"
+                        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-yellow-800 bg-yellow-100 border border-yellow-300 rounded-full px-2 py-0.5"
                         title="Upgrade to Premium to change models"
                       >
                         🔒 Premium
@@ -356,10 +389,7 @@ export default function SettingsButton({
 
                   <div className="relative">
                     {modelLocked && (
-                      <div
-                        className="absolute inset-0 z-10 rounded-md bg-white/60 cursor-not-allowed"
-                        aria-hidden
-                      />
+                      <div className="absolute inset-0 z-10 rounded-md bg-white/60 cursor-not-allowed" />
                     )}
 
                     <select
@@ -367,8 +397,8 @@ export default function SettingsButton({
                       onChange={(e) => setSelectedModelId(e.target.value)}
                       disabled={modelLocked}
                       className={`w-full border border-indigo-300 rounded-md p-2 text-sm bg-indigo-50 text-indigo-900 shadow-sm
-                                 focus:outline-none focus:ring-2 focus:ring-indigo-400
-                                 ${modelLocked ? 'opacity-70' : ''}`}
+                        focus:outline-none focus:ring-2 focus:ring-indigo-400
+                        ${modelLocked ? 'opacity-70' : ''}`}
                     >
                       <option value="gpt-4o">OpenAI</option>
                       <option value="deepseek-chat">DeepSeek</option>
@@ -383,9 +413,10 @@ export default function SettingsButton({
                   )}
                 </div>
 
-                {/* Preferred name */}
                 <div className="mt-5">
-                  <label className="block text-sm font-semibold mb-1">🏷️ What should Zeta call you?</label>
+                  <label className="block text-sm font-semibold mb-1">
+                    🏷️ What should Zeta call you?
+                  </label>
                   <input
                     type="text"
                     placeholder="e.g. Yogi"
@@ -395,7 +426,6 @@ export default function SettingsButton({
                   />
                 </div>
 
-                {/* Actions */}
                 <div className="mt-6 flex justify-end gap-2">
                   <button
                     onClick={() => setShowModal(false)}
@@ -409,7 +439,7 @@ export default function SettingsButton({
                         String(projectId),
                         preferredName,
                         () => setShowModal(false),
-                        setSavingPrefName
+                        setSavingPrefName,
                       )
                     }
                     disabled={savingPrefName}
@@ -423,12 +453,22 @@ export default function SettingsButton({
 
             <div className="mt-4 text-[11px] text-indigo-700/70">
               Tip: XP here is computed live the same way as Timeline
-              (<code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">fetch_xp_counts</code> →{' '}
-              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">lib/XP</code>).
-              Traits & preferred name come from{' '}
-              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">user_projects</code>.
-              Plan & created date are also from{' '}
-              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">user_projects</code>.
+              (<code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">
+                fetch_xp_counts
+              </code>{' '}
+              →{' '}
+              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">
+                lib/XP
+              </code>
+              ). Traits & preferred name come from{' '}
+              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">
+                user_projects
+              </code>
+              . Plan & created date are also from{' '}
+              <code className="px-1 py-0.5 bg-indigo-50 rounded border border-indigo-200">
+                user_projects
+              </code>
+              .
             </div>
           </div>
         </div>

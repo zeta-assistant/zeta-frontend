@@ -547,7 +547,7 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     }
   }, [combined, uiLoading]);
 
-  const isLoading = Boolean(loading || refreshing || uiLoading);
+ const isLoading = Boolean(loading || uiLoading);
 
   /* ---------- input / send ---------- */
   
@@ -630,9 +630,14 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   }, [chatView, pinnedMessages, combined, projectTZ, now.getTime()]);
 
   /* ---------- Derived rows (messages + typing) ---------- */
-  const rows = useMemo(() => {
-    return isLoading ? [...displayedMessages, { __type: 'typing' as const }] : displayedMessages;
-  }, [displayedMessages, isLoading]);
+const rows = useMemo(() => {
+  // Never show the "Zeta is thinking" bubble during a manual refresh
+  if (refreshing) return displayedMessages;
+
+  return isLoading
+    ? [...displayedMessages, { __type: 'typing' as const }]
+    : displayedMessages;
+}, [displayedMessages, isLoading, refreshing]);
 
   /* ---------- follow-to-bottom behavior ---------- */
 

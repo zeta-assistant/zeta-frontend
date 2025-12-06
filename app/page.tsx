@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import { supabase } from '@/lib/supabaseClient';
 import { getPlanFromUser, PLAN_LIMIT, type Plan } from '@/lib/plan';
 import { PlanTag } from '@/components/ui/ZetaPremiumMark';
-
 
 // Optional XP utils. Falls back gracefully if not present.
 let getXPProgress: ((xp: number) => any) | undefined;
@@ -341,6 +341,8 @@ function normalizeProject(row: ProjectRowRaw): Project {
 /* ========================= Page ========================= */
 
 export default function HomePage() {
+  const router = useRouter();
+
   const [loading, setLoading] = useState(true);
   const [sessionInfo, setSessionInfo] = useState<SessionSummary | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -456,7 +458,7 @@ export default function HomePage() {
   /* ===================== Logged-OUT Landing ===================== */
   if (!isAuthed) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-[#0f1b3d] via-[#1d2d6b] to-[#2438a6] text-white">
+      <main className="relative min-h-screen bg-gradient-to-br from-[#0f1b3d] via-[#1d2d6b] to-[#2438a6] text-white">
         <Header authed={false} />
 
         {/* Hero */}
@@ -465,10 +467,7 @@ export default function HomePage() {
             Pantheon <span className="text-indigo-300">Personal Superintelligence</span>
           </h1>
           <p className="mt-4 text-lg text-slate-200 max-w-2xl mx-auto">
-            Pantheon is a collection of AI agents that deliver personal superintelligence — helping you
-            <strong> think smarter</strong>, <strong> build faster</strong>, and
-            <strong> achieve more</strong>. Each Zeta template focuses on a different domain, from business
-            automation to learning, creativity, and mindset.
+            Pantheon is home to Zeta, your customizable AI assistant. Able to customize its preset features, personality, and tone, Zeta is you're personal superintelligence here to help you achieve your goals in whatever way you use AI!
           </p>
         </section>
 
@@ -485,9 +484,8 @@ export default function HomePage() {
               const rec = TEMPLATE_DISPLAY[c.recommendedTemplate];
               const recIcon = TEMPLATE_ICONS[c.recommendedTemplate];
               return (
-                <Link
+                <div
                   key={c.key}
-                  href={c.href}
                   className="group relative rounded-2xl bg-white/80 p-4 shadow-sm ring-1 ring-black/10 hover:shadow-md hover:-translate-y-0.5 transition transform flex flex-col items-center text-center overflow-hidden"
                 >
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-2xl mb-2">
@@ -516,7 +514,7 @@ export default function HomePage() {
                       </div>
                     </div>
                   </div>
-                </Link>
+                </div>
               );
             })}
           </div>
@@ -535,12 +533,11 @@ export default function HomePage() {
             {(['zeta build', 'zeta learn', 'zeta chef', 'zeta trainer'] as Template[]).map(
               (tpl) => {
                 const icon = TEMPLATE_ICONS[tpl];
-                const { title, sub, href } = TEMPLATE_DISPLAY[tpl];
+                const { title, sub } = TEMPLATE_DISPLAY[tpl];
                 const traits = TEMPLATE_TRAITS[tpl];
                 return (
-                  <Link
+                  <div
                     key={tpl}
-                    href={href}
                     className="rounded-xl bg-white p-6 shadow hover:shadow-md"
                   >
                     <Image
@@ -559,7 +556,7 @@ export default function HomePage() {
                         </li>
                       ))}
                     </ul>
-                  </Link>
+                  </div>
                 );
               }
             )}
@@ -568,12 +565,12 @@ export default function HomePage() {
 
         {/* Browse Templates Button */}
         <div className="text-center mt-10">
-          <Link
-            href="/onboarding"
+          <button
+            type="button"
             className="inline-block rounded-full bg-indigo-500 px-6 py-3 text-white font-medium hover:bg-indigo-600 transition"
           >
             Browse All Zeta Templates →
-          </Link>
+          </button>
         </div>
 
         {/* Premium */}
@@ -602,18 +599,28 @@ export default function HomePage() {
               <li>✅ Deeper customization & control</li>
             </ul>
 
-            <Link
-              href="/upgrade"
+            <button
+              type="button"
               className="mt-5 inline-block rounded-full bg-amber-500 px-6 py-3 text-white font-semibold hover:bg-amber-600 transition"
             >
               Upgrade to Premium
-            </Link>
+            </button>
           </div>
         </section>
 
         <footer className="mt-20 px-4 py-6 text-center text-sm text-slate-300">
           © {new Date().getFullYear()} Pantheon. All rights reserved.
         </footer>
+
+        {/* 🔒 Overlay: any click anywhere sends to /login */}
+        <div
+          className="fixed inset-0 z-50 cursor-pointer"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            router.push('/login');
+          }}
+        />
       </main>
     );
   }
