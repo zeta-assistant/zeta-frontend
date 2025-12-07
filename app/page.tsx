@@ -8,7 +8,6 @@ import Header from '@/components/Header';
 import { supabase } from '@/lib/supabaseClient';
 import { getPlanFromUser, PLAN_LIMIT, type Plan } from '@/lib/plan';
 import { PlanTag } from '@/components/ui/ZetaPremiumMark';
-import Footer from '@/components/Footer';
 
 
 // Optional XP utils. Falls back gracefully if not present.
