@@ -128,12 +128,17 @@ export default function SettingsPageFree() {
     }
   }
 
-  const usernameValid = useMemo(() => /^[a-z0-9_]{2,15}$/.test(username), [username]);
+  const usernameValid = useMemo(
+    () => /^[a-z0-9_]{2,15}$/.test(username),
+    [username]
+  );
 
   function validateUsernameLocal() {
     if (!username) return setUsernameError('Username is required.');
-    if (username.length < 2 || username.length > 15) return setUsernameError('Username must be 2–15 characters.');
-    if (!/^[a-z0-9_]+$/.test(username)) return setUsernameError('Only lowercase letters, numbers, and underscore.');
+    if (username.length < 2 || username.length > 15)
+      return setUsernameError('Username must be 2–15 characters.');
+    if (!/^[a-z0-9_]+$/.test(username))
+      return setUsernameError('Only lowercase letters, numbers, and underscore.');
     setUsernameError(null);
   }
 
@@ -152,10 +157,14 @@ export default function SettingsPageFree() {
     try {
       const fileExt = file.name.split('.').pop()?.toLowerCase() || 'png';
       const filePath = `${userId}/${Date.now()}.${fileExt}`;
-      const { error: upErr } = await supabase.storage.from('profile-photos').upload(filePath, file, { upsert: true });
+      const { error: upErr } = await supabase.storage
+        .from('profile-photos')
+        .upload(filePath, file, { upsert: true });
       if (upErr) throw upErr;
 
-      const { data: pub } = supabase.storage.from('profile-photos').getPublicUrl(filePath);
+      const { data: pub } = supabase.storage
+        .from('profile-photos')
+        .getPublicUrl(filePath);
       const publicUrl = pub?.publicUrl || '';
       setAvatarUrl(publicUrl);
       setAvatarPreview(publicUrl);
@@ -210,11 +219,15 @@ export default function SettingsPageFree() {
           <span
             className={[
               'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs border',
-              isPremium ? 'border-amber-400 bg-white text-amber-700' : 'border-slate-300 bg-white text-slate-700',
+              isPremium
+                ? 'border-amber-400 bg-white text-amber-700'
+                : 'border-slate-300 bg-white text-slate-700',
             ].join(' ')}
           >
             <span aria-hidden>{isPremium ? '👑' : '🟢'}</span>
-            <span className="font-semibold">{isPremium ? 'Premium' : 'Free'}</span>
+            <span className="font-semibold">
+              {isPremium ? 'Premium' : 'Free'}
+            </span>
           </span>
         );
       },
@@ -224,7 +237,9 @@ export default function SettingsPageFree() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0b1226] text-white px-6 py-10">
-        <div className="max-w-5xl mx-auto text-white/70">Loading settings…</div>
+        <div className="max-w-5xl mx-auto text-white/70">
+          Loading settings…
+        </div>
       </div>
     );
   }
@@ -233,7 +248,7 @@ export default function SettingsPageFree() {
 
   return (
     <div className="min-h-screen bg-[#0b1226]">
-      {/* HERO — removed ZetaPremiumMark so no "Free" caption under logo */}
+      {/* HERO (unchanged visuals) */}
       <div className="relative border-b border-white/10 bg-gradient-to-b from-indigo-950 via-indigo-900 to-indigo-800">
         <div
           className="absolute inset-0 pointer-events-none"
@@ -256,14 +271,23 @@ export default function SettingsPageFree() {
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <h1 className="text-3xl font-bold text-white">User Settings</h1>
-              <PlanTag plan={plan} onClick={() => router.push(plan === 'premium' ? '/billing' : '/upgrade')} />
+              <PlanTag
+                plan={plan}
+                onClick={() =>
+                  router.push(plan === 'premium' ? '/billing' : '/upgrade')
+                }
+              />
             </div>
             <p className="text-sm text-white/80 mt-1">
               Projects used: <span className="font-mono">{used}</span> / {limit}{' '}
               {remaining === 0 ? (
-                <span className="ml-2 text-amber-300 font-medium">Limit reached</span>
+                <span className="ml-2 text-amber-300 font-medium">
+                  Limit reached
+                </span>
               ) : (
-                <span className="ml-2 text-emerald-300 font-medium">{remaining} remaining</span>
+                <span className="ml-2 text-emerald-300 font-medium">
+                  {remaining} remaining
+                </span>
               )}
             </p>
           </div>
@@ -278,7 +302,9 @@ export default function SettingsPageFree() {
               onClick={handleUpgrade}
               className={[
                 'text-sm px-4 py-2 rounded-md shadow',
-                plan === 'premium' ? 'bg-white/20 text-white' : 'bg-amber-500 text-white hover:bg-amber-600',
+                plan === 'premium'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-amber-500 text-white hover:bg-amber-600',
               ].join(' ')}
             >
               {plan === 'premium' ? 'Manage Billing' : 'Upgrade to Premium'}
@@ -290,12 +316,14 @@ export default function SettingsPageFree() {
       {/* PAGE CONTENT */}
       <div className="max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Profile */}
-        <div className="lg:col-span-1 bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <div className="lg:col-span-1 bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-sm p-5">
           <h2 className="text-lg font-semibold mb-3">Profile</h2>
 
           {/* Avatar (wide, contain) */}
           <div className="mb-4">
-            <label className="block text-xs text-gray-500 mb-1">Profile picture</label>
+            <label className="block text-xs text-gray-500 mb-1">
+              Profile picture
+            </label>
             <div className="w-full h-36 sm:h-44 rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -311,9 +339,17 @@ export default function SettingsPageFree() {
             <div className="mt-2 flex items-center gap-3">
               <label className="inline-block">
                 <span className="sr-only">Choose photo</span>
-                <input type="file" accept="image/*" onChange={handleImageChange} className="block text-xs" disabled={uploading} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  className="block text-xs"
+                  disabled={uploading}
+                />
               </label>
-              {uploading && <div className="text-[11px] text-gray-500">Uploading…</div>}
+              {uploading && (
+                <div className="text-[11px] text-gray-500">Uploading…</div>
+              )}
               {avatarUrl && (
                 <button
                   type="button"
@@ -331,60 +367,84 @@ export default function SettingsPageFree() {
 
           {/* Username */}
           <div className="mb-3">
-            <label className="block text-xs text-gray-500 mb-1">Username (unique)</label>
+            <label className="block text-xs text-gray-500 mb-1">
+              Username (unique)
+            </label>
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value.toLowerCase())}
               onBlur={validateUsernameLocal}
-              className={['w-full border rounded-md px-3 py-2 text-sm', usernameError ? 'border-red-400' : 'border-gray-300'].join(' ')}
+              className={[
+                'w-full border rounded-md px-3 py-2 text-sm text-gray-900 caret-blue-600',
+                usernameError ? 'border-red-400' : 'border-gray-300',
+              ].join(' ')}
               placeholder="e.g. maker_ai"
               maxLength={15}
             />
             <div className="mt-1 text-[11px] text-gray-500">
-              2–15 chars, only <code>a–z</code>, <code>0–9</code>, and <code>_</code>.
+              2–15 chars, only <code>a–z</code>, <code>0–9</code>, and{' '}
+              <code>_</code>.
             </div>
-            {usernameError && <div className="text-[11px] text-red-600 mt-1">{usernameError}</div>}
+            {usernameError && (
+              <div className="text-[11px] text-red-600 mt-1">
+                {usernameError}
+              </div>
+            )}
           </div>
 
           {/* Self-description */}
           <div className="mb-3">
-            <label className="block text-xs text-gray-500 mb-1">About you</label>
+            <label className="block text-xs text-gray-500 mb-1">
+              About you
+            </label>
             <textarea
               value={selfDescription}
               onChange={(e) => setSelfDescription(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm min-h-[120px]"
+              className="w-full border rounded-md px-3 py-2 text-sm min-h-[120px] text-gray-900 caret-blue-600"
               placeholder={`What are your goals over the next 3–6 months?
 What skills or domains interest you most?
 What would you like Zeta to help you automate or accelerate?`}
             />
             <div className="mt-1 text-[11px] text-gray-500">
-              Share goals, interests, and where Zeta should plug in — I’ll use this for smarter defaults.
+              Share goals, interests, and where Zeta should plug in — I’ll use
+              this for smarter defaults.
             </div>
           </div>
 
           <button
             onClick={saveProfile}
             disabled={saving || uploading}
-            className={['text-sm px-4 py-2 rounded-md', saving || uploading ? 'bg-gray-300 text-gray-700' : 'bg-blue-600 hover:bg-blue-700 text-white'].join(' ')}
+            className={[
+              'text-sm px-4 py-2 rounded-md',
+              saving || uploading
+                ? 'bg-gray-300 text-gray-700'
+                : 'bg-blue-600 hover:bg-blue-700 text-white',
+            ].join(' ')}
           >
             {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
 
         {/* Agents */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <div className="lg:col-span-2 bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-sm p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Agents</h2>
-            {!agentsLoading && <span className="text-xs text-gray-500">{agents.length} total</span>}
+            {!agentsLoading && (
+              <span className="text-xs text-gray-500">
+                {agents.length} total
+              </span>
+            )}
           </div>
 
           {agentsLoading ? (
             <div className="text-gray-500 text-sm">Loading agents…</div>
           ) : agents.length === 0 ? (
-            <div className="text-gray-600 text-sm">You don’t have any agents yet. Create a project to spin one up.</div>
+            <div className="text-gray-600 text-sm">
+              You don’t have any agents yet. Create a project to spin one up.
+            </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-gray-200">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm text-gray-800">
                 <thead className="bg-gray-50 text-gray-700">
                   <tr>
                     <th className="text-left p-3">Agent ID</th>
@@ -396,14 +456,20 @@ What would you like Zeta to help you automate or accelerate?`}
                 <tbody>
                   {agents.map((a) => (
                     <tr key={a.id} className="border-t">
-                      <td className="p-3 font-mono text-xs break-all">{a.id}</td>
+                      <td className="p-3 font-mono text-xs break-all">
+                        {a.id}
+                      </td>
                       <td className="p-3">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs border border-indigo-300 text-indigo-700 bg-indigo-50">
                           {a.level || 'standard'}
                         </span>
                       </td>
-                      <td className="p-3">{new Date(a.created_at).toLocaleString()}</td>
-                      <td className="p-3 text-right text-gray-500">{a.source}</td>
+                      <td className="p-3">
+                        {new Date(a.created_at).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-gray-600">
+                        {a.source}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -413,36 +479,79 @@ What would you like Zeta to help you automate or accelerate?`}
         </div>
 
         {/* Premium (full width below) */}
-        <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <div className="lg:col-span-3 bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-sm p-5">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
             <div className="flex-1">
               <h2 className="text-lg font-semibold">Why go Premium?</h2>
               <p className="text-sm text-gray-600 mt-1">
-                Go from <strong>{PLAN_LIMIT.free} projects (Free)</strong> to <strong>{PLAN_LIMIT.premium} projects (Premium)</strong> and unlock power features.
+                Go from <strong>{PLAN_LIMIT.free} projects (Free)</strong> to{' '}
+                <strong>{PLAN_LIMIT.premium} projects (Premium)</strong> and
+                unlock power features.
               </p>
-              <ProjectMeter freeMax={PLAN_LIMIT.free} premiumMax={PLAN_LIMIT.premium} />
+              <ProjectMeter
+                freeMax={PLAN_LIMIT.free}
+                premiumMax={PLAN_LIMIT.premium}
+              />
             </div>
             <div className="flex items-center gap-3">
-              <Image src="/zeta-premium.png" alt="Zeta Premium" width={56} height={56} className="rounded-xl" />
+              <Image
+                src="/zeta-premium.png"
+                alt="Zeta Premium"
+                width={56}
+                height={56}
+                className="rounded-xl"
+              />
               <PlanPrice plan={plan} />
             </div>
           </div>
 
           {/* Benefits — updated copy */}
           <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4 text-sm">
-            <Benefit icon="📁" title="More Projects" desc={`From ${PLAN_LIMIT.free} → ${PLAN_LIMIT.premium} total projects.`} />
-            <Benefit icon="💎" title="Premium Features" desc="Access advanced automations, integrations & tools." />
-            <Benefit icon="🧪" title="First Access" desc="New & beta features roll out to Premium first." />
-            <Benefit icon="🎧" title="Priority Support" desc="Faster responses & issue triage." />
-            <Benefit icon="🎨" title="Deeper Customization" desc="More control over agent style & behavior." />
-            <Benefit icon="⚡" title="Higher Limits" desc="Bigger file sizes, more actions, richer history." />
-            <Benefit icon="🔔" title="Smarter Notifications" desc="Advanced scheduling & multi-channel delivery." />
-            <Benefit icon="🔌" title="More Integrations" desc="Extra API slots & channels as they ship." />
+            <Benefit
+              icon="📁"
+              title="More Projects"
+              desc={`From ${PLAN_LIMIT.free} → ${PLAN_LIMIT.premium} total projects.`}
+            />
+            <Benefit
+              icon="💎"
+              title="Premium Features"
+              desc="Access advanced automations, integrations & tools."
+            />
+            <Benefit
+              icon="🧪"
+              title="First Access"
+              desc="New & beta features roll out to Premium first."
+            />
+            <Benefit
+              icon="🎧"
+              title="Priority Support"
+              desc="Faster responses & issue triage."
+            />
+            <Benefit
+              icon="🎨"
+              title="Deeper Customization"
+              desc="More control over agent style & behavior."
+            />
+            <Benefit
+              icon="⚡"
+              title="Higher Limits"
+              desc="Bigger file sizes, more actions, richer history."
+            />
+            <Benefit
+              icon="🔔"
+              title="Smarter Notifications"
+              desc="Advanced scheduling & multi-channel delivery."
+            />
+            <Benefit
+              icon="🔌"
+              title="More Integrations"
+              desc="Extra API slots & channels as they ship."
+            />
           </ul>
 
           {/* Comparison — succinct */}
           <div className="mt-6 overflow-hidden rounded-xl border border-gray-200">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm text-gray-800">
               <thead className="bg-gray-50 text-gray-700">
                 <tr>
                   <th className="text-left p-3">Feature</th>
@@ -451,11 +560,27 @@ What would you like Zeta to help you automate or accelerate?`}
                 </tr>
               </thead>
               <tbody>
-                <Row label="Projects" free={`${PLAN_LIMIT.free}`} pro={`${PLAN_LIMIT.premium}`} />
-                <Row label="Feature access" free="Core features" pro="Premium features unlocked" />
-                <Row label="New & beta features" free="Later" pro="First access" />
+                <Row
+                  label="Projects"
+                  free={`${PLAN_LIMIT.free}`}
+                  pro={`${PLAN_LIMIT.premium}`}
+                />
+                <Row
+                  label="Feature access"
+                  free="Core features"
+                  pro="Premium features unlocked"
+                />
+                <Row
+                  label="New & beta features"
+                  free="Later"
+                  pro="First access"
+                />
                 <Row label="Support" free="Standard" pro="Priority" />
-                <Row label="Agent customization" free="Basic" pro="Advanced styles & controls" />
+                <Row
+                  label="Agent customization"
+                  free="Basic"
+                  pro="Advanced styles & controls"
+                />
               </tbody>
             </table>
           </div>
@@ -465,12 +590,16 @@ What would you like Zeta to help you automate or accelerate?`}
               onClick={handleUpgrade}
               className={[
                 'text-sm px-5 py-2 rounded-md shadow',
-                plan === 'premium' ? 'bg-gray-200 text-gray-700 cursor-pointer' : 'bg-amber-500 text-white hover:bg-amber-600',
+                plan === 'premium'
+                  ? 'bg-gray-200 text-gray-700 cursor-pointer'
+                  : 'bg-amber-500 text-white hover:bg-amber-600',
               ].join(' ')}
             >
               {plan === 'premium' ? 'Manage Billing' : 'Upgrade to Premium'}
             </button>
-            <span className="text-xs text-gray-500">Cancel anytime. Annual plans save more.</span>
+            <span className="text-xs text-gray-500">
+              Cancel anytime. Annual plans save more.
+            </span>
           </div>
         </div>
       </div>
@@ -524,7 +653,6 @@ function Row({ label, free, pro }: { label: string; free: string; pro: string })
 }
 
 function ProjectMeter({ freeMax, premiumMax }: { freeMax: number; premiumMax: number }) {
-  // simple horizontal dots visual showing 3 vs 10
   const dots = Array.from({ length: premiumMax }, (_, i) => i);
   return (
     <div className="mt-3">

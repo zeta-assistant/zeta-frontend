@@ -69,23 +69,23 @@ export default function SettingsPagePremium() {
       const u = session.user;
       const plan_ = getPlanFromUser(u);
 
-// Also check projects table
-const { data: projRows } = await supabase
-  .from('user_projects')
-  .select('plan, type')
-  .eq('user_id', u.id);
+      // Also check projects table
+      const { data: projRows } = await supabase
+        .from('user_projects')
+        .select('plan, type')
+        .eq('user_id', u.id);
 
-const hasPremiumProject =
-  Array.isArray(projRows) &&
-  projRows.some((r: any) => {
-    const v = String((r?.plan ?? r?.type ?? '')).toLowerCase();
-    return v === 'premium';
-  });
+      const hasPremiumProject =
+        Array.isArray(projRows) &&
+        projRows.some((r: any) => {
+          const v = String((r?.plan ?? r?.type ?? '')).toLowerCase();
+          return v === 'premium';
+        });
 
-if (plan_ !== 'premium' && !hasPremiumProject) {
-  router.replace('/settings'); // still free
-  return;
-}
+      if (plan_ !== 'premium' && !hasPremiumProject) {
+        router.replace('/settings'); // still free
+        return;
+      }
 
       setUserId(u.id);
       setEmail(u.email ?? null);
@@ -386,7 +386,7 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
       {/* CONTENT */}
       <div className="max-w-5xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Profile */}
-        <div className="lg:col-span-1 bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <div className="lg:col-span-1 bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-sm p-5">
           <h2 className="text-lg font-semibold mb-3">Profile</h2>
 
           {/* Avatar */}
@@ -426,7 +426,10 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
               value={username}
               onChange={(e) => setUsername(e.target.value.toLowerCase())}
               onBlur={validateUsernameLocal}
-              className={['w-full border rounded-md px-3 py-2 text-sm', usernameError ? 'border-red-400' : 'border-gray-300'].join(' ')}
+              className={[
+                'w-full border rounded-md px-3 py-2 text-sm text-gray-900 caret-blue-600',
+                usernameError ? 'border-red-400' : 'border-gray-300',
+              ].join(' ')}
               placeholder="e.g. maker_ai"
               maxLength={15}
             />
@@ -442,7 +445,7 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
             <textarea
               value={selfDescription}
               onChange={(e) => setSelfDescription(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm min-h-[120px]"
+              className="w-full border rounded-md px-3 py-2 text-sm min-h-[120px] text-gray-900 caret-blue-600"
               placeholder={`What are your goals over the next 3–6 months?\nWhat skills or domains interest you most?\nWhat would you like Zeta to help you automate or accelerate?`}
             />
             <div className="mt-1 text-[11px] text-gray-500">
@@ -475,14 +478,17 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
           <button
             onClick={saveProfile}
             disabled={saving || uploading}
-            className={['text-sm px-4 py-2 rounded-md', saving || uploading ? 'bg-gray-300 text-gray-700' : 'bg-amber-600 hover:bg-amber-700 text-white'].join(' ')}
+            className={[
+              'text-sm px-4 py-2 rounded-md',
+              saving || uploading ? 'bg-gray-300 text-gray-700' : 'bg-amber-600 hover:bg-amber-700 text-white',
+            ].join(' ')}
           >
             {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
 
         {/* Premium Controls */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <div className="lg:col-span-2 bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-sm p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Premium Controls</h2>
             <div className="text-xs text-amber-700 font-medium">👑 Premium Active</div>
@@ -492,10 +498,12 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
           <div className="mb-5">
             <div className="flex items-center justify-between">
               <h3 className="font-medium">Task Automation Frequency</h3>
-              <div className="text-xs text-gray-500">Calls <code>generate-daily-tasks</code> on schedule</div>
+              <div className="text-xs text-gray-500">
+                Calls <code>generate-daily-tasks</code> on schedule
+              </div>
             </div>
             <div className="mt-2 rounded-xl border border-gray-200 overflow-hidden">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm text-gray-800">
                 <thead className="bg-gray-50 text-gray-700">
                   <tr>
                     <th className="text-left p-3">Project</th>
@@ -505,7 +513,11 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
                 </thead>
                 <tbody>
                   {projects.length === 0 ? (
-                    <tr><td className="p-3 text-gray-500" colSpan={3}>No projects yet.</td></tr>
+                    <tr>
+                      <td className="p-3 text-gray-500" colSpan={3}>
+                        No projects yet.
+                      </td>
+                    </tr>
                   ) : (
                     projects.map(p => (
                       <tr key={p.id} className="border-t">
@@ -523,7 +535,9 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
                                   onClick={() => saveFrequency(p.id, f)}
                                   className={[
                                     'px-2.5 py-1 rounded-full border text-xs',
-                                    selected ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-gray-300 text-gray-700 hover:bg-gray-50',
+                                    selected
+                                      ? 'border-amber-400 text-amber-700 bg-amber-50'
+                                      : 'border-gray-300 text-gray-700 hover:bg-gray-50',
                                     busy ? 'opacity-60 cursor-wait' : '',
                                   ].join(' ')}
                                   title={f}
@@ -541,7 +555,8 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
               </table>
             </div>
             <p className="mt-2 text-xs text-gray-500">
-              Changing the frequency updates your project’s schedule. Your edge function <code>supabase/functions/generate-daily-tasks</code> will be triggered on the selected cadence.
+              Changing the frequency updates your project’s schedule. Your edge function{' '}
+              <code>supabase/functions/generate-daily-tasks</code> will be triggered on the selected cadence.
             </p>
           </div>
 
@@ -553,10 +568,15 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
             </div>
             <div className="mt-2 space-y-2">
               {projects.map(p => (
-                <div key={p.id} className="rounded-xl border border-gray-200 p-3 flex items-center justify-between">
+                <div
+                  key={p.id}
+                  className="rounded-xl border border-gray-200 p-3 flex items-center justify-between"
+                >
                   <div>
                     <div className="text-sm font-medium">{p.title || 'Untitled Project'}</div>
-                    <div className="text-xs text-gray-500">Project ID: <span className="font-mono">{p.id}</span></div>
+                    <div className="text-xs text-gray-500">
+                      Project ID: <span className="font-mono">{p.id}</span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     {(['telegram', 'email', 'webhook'] as const).map(ch => {
@@ -569,7 +589,9 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
                           onClick={() => toggleIntegration(p.id, ch)}
                           className={[
                             'px-2.5 py-1 rounded-full border text-xs',
-                            on ? 'border-emerald-400 text-emerald-700 bg-emerald-50' : 'border-gray-300 text-gray-700 hover:bg-gray-50',
+                            on
+                              ? 'border-emerald-400 text-emerald-700 bg-emerald-50'
+                              : 'border-gray-300 text-gray-700 hover:bg-gray-50',
                             busy ? 'opacity-60 cursor-wait' : '',
                           ].join(' ')}
                           title={ch}
@@ -581,7 +603,9 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
                   </div>
                 </div>
               ))}
-              {projects.length === 0 && <div className="text-sm text-gray-500">Create a project to enable integrations.</div>}
+              {projects.length === 0 && (
+                <div className="text-sm text-gray-500">Create a project to enable integrations.</div>
+              )}
             </div>
           </div>
 
@@ -605,7 +629,7 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
         </div>
 
         {/* Agents */}
-        <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <div className="lg:col-span-3 bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-sm p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Agents</h2>
             {!agentsLoading && <span className="text-xs text-gray-500">{agents.length} total</span>}
@@ -613,10 +637,12 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
           {agentsLoading ? (
             <div className="text-gray-500 text-sm">Loading agents…</div>
           ) : agents.length === 0 ? (
-            <div className="text-gray-600 text-sm">You don’t have any agents yet. Create a project to spin one up.</div>
+            <div className="text-gray-600 text-sm">
+              You don’t have any agents yet. Create a project to spin one up.
+            </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-gray-200">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm text-gray-800">
                 <thead className="bg-gray-50 text-gray-700">
                   <tr>
                     <th className="text-left p-3">Agent ID</th>
@@ -626,7 +652,7 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
                   </tr>
                 </thead>
                 <tbody>
-                  {agents.map((a) => (
+                  {agents.map(a => (
                     <tr key={a.id} className="border-t">
                       <td className="p-3 font-mono text-xs break-all">{a.id}</td>
                       <td className="p-3">
@@ -645,7 +671,7 @@ if (plan_ !== 'premium' && !hasPremiumProject) {
         </div>
 
         {/* Premium Summary */}
-        <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+        <div className="lg:col-span-3 bg-white text-gray-900 rounded-2xl border border-gray-200 shadow-sm p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Why stay Premium?</h2>
