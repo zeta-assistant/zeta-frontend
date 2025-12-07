@@ -160,7 +160,7 @@ export default function LoginCard() {
           id="email"
           type="email"
           placeholder="you@example.com"
-          className="mb-5 w-full border border-[#c6d3ff] rounded-lg px-4 py-3 text-base focus:outline-none focus:ring-4 focus:ring-[#2555ff]/20 focus:border-[#2555ff] transition"
+          className="mb-5 w-full border border-[#c6d3ff] rounded-lg px-4 py-3 text-base text-[#0f1b3d] caret-[#2555ff] focus:outline-none focus:ring-4 focus:ring-[#2555ff]/20 focus:border-[#2555ff] transition"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={onKeyDown}
@@ -178,7 +178,7 @@ export default function LoginCard() {
             id="password"
             type={showPw ? 'text' : 'password'}
             placeholder="••••••••"
-            className="w-full border border-[#c6d3ff] rounded-lg px-4 py-3 pr-14 text-base focus:outline-none focus:ring-4 focus:ring-[#2555ff]/20 focus:border-[#2555ff] transition"
+            className="w-full border border-[#c6d3ff] rounded-lg px-4 py-3 pr-14 text-base text-[#0f1b3d] caret-[#2555ff] focus:outline-none focus:ring-4 focus:ring-[#2555ff]/20 focus:border-[#2555ff] transition"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={onKeyDown}
