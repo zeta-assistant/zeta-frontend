@@ -18,130 +18,122 @@ export default function PrivacyPage() {
         <section className="space-y-6 text-[15px] leading-relaxed text-slate-200">
 
           <p>
-            Pantheon is committed to protecting 
-            your privacy. This Privacy Policy explains what information we collect, how it is used, 
-            and what rights you have over your data.
+            Pantheon is committed to protecting your privacy and maintaining transparency. 
+            This Privacy Policy outlines what information Pantheon collects, how it is used, 
+            and the rights you retain over your data.
           </p>
 
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">1. Information We Collect</h2>
-          <p>We collect only the information necessary to operate and improve the Pantheon platform and your Zeta assistants. This includes:</p>
+          <h2 className="text-xl font-semibold mt-8">1. Information Pantheon Collects</h2>
+          <p>Pantheon collects only the data required to operate the platform and power your Zeta assistants, including:</p>
 
           <ul className="list-disc ml-6 space-y-2">
-            <li><strong>Account information</strong> — email, profile details, and authentication data.</li>
-            <li><strong>User input and messages</strong> — all conversations, instructions, and interactions you have with your Zeta assistants.</li>
-            <li><strong>Uploaded files</strong> — documents, spreadsheets, images, or any data you upload for use within Pantheon.</li>
-            <li><strong>Project data</strong> — configuration settings, tasks, goals, and metadata related to your Zeta assistants.</li>
-            <li><strong>Usage information</strong> — logs related to platform activity, feature usage, timestamps, and analytics.</li>
+            <li><strong>Account information</strong> — email, authentication details, and optional profile information.</li>
+            <li><strong>User messages and interactions</strong> — all inputs, instructions, and conversations with Zeta.</li>
+            <li><strong>Uploaded files</strong> — any documents, images, spreadsheets, or data you choose to provide.</li>
+            <li><strong>Project and assistant data</strong> — tasks, goals, configurations, and related metadata.</li>
+            <li><strong>Usage analytics</strong> — logs of activity, timestamps, and feature usage for performance monitoring.</li>
           </ul>
 
           <p className="mt-4">
-            <strong>Important:</strong> As the operator of Pantheon, we (and authorized administrators) may have access 
-            to your data for debugging, improving the service, preventing abuse, or providing support. 
-            Access is limited and only used when necessary.
+            <strong>Administrative access:</strong>  
+            Pantheon administrators may access certain data for debugging, maintenance, abuse prevention, 
+            or support. Access is limited, controlled, and used only when necessary.
           </p>
 
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">2. How Your Data Is Used</h2>
-          <p>We use your data strictly for the following purposes:</p>
+          <h2 className="text-xl font-semibold mt-8">2. How Pantheon Uses Your Data</h2>
+          <p>Data is used strictly for platform operation and improvement, including:</p>
+
           <ul className="list-disc ml-6 space-y-2">
-            <li>Operating and maintaining your Zeta assistants.</li>
-            <li>Improving platform functionality, intelligence, and reliability.</li>
-            <li>Training Zeta on your personal preferences (only within your account).</li>
-            <li>Troubleshooting errors, ensuring security, and preventing misuse.</li>
-            <li>Providing customer support and responding to inquiries.</li>
+            <li>Running and maintaining Zeta assistants.</li>
+            <li>Improving Pantheon’s features, reliability, and performance.</li>
+            <li>Personalizing Zeta’s behavior based on your preferences.</li>
+            <li>Ensuring platform security and preventing misuse.</li>
+            <li>Responding to support requests.</li>
           </ul>
 
           <p className="mt-4">
-            <strong>We do not sell your data.</strong>  
-            We do not use your private data to train public AI models.
+            <strong>Pantheon does not sell data.</strong><br />
+            Pantheon does not use your private data to train public AI models.
           </p>
 
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">3. How AI Processing Works</h2>
+          <h2 className="text-xl font-semibold mt-8">3. AI Processing</h2>
           <p>
-            Zeta processes your messages, files, and instructions using OpenAI’s API. 
-            Your data is sent securely to OpenAI only for the purpose of generating responses, 
-            performing tasks, and powering AI features.
+            Zeta processes your data using OpenAI’s API. Information is transmitted securely and used only 
+            to produce responses, perform tasks, and power Pantheon’s AI features.
           </p>
 
           <p className="mt-4">
-            OpenAI does <strong>not</strong> use your submitted data to train their public models.  
-            (Consistent with OpenAI’s current API data usage policies.)
+            Under current OpenAI policies, submitted data is <strong>not</strong> used to train public models.
           </p>
 
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">4. Where Your Data Is Stored</h2>
-          <p>Your data is stored securely using:</p>
+          <h2 className="text-xl font-semibold mt-8">4. Data Storage</h2>
+          <p>Your data is stored using the following infrastructure:</p>
 
           <ul className="list-disc ml-6 space-y-2">
-            <li><strong>Supabase</strong> — for database storage, authentication, and file storage.</li>
-            <li><strong>OpenAI</strong> — for processing natural language and tasks.</li>
-            <li><strong>Vercel</strong> — for hosting the Pantheon web application.</li>
+            <li><strong>Supabase</strong> — authentication, database, and file storage.</li>
+            <li><strong>OpenAI</strong> — secure AI processing.</li>
+            <li><strong>Vercel</strong> — hosting for the Pantheon web application.</li>
+          </ul>
+
+          <p>All transfers occur over encrypted HTTPS connections.</p>
+
+          <h2 className="text-xl font-semibold mt-8">5. Access to Your Data</h2>
+          <p>Pantheon administrators may access data only in specific circumstances:</p>
+
+          <ul className="list-disc ml-6 space-y-2">
+            <li>Diagnosing errors or technical issues.</li>
+            <li>Investigating security concerns or misuse.</li>
+            <li>Responding to support requests when you request help.</li>
+            <li>Ensuring safe operation of Zeta assistants.</li>
           </ul>
 
           <p>
-            All data transmission occurs over encrypted HTTPS connections.
+            Routine browsing of user data does not occur.  
+            Administrative access is controlled and logged.
           </p>
 
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">5. Who Has Access to Your Data</h2>
-          <p>
-            As the owner and operator of Pantheon, we may access your data only when necessary, such as:
-          </p>
+          <h2 className="text-xl font-semibold mt-8">6. Your Rights</h2>
+          <p>You retain full control over your data. You may:</p>
 
           <ul className="list-disc ml-6 space-y-2">
-            <li>Debugging errors or issues with your Zeta assistant.</li>
-            <li>Investigating potential abuse or policy violations.</li>
-            <li>Providing technical support if you request help.</li>
-            <li>Improving system safety, reliability, and performance.</li>
+            <li>Delete projects, files, or messages at any time.</li>
+            <li>Request full account and data deletion.</li>
+            <li>Update personal account information.</li>
+            <li>Request an export of your data.</li>
           </ul>
 
+          <p>For data-related inquiries, contact: <strong>pnthndev@gmail.com</strong></p>
+
+          <h2 className="text-xl font-semibold mt-8">7. Security</h2>
           <p>
-            We do <strong>not</strong> browse user data unnecessarily. Access is tightly controlled and logged.
+            Pantheon uses industry-standard security practices, including encryption and access controls. 
+            No system is entirely free of risk, and users are encouraged to manage sensitive information 
+            thoughtfully.
           </p>
 
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">6. Your Rights</h2>
-          <p>You have full control over your data. You may:</p>
-
-          <ul className="list-disc ml-6 space-y-2">
-            <li>Delete your projects, messages, or files at any time.</li>
-            <li>Request permanent deletion of your entire account and data.</li>
-            <li>Update personal information linked to your account.</li>
-            <li>Export your data upon request.</li>
-          </ul>
-
+          <h2 className="text-xl font-semibold mt-8">8. Data Retention</h2>
           <p>
-            If you wish to request deletion or have privacy concerns, contact us at:  
+            Data is retained only while needed to operate the platform.  
+            Deleted projects and files are removed from active storage.  
+            Full account deletion requests result in permanent deletion.
+          </p>
+
+          <h2 className="text-xl font-semibold mt-8">9. Children’s Privacy</h2>
+          <p>
+            Pantheon is not intended for users under 13. If data from a minor is discovered, 
+            it will be removed promptly.
+          </p>
+
+          <h2 className="text-xl font-semibold mt-8">10. Updates to This Policy</h2>
+          <p>
+            Pantheon may update this Privacy Policy over time. Updated versions will be posted on this page 
+            with a revised date.
+          </p>
+
+          <h2 className="text-xl font-semibold mt-8">11. Contact</h2>
+          <p>
+            For privacy questions or data requests, contact:  
             <strong>pnthndev@gmail.com</strong>
-          </p>
-
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">7. Security</h2>
-          <p>
-            We implement industry-standard security practices to safeguard your data, 
-            including encryption, access controls, and secure infrastructure. 
-            However, no system is completely free of risk, and we encourage users to manage 
-            sensitive information thoughtfully.
-          </p>
-
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">8. Data Retention</h2>
-          <p>
-            We retain your data only for as long as your account is active or as required 
-            to operate the platform. When you delete a project or file, it is removed from 
-            active storage. Full account deletion requests are permanently honored.
-          </p>
-
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">9. Children’s Privacy</h2>
-          <p>
-            Pantheon is not intended for individuals under 13. If we become aware that data 
-            from a minor has been collected, we will delete it promptly.
-          </p>
-
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">10. Changes to This Policy</h2>
-          <p>
-            We may update this Privacy Policy as needed to reflect operational or legal changes. 
-            Updated versions will be posted on this page with a revised date.
-          </p>
-
-          <h2 className="text-xl font-semibold text-slate-100 mt-8">11. Contact Us</h2>
-          <p>
-            For any questions about privacy, data use, or this policy, contact us at:  
-            <strong> pnthndev@gmail.com </strong>
           </p>
 
         </section>
