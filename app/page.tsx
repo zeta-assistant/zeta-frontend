@@ -61,6 +61,7 @@ type UseCase = {
   emoji: string;
   href: string;
   recommendedTemplate: Template;
+  color: string; // tailwind bg class
 };
 
 /* ========================= Constants ========================= */
@@ -126,14 +127,62 @@ const TEMPLATE_DISPLAY: Record<
 
 // 5-trait lists shown under each template card
 const TEMPLATE_TRAITS: Record<Template, string[]> = {
-  'zeta learn': ['Math Whiz', 'Concept Simplifier', 'Patient Teacher', 'Pattern Spotter', 'Curious Explorer'],
-  'zeta build': ['Goal-Driven', 'Organized Planner', 'Strategic Thinker', 'Visionary Leader', 'Outcome Oriented'],
-  'zeta engineer': ['Analytical Mind', 'Code Architect', 'Problem Solver', 'Logical Thinker', 'Efficiency Optimizer'],
-  'zeta writer': ['Idea Generator', 'Creative Thinker', 'Expressive Communicator', 'Storyteller', 'Wordsmith'],
-  'zeta trainer': ['Motivator', 'Performance Coach', 'Habit Architect', 'Disciplined', 'Results-Focused'],
-  'zeta chef': ['Creative Cook', 'Resourceful Planner', 'Flavor Experimenter', 'Nutritional Thinker', 'Precision Maker'],
-  'zeta motivation': ['Drive Igniter', 'Resilience Coach', 'Mindset Shifter', 'Focus Builder', 'Purpose Finder'],
-  'zeta quant': ['Data Analyst', 'Financial Thinker', 'Risk Evaluator', 'Precision Calculator', 'Insight Generator'],
+  'zeta learn': [
+    'Math Whiz',
+    'Concept Simplifier',
+    'Patient Teacher',
+    'Pattern Spotter',
+    'Curious Explorer',
+  ],
+  'zeta build': [
+    'Goal-Driven',
+    'Organized Planner',
+    'Strategic Thinker',
+    'Visionary Leader',
+    'Outcome Oriented',
+  ],
+  'zeta engineer': [
+    'Analytical Mind',
+    'Code Architect',
+    'Problem Solver',
+    'Logical Thinker',
+    'Efficiency Optimizer',
+  ],
+  'zeta writer': [
+    'Idea Generator',
+    'Creative Thinker',
+    'Expressive Communicator',
+    'Storyteller',
+    'Wordsmith',
+  ],
+  'zeta trainer': [
+    'Motivator',
+    'Performance Coach',
+    'Habit Architect',
+    'Disciplined',
+    'Results-Focused',
+  ],
+  'zeta chef': [
+    'Creative Cook',
+    'Resourceful Planner',
+    'Flavor Experimenter',
+    'Nutritional Thinker',
+    'Precision Maker',
+  ],
+  'zeta motivation': [
+    'Drive Igniter',
+    'Resilience Coach',
+    'Mindset Shifter',
+    'Focus Builder',
+    'Purpose Finder',
+  ],
+  'zeta quant': [
+    'Data Analyst',
+    'Financial Thinker',
+    'Risk Evaluator',
+    'Precision Calculator',
+    'Insight Generator',
+  ],
 };
 
 const KNOWN_TEMPLATES: Template[] = [
@@ -153,6 +202,7 @@ const USE_CASES: UseCase[] = [
     label: 'Cooking',
     description: 'Plan meals, recipes, and shopping.',
     emoji: '🍳',
+    color: 'bg-[#FFEEDB]', // warm cream
     href: '/onboarding?template=zeta%20chef',
     recommendedTemplate: 'zeta chef',
   },
@@ -161,6 +211,7 @@ const USE_CASES: UseCase[] = [
     label: 'Learning',
     description: 'Explore new topics and ideas.',
     emoji: '🧠',
+    color: 'bg-[#E3F2FD]', // light blue
     href: '/onboarding?template=zeta%20learn',
     recommendedTemplate: 'zeta learn',
   },
@@ -169,30 +220,34 @@ const USE_CASES: UseCase[] = [
     label: 'Studying',
     description: 'Revise smarter for exams.',
     emoji: '📚',
+    color: 'bg-[#F3E5F5]', // soft purple
     href: '/onboarding?template=zeta%20learn',
     recommendedTemplate: 'zeta learn',
   },
   {
-    key: 'gossiping',
-    label: 'Gossiping',
-    description: 'Chat, bounce thoughts, vent.',
+    key: 'personal_conversations',
+    label: 'Personal Conversations',
+    description: 'Talk through situations, get social help, or think out loud.',
     emoji: '💬',
-    href: '/onboarding',
+    color: 'bg-[#E8F5E9]', // light mint
+    href: '/onboarding?template=zeta%20motivation',
     recommendedTemplate: 'zeta motivation',
   },
   {
-    key: 'researching',
-    label: 'Researching',
-    description: 'Deep dives, notes, and sources.',
-    emoji: '🔎',
-    href: '/onboarding?template=zeta%20learn',
-    recommendedTemplate: 'zeta learn',
+    key: 'projects_planning',
+    label: 'Projects & Planning',
+    description: 'Organize goals, tasks, and life structure.',
+    emoji: '📋',
+    color: 'bg-[#FFF3CD]', // soft yellow
+    href: '/onboarding?template=zeta%20build',
+    recommendedTemplate: 'zeta build',
   },
   {
     key: 'exercising',
-    label: 'Exercising',
-    description: 'Training plans and tracking.',
+    label: 'Fitness & Training',
+    description: 'Training plans and habit tracking.',
     emoji: '🏋️',
+    color: 'bg-[#FDEDEC]', // soft red
     href: '/onboarding?template=zeta%20trainer',
     recommendedTemplate: 'zeta trainer',
   },
@@ -201,16 +256,18 @@ const USE_CASES: UseCase[] = [
     label: 'Writing',
     description: 'Essays, content, and scripts.',
     emoji: '✍️',
+    color: 'bg-[#E8EAF6]', // light indigo
     href: '/onboarding?template=zeta%20writer',
     recommendedTemplate: 'zeta writer',
   },
   {
-    key: 'grammar',
-    label: 'Grammar',
-    description: 'Fix tone, clarity, and typos.',
-    emoji: '✅',
-    href: '/onboarding?template=zeta%20writer',
-    recommendedTemplate: 'zeta writer',
+    key: 'money_analysis',
+    label: 'Money & Analysis',
+    description: 'Track spending, analyze trends, and make informed decisions.',
+    emoji: '💹',
+    color: 'bg-[#E2F7F6]', // aqua teal
+    href: '/onboarding?template=zeta%20quant',
+    recommendedTemplate: 'zeta quant',
   },
 ];
 
@@ -241,7 +298,8 @@ function classifyTemplateValue(raw: unknown): Template | null {
   if (/zeta[_\s-]*trainer|zeta[_\s-]*exercise/.test(s)) return 'zeta trainer';
   if (/zeta[_\s-]*engineer|zeta[_\s-]*code/.test(s)) return 'zeta engineer';
   if (/zeta[_\s-]*writer/.test(s)) return 'zeta writer';
-  if (/zeta[_\s-]*motivation|zeta[_\s-]*sage|zeta[_\s-]*emotion/.test(s)) return 'zeta motivation';
+  if (/zeta[_\s-]*motivation|zeta[_\s-]*sage|zeta[_\s-]*emotion/.test(s))
+    return 'zeta motivation';
   if (/zeta[_\s-]*quant/.test(s)) return 'zeta quant';
 
   return null;
@@ -274,8 +332,8 @@ function normalizeTemplateFromAny(row: ProjectRowRaw): Template {
     row.templateSlug,
     row.template_type,
     row.assistant_type, // legacy
-    row.agent,          // legacy
-    row.type,           // legacy
+    row.agent, // legacy
+    row.type, // legacy
   ];
   for (const c of nameCandidates) {
     const t = classifyTemplateValue(c);
@@ -299,10 +357,14 @@ const fallbackLevelFromXP = (xp: number) =>
   Math.max(1, Math.min(10, Math.floor(xp / 100) + 1));
 const fallbackTitleFromLevel = (lvl: number) => `Lv ${lvl}`;
 
-function getProjectLevel(row: ProjectRowRaw): { levelNum: number; levelTitle: string } | null {
+function getProjectLevel(row: ProjectRowRaw): {
+  levelNum: number;
+  levelTitle: string;
+} | null {
   const direct = Number(row.level ?? row.project_level ?? row.lvl ?? Number.NaN);
   if (Number.isFinite(direct) && direct > 0) {
-    const title = LEVELS?.find((l) => l.level === direct)?.title ?? `Lv ${direct}`;
+    const title =
+      LEVELS?.find((l) => l.level === direct)?.title ?? `Lv ${direct}`;
     return { levelNum: direct, levelTitle: title };
   }
   const xp = Number(row.xp ?? row.total_xp ?? row.project_xp ?? Number.NaN);
@@ -311,7 +373,9 @@ function getProjectLevel(row: ProjectRowRaw): { levelNum: number; levelTitle: st
       try {
         const gp: any = getXPProgress(xp);
         const levelNum = gp?.level ?? gp?.currentLevel ?? gp?.levelNumber ?? 1;
-        const title = LEVELS?.find((l) => l.level === levelNum)?.title ?? `Lv ${levelNum}`;
+        const title =
+          LEVELS?.find((l) => l.level === levelNum)?.title ??
+          `Lv ${levelNum}`;
         return { levelNum, levelTitle: title };
       } catch {
         /* ignore and fall back */
@@ -326,7 +390,9 @@ function getProjectLevel(row: ProjectRowRaw): { levelNum: number; levelTitle: st
 function normalizeProject(row: ProjectRowRaw): Project {
   const id =
     normStr(row.id) ||
-    (typeof crypto !== 'undefined' ? crypto.randomUUID() : `tmp_${Date.now()}`);
+    (typeof crypto !== 'undefined'
+      ? crypto.randomUUID()
+      : `tmp_${Date.now()}`);
   const name =
     normStr(row.name) ||
     normStr(row.title) ||
@@ -377,8 +443,10 @@ export default function HomePage() {
           (u.user_metadata?.username as string) ||
           (u.email?.split('@')[0] as string) ||
           '';
-        const selfDescription = (u.user_metadata?.self_description as string) || '';
-        const avatarUrl = (u.user_metadata?.profile_image_url as string) || '';
+        const selfDescription =
+          (u.user_metadata?.self_description as string) || '';
+        const avatarUrl =
+          (u.user_metadata?.profile_image_url as string) || '';
 
         setSessionInfo({
           userId: u.id,
@@ -446,7 +514,9 @@ export default function HomePage() {
             ].join(' ')}
           >
             <span aria-hidden>{isPremium ? '👑' : '🟢'}</span>
-            <span className="font-semibold">{isPremium ? 'Premium' : 'Free'}</span>
+            <span className="font-semibold">
+              {isPremium ? 'Premium' : 'Free'}
+            </span>
           </span>
         );
       },
@@ -464,10 +534,14 @@ export default function HomePage() {
         {/* Hero */}
         <section className="mx-auto w-full max-w-6xl px-4 mt-10 text-center">
           <h1 className="text-4xl md:text-5xl font-extrabold text-white">
-            Pantheon <span className="text-indigo-300">Personal Superintelligence</span>
+            Pantheon{' '}
+            <span className="text-indigo-300">Personal Superintelligence</span>
           </h1>
           <p className="mt-4 text-lg text-slate-200 max-w-2xl mx-auto">
-            Pantheon is home to Zeta, your customizable AI assistant. Able to customize its preset features, personality, and tone, Zeta is you're personal superintelligence here to help you achieve your goals in whatever way you use AI!
+            Pantheon is home to Zeta, your customizable AI assistant. Able to
+            customize its preset features, personality, and tone, Zeta is you're
+            personal superintelligence here to help you achieve your goals in
+            whatever way you use AI!
           </p>
         </section>
 
@@ -477,7 +551,8 @@ export default function HomePage() {
             What do you use AI for?
           </h2>
           <p className="mt-2 text-sm text-slate-200 text-center max-w-xl mx-auto">
-            Tap a tile below and we&rsquo;ll match you to the Zeta agent that fits best.
+            Tap a tile below and we&rsquo;ll match you to the Zeta agent that
+            fits best.
           </p>
           <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
             {USE_CASES.map((c) => {
@@ -486,33 +561,38 @@ export default function HomePage() {
               return (
                 <div
                   key={c.key}
-                  className="group relative rounded-2xl bg-white/80 p-4 shadow-sm ring-1 ring-black/10 hover:shadow-md hover:-translate-y-0.5 transition transform flex flex-col items-center text-center overflow-hidden"
+                  className={`group relative flex h-full flex-col justify-between rounded-2xl p-5 text-left shadow-md ring-1 ring-black/10 transition transform hover:-translate-y-1 hover:shadow-lg ${c.color}`}
                 >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-2xl mb-2">
-                    <span aria-hidden>{c.emoji}</span>
-                  </div>
-                  <div className="text-sm font-semibold text-gray-900">{c.label}</div>
-                  <div className="mt-1 text-xs text-gray-500">{c.description}</div>
-
-                  {/* Recommended profile on hover */}
-                  <div className="mt-3 w-full rounded-xl bg-indigo-50/80 p-2 text-left text-[11px] text-gray-800 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition">
-                    <div className="flex items-center gap-2">
-                      <Image
-                        src={encodeURI(recIcon)}
-                        alt={rec.title}
-                        width={28}
-                        height={28}
-                        className="rounded-md"
-                      />
-                      <div className="min-w-0">
-                        <div className="font-semibold text-xs leading-tight">
-                          Recommended: {rec.title}
-                        </div>
-                        <div className="text-[10px] text-gray-600 line-clamp-2">
-                          {rec.sub}
-                        </div>
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/70 text-2xl">
+                      <span aria-hidden>{c.emoji}</span>
+                    </div>
+                    <div>
+                      <div className="text-sm md:text-base font-semibold text-gray-900">
+                        {c.label}
+                      </div>
+                      <div className="mt-1 text-[13px] md:text-sm text-gray-800/90">
+                        {c.description}
                       </div>
                     </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-[12px] md:text-sm text-gray-900">
+                    <div className="min-w-0">
+                      <div className="font-semibold leading-tight">
+                        Recommended: {rec.title}
+                      </div>
+                      <div className="mt-0.5 text-[11px] md:text-xs text-gray-700 line-clamp-2">
+                        {rec.sub}
+                      </div>
+                    </div>
+                    <Image
+                      src={encodeURI(recIcon)}
+                      alt={rec.title}
+                      width={34}
+                      height={34}
+                      className="ml-2 shrink-0 rounded-md"
+                    />
                   </div>
                 </div>
               );
@@ -530,36 +610,44 @@ export default function HomePage() {
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
-            {(['zeta build', 'zeta learn', 'zeta chef', 'zeta trainer'] as Template[]).map(
-              (tpl) => {
-                const icon = TEMPLATE_ICONS[tpl];
-                const { title, sub } = TEMPLATE_DISPLAY[tpl];
-                const traits = TEMPLATE_TRAITS[tpl];
-                return (
-                  <div
-                    key={tpl}
-                    className="rounded-xl bg-white p-6 shadow hover:shadow-md"
-                  >
-                    <Image
-                      src={encodeURI(icon)}
-                      alt={title}
-                      width={96}
-                      height={96}
-                      className="mx-auto mb-3 rounded-lg"
-                    />
-                    <h3 className="text-center text-lg font-semibold text-gray-800">{title}</h3>
-                    <p className="mt-1 text-center text-sm text-gray-600">{sub}</p>
-                    <ul className="mt-3 grid grid-cols-1 gap-1 text-xs text-gray-700">
-                      {traits.map((t) => (
-                        <li key={t} className="mx-auto w-fit rounded-full border px-2 py-0.5">
-                          {t}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              }
-            )}
+            {(
+              ['zeta build', 'zeta learn', 'zeta chef', 'zeta trainer'] as
+              Template[]
+            ).map((tpl) => {
+              const icon = TEMPLATE_ICONS[tpl];
+              const { title, sub } = TEMPLATE_DISPLAY[tpl];
+              const traits = TEMPLATE_TRAITS[tpl];
+              return (
+                <div
+                  key={tpl}
+                  className="rounded-xl bg-white p-6 shadow hover:shadow-md"
+                >
+                  <Image
+                    src={encodeURI(icon)}
+                    alt={title}
+                    width={96}
+                    height={96}
+                    className="mx-auto mb-3 rounded-lg"
+                  />
+                  <h3 className="text-center text-lg font-semibold text-gray-800">
+                    {title}
+                  </h3>
+                  <p className="mt-1 text-center text-sm text-gray-600">
+                    {sub}
+                  </p>
+                  <ul className="mt-3 grid grid-cols-1 gap-1 text-xs text-gray-700">
+                    {traits.map((t) => (
+                      <li
+                        key={t}
+                        className="mx-auto w-fit rounded-full border px-2 py-0.5"
+                      >
+                        {t}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
           </div>
         </section>
 
@@ -585,11 +673,14 @@ export default function HomePage() {
             />
           </div>
           <div>
-            <h2 className="text-3xl font-bold text-white mb-2">Zeta Premium</h2>
+            <h2 className="text-3xl font-bold text-white mb-2">
+              Zeta Premium
+            </h2>
             <p className="text-slate-200 text-lg max-w-md">
-              Unlock the full power of Pantheon — access more AI agents, deeper customization,
-              higher limits, and exclusive premium tools. Premium gives you elite capabilities
-              to turn ideas into outcomes faster, smarter, and with greater precision.
+              Unlock the full power of Pantheon — access more AI agents, deeper
+              customization, higher limits, and exclusive premium tools. Premium
+              gives you elite capabilities to turn ideas into outcomes faster,
+              smarter, and with greater precision.
             </p>
 
             <ul className="mt-3 text-slate-100 text-sm space-y-1">
@@ -626,10 +717,14 @@ export default function HomePage() {
   }
 
   /* ===================== Logged-IN Home ===================== */
-  const { plan, username, selfDescription, avatarUrl, used, limit } = sessionInfo;
+  const { plan, username, selfDescription, avatarUrl, used, limit } =
+    sessionInfo;
   const remaining = Math.max(0, limit - used);
   const avatarSrc = avatarUrl || DEFAULT_AVATAR_SRC;
-  const progressPct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+  const progressPct = Math.min(
+    100,
+    Math.round((used / Math.max(1, limit)) * 100)
+  );
 
   const TEMPLATE_ORDER: Template[] = [
     'zeta build',
@@ -672,17 +767,26 @@ export default function HomePage() {
             />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="truncate text-xl font-semibold text-gray-900">{username || 'User'}</h2>
+                <h2 className="truncate text-xl font-semibold text-gray-900">
+                  {username || 'User'}
+                </h2>
                 <PlanBadge plan={plan} />
               </div>
               <p className="mt-1 line-clamp-3 text-sm text-gray-600">
-                {selfDescription || 'Tell Zeta about your goals in Settings → Profile.'}
+                {selfDescription ||
+                  'Tell Zeta about your goals in Settings → Profile.'}
               </p>
               <div className="mt-3 flex gap-2">
-                <Link href="/settings" className="rounded-md border px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+                <Link
+                  href="/settings"
+                  className="rounded-md border px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+                >
                   Edit profile
                 </Link>
-                <Link href="/projects" className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500">
+                <Link
+                  href="/projects"
+                  className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-500"
+                >
                   Open Projects
                 </Link>
               </div>
@@ -693,19 +797,31 @@ export default function HomePage() {
           <div className="col-span-1">
             <div className="text-sm font-medium text-gray-700">Projects</div>
             <div className="mt-1 text-3xl font-extrabold text-gray-900">
-              {used} <span className="text-base font-medium text-gray-500">/ {limit}</span>
+              {used}{' '}
+              <span className="text-base font-medium text-gray-500">
+                / {limit}
+              </span>
             </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-200">
-              <div className="h-2 bg-indigo-500" style={{ width: `${progressPct}%` }} />
+              <div
+                className="h-2 bg-indigo-500"
+                style={{ width: `${progressPct}%` }}
+              />
             </div>
             <div className="mt-1 text-xs text-gray-500">
               {remaining === 0 ? 'Limit reached' : `${remaining} remaining`}
             </div>
             <div className="mt-3 flex gap-2">
-              <Link href="/onboarding" className="rounded-md bg-black px-3 py-1.5 text-xs text-white hover:bg-gray-800">
+              <Link
+                href="/onboarding"
+                className="rounded-md bg-black px-3 py-1.5 text-xs text-white hover:bg-gray-800"
+              >
                 + New Project
               </Link>
-              <Link href="/upgrade" className="rounded-md border px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">
+              <Link
+                href="/upgrade"
+                className="rounded-md border px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+              >
                 {plan === 'premium' ? 'Manage Billing' : 'Upgrade'}
               </Link>
             </div>
@@ -719,7 +835,8 @@ export default function HomePage() {
           What do you use AI for?
         </h2>
         <p className="mt-1 text-xs text-slate-200 text-center md:text-left max-w-xl">
-          Choose a tile to jump straight into creating a project with the right Zeta agent.
+          Choose a tile to jump straight into creating a project with the right
+          Zeta agent.
         </p>
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {USE_CASES.map((c) => {
@@ -729,33 +846,38 @@ export default function HomePage() {
               <Link
                 key={c.key}
                 href={c.href}
-                className="group relative rounded-2xl bg-white/80 p-3 shadow-sm ring-1 ring-black/10 hover:shadow-md hover:-translate-y-0.5 transition transform flex flex-col items-center text-center overflow-hidden"
+                className={`group relative flex h-full flex-col justify-between rounded-2xl p-4 text-left shadow-md ring-1 ring-black/10 transition transform hover:-translate-y-1 hover:shadow-lg ${c.color}`}
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-50 text-xl mb-1.5">
-                  <span aria-hidden>{c.emoji}</span>
-                </div>
-                <div className="text-xs font-semibold text-gray-900">{c.label}</div>
-                <div className="mt-0.5 text-[11px] text-gray-500">{c.description}</div>
-
-                {/* Recommended profile on hover */}
-                <div className="mt-2 w-full rounded-xl bg-indigo-50/80 p-2 text-left text-[11px] text-gray-800 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition">
-                  <div className="flex items-center gap-2">
-                    <Image
-                      src={encodeURI(recIcon)}
-                      alt={rec.title}
-                      width={24}
-                      height={24}
-                      className="rounded-md"
-                    />
-                    <div className="min-w-0">
-                      <div className="font-semibold text-[11px] leading-tight">
-                        Recommended: {rec.title}
-                      </div>
-                      <div className="text-[10px] text-gray-600 line-clamp-2">
-                        {rec.sub}
-                      </div>
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/70 text-xl mb-0.5">
+                    <span aria-hidden>{c.emoji}</span>
+                  </div>
+                  <div>
+                    <div className="text-sm md:text-base font-semibold text-gray-900">
+                      {c.label}
+                    </div>
+                    <div className="mt-1 text-[12px] md:text-sm text-gray-900/90">
+                      {c.description}
                     </div>
                   </div>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-[12px] md:text-sm text-gray-900">
+                  <div className="min-w-0">
+                    <div className="font-semibold leading-tight">
+                      Recommended: {rec.title}
+                    </div>
+                    <div className="mt-0.5 text-[11px] md:text-xs text-gray-700 line-clamp-2">
+                      {rec.sub}
+                    </div>
+                  </div>
+                  <Image
+                    src={encodeURI(recIcon)}
+                    alt={rec.title}
+                    width={26}
+                    height={26}
+                    className="ml-2 shrink-0 rounded-md"
+                  />
                 </div>
               </Link>
             );
@@ -769,7 +891,8 @@ export default function HomePage() {
           <div>
             <h2 className="text-2xl font-bold text-white">Agents</h2>
             <p className="mt-1 text-sm text-slate-200">
-              Your projects are grouped by Zeta agent so you can see where your time and progress lives.
+              Your projects are grouped by Zeta agent so you can see where your
+              time and progress lives.
             </p>
           </div>
         </div>
@@ -781,7 +904,10 @@ export default function HomePage() {
             const items = byTemplate[tpl] || [];
             const traits = TEMPLATE_TRAITS[tpl];
             return (
-              <div key={tpl} className="rounded-2xl bg-white p-6 shadow ring-1 ring-black/5">
+              <div
+                key={tpl}
+                className="rounded-2xl bg-white p-6 shadow ring-1 ring-black/5"
+              >
                 <div className="relative flex items-center justify-center">
                   <Image
                     src={encodeURI(icon)}
@@ -794,13 +920,18 @@ export default function HomePage() {
                     {items.length}
                   </span>
                 </div>
-                <h3 className="text-center text-lg font-semibold text-gray-800">{title}</h3>
+                <h3 className="text-center text-lg font-semibold text-gray-800">
+                  {title}
+                </h3>
                 <p className="mt-1 text-center text-xs text-gray-500">{sub}</p>
 
                 {/* Traits */}
                 <ul className="mt-3 grid grid-cols-1 gap-1 text-xs text-gray-700">
                   {traits.map((t) => (
-                    <li key={t} className="mx-auto w-fit rounded-full border px-2 py-0.5">
+                    <li
+                      key={t}
+                      className="mx-auto w-fit rounded-full border px-2 py-0.5"
+                    >
                       {t}
                     </li>
                   ))}
@@ -809,10 +940,15 @@ export default function HomePage() {
                 {/* Project list */}
                 <ul className="mt-3 max-h-36 space-y-1 overflow-auto text-sm text-gray-700">
                   {items.length === 0 ? (
-                    <li className="text-center text-gray-400">No projects yet</li>
+                    <li className="text-center text-gray-400">
+                      No projects yet
+                    </li>
                   ) : (
                     items.map((p) => (
-                      <li key={p.id} className="flex items-center justify-between gap-2">
+                      <li
+                        key={p.id}
+                        className="flex items-center justify-between gap-2"
+                      >
                         <span className="truncate">• {p.name}</span>
                         {p.levelNum ? (
                           <span className="flex shrink-0 items-center gap-2">

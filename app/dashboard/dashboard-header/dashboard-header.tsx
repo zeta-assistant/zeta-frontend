@@ -23,6 +23,7 @@ type Props = {
 function HelpButton() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<'root' | 'faq' | 'privacy'>('root');
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   // Close on outside click
@@ -40,9 +41,15 @@ function HelpButton() {
     return () => window.removeEventListener('mousedown', handleClick);
   }, [open]);
 
+  // When popup closes, reset to root
+  useEffect(() => {
+    if (!open) setView('root');
+  }, [open]);
+
   const goToSupport = () => {
     setOpen(false);
-    router.push('/support'); // 🔗 direct link to support page
+    setView('root');
+    router.push('/support');
   };
 
   return (
@@ -59,49 +66,215 @@ function HelpButton() {
 
       {open && (
         <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-xs shadow-lg z-50">
+          {/* Header */}
           <div className="mb-2">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               Need help?
             </div>
             <div className="text-sm font-bold text-slate-900">
-              Help & Support
+              {view === 'root'
+                ? 'Help & Support'
+                : view === 'faq'
+                ? 'FAQ'
+                : 'Privacy & Data'}
             </div>
           </div>
 
-          <div className="space-y-2 max-h-52 overflow-y-auto">
-            <button
-              type="button"
-              className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
-            >
-              <div className="font-semibold text-slate-800">FAQ</div>
-              <div className="mt-0.5 text-[10px] text-slate-500">
-                Common questions about using Zeta & the dashboard.
-              </div>
-            </button>
+          {/* BODY: ROOT VIEW */}
+          {view === 'root' && (
+            <div className="space-y-2 max-h-52 overflow-y-auto">
+              {/* FAQ card */}
+              <button
+                type="button"
+                onClick={() => setView('faq')}
+                className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
+              >
+                <div className="font-semibold text-slate-800 flex items-center justify-between">
+                  <span>FAQ</span>
+                  <span className="text-[10px] text-slate-500">View all</span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-slate-500">
+                  Common questions about using Zeta & the dashboard.
+                </div>
+              </button>
 
-            <button
-              type="button"
-              className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
-            >
-              <div className="font-semibold text-slate-800">Quick start</div>
-              <div className="mt-0.5 text-[10px] text-slate-500">
-                How to use chats, files, memory, and tasks.
-              </div>
-            </button>
+              {/* Quick start */}
+              <button
+                type="button"
+                className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
+              >
+                <div className="font-semibold text-slate-800">Quick start</div>
+                <div className="mt-0.5 text-[10px] text-slate-500">
+                  How to use chats, files, memory, and tasks.
+                </div>
+              </button>
 
-            <button
-              type="button"
-              className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
-            >
-              <div className="font-semibold text-slate-800">
-                Tips & workflows
-              </div>
-              <div className="mt-0.5 text-[10px] text-slate-500">
-                Recommended flows and power-user tricks.
-              </div>
-            </button>
-          </div>
+              {/* Tips */}
+              <button
+                type="button"
+                className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-[11px] hover:bg-slate-100 transition-colors"
+              >
+                <div className="font-semibold text-slate-800">
+                  Tips & workflows
+                </div>
+                <div className="mt-0.5 text-[10px] text-slate-500">
+                  Recommended flows and power-user tricks.
+                </div>
+              </button>
 
+              {/* Privacy & Data card */}
+              <button
+                type="button"
+                onClick={() => setView('privacy')}
+                className="w-full rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-left text-[11px] hover:bg-indigo-100 transition-colors"
+              >
+                <div className="font-semibold text-slate-800 flex items-center justify-between">
+                  <span>Privacy & Data</span>
+                  <span className="text-[10px] text-indigo-600">How it works</span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-slate-600">
+                  How your chats, files, and project data are stored & protected.
+                </div>
+              </button>
+            </div>
+          )}
+
+          {/* BODY: FAQ VIEW */}
+          {view === 'faq' && (
+            <div className="max-h-52 overflow-y-auto">
+              {/* Back row */}
+              <div className="flex items-center justify-between mb-2">
+                <button
+                  type="button"
+                  onClick={() => setView('root')}
+                  className="inline-flex items-center gap-1 text-[10px] text-slate-600 hover:text-slate-900"
+                >
+                  <span aria-hidden>←</span>
+                  <span>Back</span>
+                </button>
+                <span className="text-[10px] text-slate-400">
+                  Zeta dashboard FAQ
+                </span>
+              </div>
+
+              <p className="text-[10px] text-slate-500 mb-2">
+                A few common questions to get you started. Detailed answers live on
+                the full support page.
+              </p>
+
+              <div className="space-y-2 text-[11px] text-slate-800">
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5">
+                  <div className="font-semibold">
+                    1. How do I start a new chat with Zeta?
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-slate-600">
+                    Use the main chat box on the Chatboard tab. Each project has
+                    its own thread(s) and memory.
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5">
+                  <div className="font-semibold">
+                    2. Where do I upload files for this project?
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-slate-600">
+                    Go to the Files panel and drag &amp; drop documents. Zeta will
+                    index them for search and context.
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5">
+                  <div className="font-semibold">
+                    3. What does “memory” mean here?
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-slate-600">
+                    Memory is what Zeta remembers for this project over time:
+                    goals, decisions, and important notes.
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5">
+                  <div className="font-semibold">
+                    4. How do I reset a conversation or thread?
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-slate-600">
+                    Use the &quot;Clear chat&quot; or new-thread controls in the
+                    Chatboard. This starts fresh without deleting logs.
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 mb-1">
+                  <div className="font-semibold">
+                    5. How do I report a bug or request a feature?
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-slate-600">
+                    Click &quot;Open support&quot; below to jump to the support
+                    page, or contact us via the site footer.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* BODY: PRIVACY VIEW */}
+          {view === 'privacy' && (
+            <div className="max-h-52 overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <button
+                  type="button"
+                  onClick={() => setView('root')}
+                  className="inline-flex items-center gap-1 text-[10px] text-slate-600 hover:text-slate-900"
+                >
+                  <span aria-hidden>←</span>
+                  <span>Back</span>
+                </button>
+                <span className="text-[10px] text-slate-400">
+                  Privacy overview
+                </span>
+              </div>
+
+              <p className="text-[10px] text-slate-500 mb-2">
+                High-level summary of how your data is handled inside Zeta. For full
+                details, see the Privacy Policy.
+              </p>
+
+              <ul className="space-y-1.5 text-[10px] text-slate-700">
+                <li>
+                  <span className="font-semibold">• Your data belongs to you.</span>{' '}
+                  Projects, chats, and files are never sold or shared with advertisers.
+                </li>
+                <li>
+                  <span className="font-semibold">• Stored securely.</span> Data is
+                  stored in Supabase with row-level security and encrypted storage.
+                </li>
+                <li>
+                  <span className="font-semibold">• Encrypted in transit.</span> All
+                  traffic uses HTTPS (TLS).
+                </li>
+                <li>
+                  <span className="font-semibold">
+                    • AI model access is processing-only.
+                  </span>{' '}
+                  Data is sent to the model provider only to generate responses, not to
+                  train models.
+                </li>
+                <li>
+                  <span className="font-semibold">• You control deletion.</span> You
+                  can delete files, chats, or whole projects from inside the app.
+                </li>
+              </ul>
+
+              <button
+                type="button"
+                onClick={() => router.push('/privacy')}
+                className="mt-3 inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                View full Privacy Policy
+              </button>
+            </div>
+          )}
+
+          {/* FOOTER */}
           <div className="mt-3 border-t border-slate-100 pt-2 flex items-center justify-between">
             <span className="text-[10px] text-slate-500">Still stuck?</span>
             <button

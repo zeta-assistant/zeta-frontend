@@ -310,7 +310,6 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
       ? 'Loading Zeta’s latest thought…'
       : 'No thoughts yet. Generate one to kick things off.');
 
-  // 🔍 Final formatted text for display (handles long run-on tokens)
   const displayThought = useMemo(
     () => cleanThoughtForDisplay(thoughtText),
     [thoughtText]
@@ -323,17 +322,13 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
     <div className="flex flex-col items-center pt-[230px] gap-4 pr-1">
       {/* ⚡ Zeta XP & Level (compact) */}
       <div className={`${PANEL_W} shrink-0 bg-blue-950 border border-blue-700 rounded-2xl p-3 shadow`}>
-        {/* Header row: Zeta name + level badge */}
-        <div className="flex items-center gap-2 mb-1">
+        {/* Header row: Zeta name + level badge + title all in one line */}
+        <div className="flex flex-wrap items-center gap-2 mb-2">
           <div className="text-sm font-medium text-purple-100">Zeta⚡</div>
           <span className="px-2 py-0.5 rounded-full border border-purple-400/60 text-[10px] font-semibold text-purple-100 whitespace-nowrap">
             LEVEL {prog.level}
           </span>
-        </div>
-
-        {/* Assistant title */}
-        <div className="mb-2">
-          <span className="inline-block px-2 py-0.5 rounded-full border border-blue-500/60 text-[11px] font-semibold text-blue-100 bg-blue-900/40 whitespace-nowrap">
+          <span className="px-2 py-0.5 rounded-full border border-blue-500/60 text-[10px] font-semibold text-blue-100 bg-blue-900/40 whitespace-nowrap">
             {prog.title}
           </span>
         </div>
@@ -359,7 +354,6 @@ export default function ZetaLeftSidePanel({ projectId }: ZetaLeftSidePanelProps)
         className={`${PANEL_W} shrink-0 bg-indigo-100 text-indigo-900 px-4 py-3 rounded-2xl shadow border border-indigo-300 text-sm`}
       >
         <p className="font-bold mb-2">💭 Zeta’s Thoughts</p>
-        {/* break-words so it wraps nicely even if something sneaks through */}
         <p className="text-sm whitespace-pre-wrap break-words">
           {displayThought}
         </p>
