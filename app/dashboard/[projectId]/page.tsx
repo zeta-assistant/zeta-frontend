@@ -371,6 +371,8 @@ export default function DashboardPage() {
     }
   };
 
+  const PANEL_H = 'calc(100vh - 110px)';
+
   // 🔹 decide thinking image: default, chef, writer
   const getThinkingSrc = () => {
     if (templateSlug === 'zeta-chef') return '/templates/zeta-chef-thinking.png';
@@ -384,13 +386,12 @@ export default function DashboardPage() {
     if (templateSlug === 'zeta-chef') return '/templates/zeta-chef.png';
     if (templateSlug === 'zeta-writer') return '/templates/zeta-writer.png';
     if (templateSlug) return `/templates/${templateSlug}.png`; // zeta-learn, zeta-quant, etc.
-    return '/templates/zeta.png'; // fallback
+    return '/templates/zeta.png'; // fallback (fixes /zeta.png 404)
   };
 
   return (
-    // ✅ IMPORTANT: no min-h-screen here, let RootLayout own the viewport height
-    <div className="flex flex-col h-full min-h-0">
-      {/* MOBILE */}
+    <>
+      {/* MOBILE: header + tabs + center panel only */}
       <div className="md:hidden">
         <MobileDashboard
           projectName={projectName}
@@ -418,13 +419,17 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* DESKTOP/TABLET */}
-      <div className="hidden md:flex flex-1 min-h-0">
-        <div className="flex-1 min-h-0 w-full bg-sky-800 text-white px-3 md:px-4 lg:px-6 py-6">
-          {/* Make this container fill the available height */}
-          <div className="flex h-full w-full gap-4 justify-start items-stretch">
-            {/* LEFT SIDEBAR */}
-            <div className="relative w-[350px] shrink-0 px-3 py-2 flex flex-col h-full">
+      {/* DESKTOP/TABLET: full layout with side panels & floating buttons */}
+      <div className="hidden md:flex">
+        {/* ⬇️ FULL-WIDTH PAGE WRAPPER (no centering / no max-w) */}
+        <div className="min-h-screen w-full bg-sky-800 text-white px-3 md:px-4 lg:px-6 py-6">
+          {/* ⬇️ ROW LAYOUT, LEFT-ALIGNED, NO MAX-W */}
+          <div className="flex w-full gap-4 justify-start items-stretch">
+            {/* Left Sidebar */}
+            <div
+              className="relative w-[350px] shrink-0 px-3 py-2 flex flex-col"
+              style={{ height: PANEL_H }}
+            >
               <img
                 src={sendingMessage ? getThinkingSrc() : getIdleSrc()}
                 alt="Zeta Avatar"
@@ -433,32 +438,34 @@ export default function DashboardPage() {
               />
 
               <div className="absolute top-4 left-[300px] z-30 flex flex-col gap-2 items-center">
-                <SettingsButton
-                  projectId={String(projectId)}
-                  selectedModelId={selectedModelId}
-                  setSelectedModelId={setSelectedModelId}
-                  avatarSrc={getIdleSrc()}
-                  templateSlug={templateSlug ?? undefined}
-                />
-                <ThoughtButton projectId={projectId} />
-                <MessageButton projectId={projectId} />
-                <UploadButton
-                  projectId={projectId}
-                  onUploaded={async () => {
-                    await fetchRecentDocs();
-                    setRefreshNonce((n) => n + 1);
-                  }}
-                />
-              </div>
+  <SettingsButton
+    projectId={String(projectId)}
+    selectedModelId={selectedModelId}
+    setSelectedModelId={setSelectedModelId}
+    avatarSrc={getIdleSrc()}          // already used for the dashboard avatar
+    templateSlug={templateSlug ?? undefined}  // 🔹 NEW: pass slug through
+  />
+  <ThoughtButton projectId={projectId} />
+  <MessageButton projectId={projectId} />
+  <UploadButton
+    projectId={projectId}
+    onUploaded={async () => {
+      await fetchRecentDocs();
+      setRefreshNonce((n) => n + 1);
+    }}
+  />
+</div>
 
-              <ZetaLeftSidePanel
-                key={`left-${refreshNonce}`}
-                projectId={projectId}
-              />
+
+
+              <ZetaLeftSidePanel key={`left-${refreshNonce}`} projectId={projectId} />
             </div>
 
-            {/* MAIN PANEL */}
-            <div className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg min-h-0 h-full overflow-hidden">
+            {/* Main panel */}
+            <div
+              className="flex flex-col flex-[4] bg-blue-900 border border-blue-800 rounded-2xl shadow-lg min-h-0 overflow-hidden"
+              style={{ height: PANEL_H }}
+            >
               <DashboardHeader
                 projectName={projectName}
                 userEmail={userEmail}
@@ -471,6 +478,7 @@ export default function DashboardPage() {
                 refreshing={refreshing}
               />
 
+              {/* === Equal-width tabs on desktop === */}
               <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
                 <div
                   className="
@@ -512,152 +520,150 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Main content region should scroll inside, not the whole page */}
-              <div className="flex-1 min-h-0">
-                {activeMainTab === 'chat' && (
-                  <ChatTab
-                    key={`chat-${refreshNonce}`}
-                    activeMainTab={activeMainTab}
-                    chatView={chatView}
-                    setChatView={setChatView}
-                    chatHidden={chatHidden}
-                    setChatHidden={setChatHidden}
-                    messages={messages}
-                    loading={loading}
-                    input={input}
-                    setInput={setInput}
-                    handleKeyDown={handleKeyDown}
-                    sendMessage={sendMessage}
-                    scrollRef={scrollRef}
-                    fontSize={fontSize}
-                    setFontSize={setFontSize}
-                    projectId={projectId}
-                    onRefresh={refreshAll}
-                    refreshing={refreshing}
-                  />
-                )}
+              {activeMainTab === 'chat' && (
+                <ChatTab
+                  key={`chat-${refreshNonce}`}
+                  activeMainTab={activeMainTab}
+                  chatView={chatView}
+                  setChatView={setChatView}
+                  chatHidden={chatHidden}
+                  setChatHidden={setChatHidden}
+                  messages={messages}
+                  loading={loading}
+                  input={input}
+                  setInput={setInput}
+                  handleKeyDown={handleKeyDown}
+                  sendMessage={sendMessage}
+                  scrollRef={scrollRef}
+                  fontSize={fontSize}
+                  setFontSize={setFontSize}
+                  projectId={projectId}
+                  onRefresh={refreshAll}
+                  refreshing={refreshing}
+                />
+              )}
 
-                {activeMainTab === 'discussions' && (
-                  <DiscussionsPanel
-                    key={`discussions-${refreshNonce}`}
-                    fontSize={fontSize}
-                  />
-                )}
+              {activeMainTab === 'discussions' && (
+                <DiscussionsPanel
+                  key={`discussions-${refreshNonce}`}
+                  fontSize={fontSize}
+                />
+              )}
 
-                {activeMainTab === 'connections' && (
-                  <ConnectionsPanel
-                    key={`connections-${refreshNonce}`}
-                    projectId={projectId}
-                  />
-                )}
+              {/* 🌐 Connections */}
+              {activeMainTab === 'connections' && (
+                <ConnectionsPanel
+                  key={`connections-${refreshNonce}`}
+                  projectId={projectId}
+                />
+              )}
 
-                {activeMainTab === 'logs' && (
-                  <LogsPanel
-                    key="Logs"
-                    fontSize={fontSize}
-                    projectId={projectId}
-                  />
-                )}
+              {activeMainTab === 'logs' && (
+                <LogsPanel
+                  key="Logs"
+                  fontSize={fontSize}
+                  projectId={projectId}
+                />
+              )}
 
-                {activeMainTab === 'files' && (
-                  <FilesPanel
-                    key={`files-${refreshNonce}`}
-                    recentDocs={recentDocs}
-                    fontSize={fontSize}
-                    projectId={projectId}
-                  />
-                )}
+              {activeMainTab === 'files' && (
+                <FilesPanel
+                  key={`files-${refreshNonce}`}
+                  recentDocs={recentDocs}
+                  fontSize={fontSize}
+                  projectId={projectId}
+                />
+              )}
 
-                {activeMainTab === 'apis' && (
-                  <ApisPanel
-                    key={`apis-${refreshNonce}`}
-                    fontSize={fontSize}
-                    projectId={projectId}
-                  />
-                )}
+              {activeMainTab === 'apis' && (
+                <ApisPanel
+                  key={`apis-${refreshNonce}`}
+                  fontSize={fontSize}
+                  projectId={projectId}
+                />
+              )}
 
-                {activeMainTab === 'calendar' && (
-                  <CalendarPanel
-                    key={`calendar-${refreshNonce}`}
-                    fontSize={fontSize}
-                  />
-                )}
+              {activeMainTab === 'calendar' && (
+                <CalendarPanel
+                  key={`calendar-${refreshNonce}`}
+                  fontSize={fontSize}
+                />
+              )}
 
-                {activeMainTab === 'goals' && (
-                  <GoalsPanel
-                    key={`goals-${refreshNonce}`}
-                    fontSize="base"
-                    projectId={projectId}
-                  />
-                )}
+              {activeMainTab === 'goals' && (
+                <GoalsPanel
+                  key={`goals-${refreshNonce}`}
+                  fontSize="base"
+                  projectId={projectId}
+                />
+              )}
 
-                {activeMainTab === 'notifications' && (
-                  <NotificationsPanel
-                    key={`notifications-${refreshNonce}`}
-                    projectId={projectId}
-                  />
-                )}
+              {activeMainTab === 'notifications' && (
+                <NotificationsPanel
+                  key={`notifications-${refreshNonce}`}
+                  projectId={projectId}
+                />
+              )}
 
-                {activeMainTab === 'tasks' && (
-                  <TasksPanel
-                    key={`tasks-${refreshNonce}`}
-                    fontSize={fontSize}
-                    userName={userName}
-                  />
-                )}
+              {activeMainTab === 'tasks' && (
+                <TasksPanel
+                  key={`tasks-${refreshNonce}`}
+                  fontSize={fontSize}
+                  userName={userName}
+                />
+              )}
 
-                {activeMainTab === 'thoughts' && (
-                  <ThoughtsPanel
-                    key={`thoughts-${refreshNonce}`}
-                    projectId={projectId}
-                    fontSize={fontSize}
-                  />
-                )}
+              {activeMainTab === 'thoughts' && (
+                <ThoughtsPanel
+                  key={`thoughts-${refreshNonce}`}
+                  projectId={projectId}
+                  fontSize={fontSize}
+                />
+              )}
 
-                {activeMainTab === 'timeline' && (
-                  <TimelinePanel
-                    key={`timeline-${refreshNonce}`}
-                    projectId={projectId}
-                  />
-                )}
+              {activeMainTab === 'timeline' && (
+                <TimelinePanel
+                  key={`timeline-${refreshNonce}`}
+                  projectId={projectId}
+                />
+              )}
 
-                {activeMainTab === 'functions' && (
-                  <FunctionsPanel
-                    key={`functions-${refreshNonce}`}
-                    projectId={projectId}
-                    fontSize={fontSize}
-                  />
-                )}
+              {activeMainTab === 'functions' && (
+                <FunctionsPanel
+                  key={`functions-${refreshNonce}`}
+                  projectId={projectId}
+                  fontSize={fontSize}
+                />
+              )}
 
-                {activeMainTab === 'newfunction' && (
-                  <NewFunctionPanel
-                    key={`newfunction-${refreshNonce}`}
-                    projectId={projectId}
-                    fontSize={fontSize}
-                  />
-                )}
+              {activeMainTab === 'newfunction' && (
+                <NewFunctionPanel
+                  key={`newfunction-${refreshNonce}`}
+                  projectId={projectId}
+                  fontSize={fontSize}
+                />
+              )}
 
-                {activeMainTab === 'workshop' && (
-                  <WorkshopPanel
-                    key={`workshop-${refreshNonce}`}
-                    projectId={projectId}
-                    fontSize="base"
-                  />
-                )}
-              </div>
+              {activeMainTab === 'workshop' && (
+                <WorkshopPanel
+                  key={`workshop-${refreshNonce}`}
+                  projectId={projectId}
+                  fontSize="base"
+                />
+              )}
             </div>
 
-           {/* RIGHT SIDEBAR */}
-<div className="w-[380px] shrink-0 h-full min-h-0 flex flex-col">
-  <ZetaRightSidePanel
-    key={`right-${refreshNonce}`}
-    userEmail={userEmail}
-    projectId={projectId}
-  />
-</div>
+            {/* Right sidebar */}
+            <div className="w-[380px] shrink-0" style={{ height: PANEL_H }}>
+              <ZetaRightSidePanel
+                key={`right-${refreshNonce}`}
+                userEmail={userEmail}
+                projectId={projectId}
+              />
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
