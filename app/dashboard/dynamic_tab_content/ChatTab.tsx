@@ -37,7 +37,11 @@ interface ChatTabProps {
 const proseScale = (fs: 'sm' | 'base' | 'lg') =>
   fs === 'sm' ? 'prose-sm' : fs === 'lg' ? 'prose-lg' : 'prose';
 const textScale = (fs: 'sm' | 'base' | 'lg') =>
-  fs === 'sm' ? 'text-[13px] leading-6' : fs === 'lg' ? 'text-[16.5px] leading-8' : 'text-[15px] leading-7';
+  fs === 'sm'
+    ? 'text-[13px] leading-6'
+    : fs === 'lg'
+    ? 'text-[16.5px] leading-8'
+    : 'text-[15px] leading-7';
 
 /* ---------- content helper ---------- */
 function getMsgContent(msg: any): string {
@@ -115,12 +119,44 @@ function formatTimeInTZ(isoNumOrDate: any, tz: string) {
 
 const isUserish = (msg: any) =>
   msg?.role === 'user' ||
-  (msg?.role === 'system' && typeof getMsgContent(msg) === 'string' && getMsgContent(msg).startsWith('📎 Files attached'));
+  (msg?.role === 'system' &&
+    typeof getMsgContent(msg) === 'string' &&
+    getMsgContent(msg).startsWith('📎 Files attached'));
 
 /* ============ Emoji ============ */
 const EMOJIS = [
-  '😀','😅','😂','😊','😍','🤔','😴','😎','🙌','👏','👍','🔥','💯','✨','⚡','🚀',
-  '🧠','📌','✅','❗','❓','📎','📝','📈','📊','⏱️','🧪','🔧','🛠️','🧰','🧵','🔁'
+  '😀',
+  '😅',
+  '😂',
+  '😊',
+  '😍',
+  '🤔',
+  '😴',
+  '😎',
+  '🙌',
+  '👏',
+  '👍',
+  '🔥',
+  '💯',
+  '✨',
+  '⚡',
+  '🚀',
+  '🧠',
+  '📌',
+  '✅',
+  '❗',
+  '❓',
+  '📎',
+  '📝',
+  '📈',
+  '📊',
+  '⏱️',
+  '🧪',
+  '🔧',
+  '🛠️',
+  '🧰',
+  '🧵',
+  '🔁',
 ];
 
 /* ---------- Stable anti-bounce scroller (no bottom padding) ---------- */
@@ -150,9 +186,23 @@ function FooterSpacer() {
 
 const ChatTab: React.FC<ChatTabProps> = (props) => {
   const {
-    activeMainTab, chatView, setChatView, chatHidden, setChatHidden,
-    messages: messagesProp, loading, input, setInput, handleKeyDown, sendMessage,
-    scrollRef, fontSize, setFontSize, projectId, onRefresh, refreshing,
+    activeMainTab,
+    chatView,
+    setChatView,
+    chatHidden,
+    setChatHidden,
+    messages: messagesProp,
+    loading,
+    input,
+    setInput,
+    handleKeyDown,
+    sendMessage,
+    scrollRef,
+    fontSize,
+    setFontSize,
+    projectId,
+    onRefresh,
+    refreshing,
   } = props;
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -164,10 +214,16 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase.from('user_projects').select('timezone').eq('id', projectId).single();
+      const { data } = await supabase
+        .from('user_projects')
+        .select('timezone')
+        .eq('id', projectId)
+        .single();
       if (!cancelled && data?.timezone) setProjectTZ(data.timezone);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   /* ---------- Local optimistic + realtime live ---------- */
@@ -177,36 +233,37 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
   // 🔁 Hard refresh from DB so UI always matches after send / first load
   const hardRefreshConvo = useCallback(async () => {
-  try {
-    const { data, error } = await supabase
-      .from('zeta_conversation_log')
-      .select('id, role, message, timestamp')
-      .eq('project_id', projectId)
-      .order('timestamp', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('zeta_conversation_log')
+        .select('id, role, message, timestamp')
+        .eq('project_id', projectId)
+        .order('timestamp', { ascending: true });
 
-    if (error) {
-      console.error('⚠️ hardRefreshConvo error:', error.message);
-      return;
+      if (error) {
+        console.error('⚠️ hardRefreshConvo error:', error.message);
+        return;
+      }
+
+      if (!Array.isArray(data)) return;
+
+      setLive(
+        data.map((r) => ({
+          id: r.id,
+          role: (r as any).role ?? 'assistant',
+          message: (r as any).message,
+          timestamp: (r as any).timestamp ?? new Date().toISOString(),
+          source: 'live' as const,
+        }))
+      );
+
+      // once DB copy is in, drop optimistic ones
+      setOptimistic([]);
+    } catch (e: any) {
+      console.error('⚠️ hardRefreshConvo exception:', e?.message ?? e);
     }
+  }, [projectId]);
 
-    if (!Array.isArray(data)) return;
-
-    setLive(
-      data.map((r) => ({
-        id: r.id,
-        role: (r as any).role ?? 'assistant',
-        message: (r as any).message,
-        timestamp: (r as any).timestamp ?? new Date().toISOString(),
-        source: 'live' as const,
-      }))
-    );
-
-    // once DB copy is in, drop optimistic ones
-    setOptimistic([]);
-  } catch (e: any) {
-    console.error('⚠️ hardRefreshConvo exception:', e?.message ?? e);
-  }
-}, [projectId]);
   // If we mount with no messages yet (fresh project / startConversation), pull from DB
   useEffect(() => {
     if (!projectId) return;
@@ -224,20 +281,32 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
         { event: 'INSERT', schema: 'public', table: 'zeta_conversation_log', filter: `project_id=eq.${projectId}` },
         (payload: any) => {
           const r = payload.new;
-          const role = (r.role ?? (r.sender ? String(r.sender).toLowerCase() : 'assistant')) as 'user' | 'assistant';
+          const role = (r.role ??
+            (r.sender ? String(r.sender).toLowerCase() : 'assistant')) as 'user' | 'assistant';
           const message = r.message ?? r.content ?? r.text ?? '';
-          const when = r.timestamp ?? r.created_at ?? r.inserted_at ?? new Date().toISOString();
+          const when =
+            r.timestamp ?? r.created_at ?? r.inserted_at ?? new Date().toISOString();
 
           setLive((prev) => {
-            const row = { id: r.id, role, message, timestamp: when, source: 'live' as const };
+            const row = {
+              id: r.id,
+              role,
+              message,
+              timestamp: when,
+              source: 'live' as const,
+            };
             const idx = prev.findIndex((x) => String(x.id) === String(r.id));
             if (idx === -1) return [...prev, row];
-            const cp = prev.slice(); cp[idx] = { ...cp[idx], ...row }; return cp;
+            const cp = prev.slice();
+            cp[idx] = { ...cp[idx], ...row };
+            return cp;
           });
         }
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [projectId]);
 
   /* ---------- Outreach feed ---------- */
@@ -268,7 +337,9 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
         setOutreachLoaded(true);
       }
     })();
-    return () => { canceled = true; };
+    return () => {
+      canceled = true;
+    };
   }, [projectId]);
 
   useEffect(() => {
@@ -281,12 +352,20 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
           const r = payload.new;
           setOutreach((prev) => [
             ...prev,
-            { id: r.id, role: 'assistant', message: r.message, timestamp: r.created_at, source: 'outreach' as const },
+            {
+              id: r.id,
+              role: 'assistant',
+              message: r.message,
+              timestamp: r.created_at,
+              source: 'outreach' as const,
+            },
           ]);
         }
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [projectId]);
 
   /* ---------- user_input_log fetch + realtime ---------- */
@@ -307,7 +386,8 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
             id: `uil-${r.id}`,
             role: 'user',
             message: r.content,
-            timestamp: r.timestamp ?? r.created_at ?? new Date().toISOString(),
+            timestamp:
+              r.timestamp ?? r.created_at ?? new Date().toISOString(),
             source: 'user_input_log' as const,
           }))
         );
@@ -327,7 +407,8 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
               id: `uil-${r.id}`,
               role: 'user',
               message: r.content,
-              timestamp: r.timestamp ?? r.created_at ?? new Date().toISOString(),
+              timestamp:
+                r.timestamp ?? r.created_at ?? new Date().toISOString(),
               source: 'user_input_log' as const,
             },
           ]);
@@ -366,104 +447,117 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
   /* ---------- Combine feeds ---------- */
   const combined = useMemo(() => {
-    const base = (Array.isArray(messagesProp) ? messagesProp : []).map((m) => ({ ...m, source: 'base' as const }));
+    const base = (Array.isArray(messagesProp) ? messagesProp : []).map((m) => ({
+      ...m,
+      source: 'base' as const,
+    }));
     const merged = [...base, ...outreach, ...live, ...userInputs, ...optimistic];
 
     const out: any[] = [];
     const byId = new Map<string, number>();
 
     const sourcePriority: Record<string, number> = {
-      live: 4, base: 3, user_input_log: 2, outreach: 1, optimistic: 0,
+      live: 4,
+      base: 3,
+      user_input_log: 2,
+      outreach: 1,
+      optimistic: 0,
     };
     const roleRank = (r?: string) => (r === 'user' ? 0 : r === 'assistant' ? 1 : 2);
 
     const pushOrMerge = (m: any) => {
-  const id = m?.id && String(m.id);
-  const role = m?.role ?? 'assistant';
-  const text = normText(getMsgContent(m));
-  const time = toDateOrNow(m).getTime();
-  const src = m?.source ?? 'base';
+      const id = m?.id && String(m.id);
+      const role = m?.role ?? 'assistant';
+      const text = normText(getMsgContent(m));
+      const time = toDateOrNow(m).getTime();
+      const src = m?.source ?? 'base';
 
-  const hasRealId = !!id && !id.startsWith('temp-') && !id.startsWith('uil-');
+      const hasRealId = !!id && !id.startsWith('temp-') && !id.startsWith('uil-');
 
-  // If we already have this real DB row by id, just merge into it.
-  if (id && hasRealId) {
-    const existingIndex = byId.get(id);
-    if (existingIndex != null) {
-      out[existingIndex] = { ...out[existingIndex], ...m };
-      return;
-    }
-  }
+      // If we already have this real DB row by id, just merge into it.
+      if (id && hasRealId) {
+        const existingIndex = byId.get(id);
+        if (existingIndex != null) {
+          out[existingIndex] = { ...out[existingIndex], ...m };
+          return;
+        }
+      }
 
-  // Only collapse by text/time when at least one side is NOT a real DB row.
-  const idx = out.findIndex((u) => {
-    const uId = u?.id && String(u.id);
-    const uHasRealId =
-      !!uId && !uId.startsWith('temp-') && !uId.startsWith('uil-');
+      // Only collapse by text/time when at least one side is NOT a real DB row.
+      const idx = out.findIndex((u) => {
+        const uId = u?.id && String(u.id);
+        const uHasRealId =
+          !!uId && !uId.startsWith('temp-') && !uId.startsWith('uil-');
 
-    // If both have real, different IDs, treat them as separate messages.
-    if (hasRealId && uHasRealId && uId !== id) return false;
+        // If both have real, different IDs, treat them as separate messages.
+        if (hasRealId && uHasRealId && uId !== id) return false;
 
-    return (
-      (u?.role ?? 'assistant') === role &&
-      normText(getMsgContent(u)) === text &&
-      Math.abs(toDateOrNow(u).getTime() - time) < 120000
-    );
-  });
+        return (
+          (u?.role ?? 'assistant') === role &&
+          normText(getMsgContent(u)) === text &&
+          Math.abs(toDateOrNow(u).getTime() - time) < 120000
+        );
+      });
 
-  if (idx === -1) {
-    const newIndex = out.push(m) - 1;
-    if (id && hasRealId) byId.set(id, newIndex);
-    return;
-  }
+      if (idx === -1) {
+        const newIndex = out.push(m) - 1;
+        if (id && hasRealId) byId.set(id, newIndex);
+        return;
+      }
 
-  const existing = out[idx];
-  const existingHasRealId =
-    !!existing?.id &&
-    !String(existing.id).startsWith('temp-') &&
-    !String(existing.id).startsWith('uil-');
-  const existingTime = toDateOrNow(existing).getTime();
-  const existingSrc = existing?.source ?? 'base';
+      const existing = out[idx];
+      const existingHasRealId =
+        !!existing?.id &&
+        !String(existing.id).startsWith('temp-') &&
+        !String(existing.id).startsWith('uil-');
+      const existingTime = toDateOrNow(existing).getTime();
+      const existingSrc = existing?.source ?? 'base';
 
-  const incomingWins =
-    (!existingHasRealId && hasRealId) ||
-    time > existingTime ||
-    (time === existingTime &&
-      (sourcePriority[src] ?? 0) > (sourcePriority[existingSrc] ?? 0));
+      const incomingWins =
+        (!existingHasRealId && hasRealId) ||
+        time > existingTime ||
+        (time === existingTime &&
+          (sourcePriority[src] ?? 0) > (sourcePriority[existingSrc] ?? 0));
 
-  if (incomingWins) {
-    out[idx] = m;
-    if (id && hasRealId) byId.set(id, idx);
-  }
-};
+      if (incomingWins) {
+        out[idx] = m;
+        if (id && hasRealId) byId.set(id, idx);
+      }
+    };
     merged.forEach(pushOrMerge);
 
-  out.sort((a, b) => {
-  const ta = toDateOrNow(a).getTime();
-  const tb = toDateOrNow(b).getTime();
-  const pa = sourcePriority[a?.source ?? 'base'] ?? 0;
-  const pb = sourcePriority[b?.source ?? 'base'] ?? 0;
+    out.sort((a, b) => {
+      const ta = toDateOrNow(a).getTime();
+      const tb = toDateOrNow(b).getTime();
+      const pa = sourcePriority[a?.source ?? 'base'] ?? 0;
+      const pb = sourcePriority[b?.source ?? 'base'] ?? 0;
 
-  // 1) Primary: chronological order
-  if (ta !== tb) return ta - tb;
+      // 1) Primary: chronological order
+      if (ta !== tb) return ta - tb;
 
-  // 2) Same exact timestamp: prefer user before assistant
-  const rr = roleRank(a?.role) - roleRank(b?.role); // user(0) < assistant(1)
-  if (rr !== 0) return rr;
+      // 2) Same exact timestamp: prefer user before assistant
+      const rr = roleRank(a?.role) - roleRank(b?.role); // user(0) < assistant(1)
+      if (rr !== 0) return rr;
 
-  // 3) Then more "authoritative" source
-  if (pa !== pb) return pa - pb;
+      // 3) Then more "authoritative" source
+      if (pa !== pb) return pa - pb;
 
-  // 4) Finally, stable-ish tie-breaker on having a real DB id
-  const aIdReal =
-    !!a?.id && !String(a.id).startsWith('temp-') && !String(a.id).startsWith('uil-') ? 1 : 0;
-  const bIdReal =
-    !!b?.id && !String(b.id).startsWith('temp-') && !String(b.id).startsWith('uil-') ? 1 : 0;
+      // 4) Finally, stable-ish tie-breaker on having a real DB id
+      const aIdReal =
+        !!a?.id &&
+        !String(a.id).startsWith('temp-') &&
+        !String(a.id).startsWith('uil-')
+          ? 1
+          : 0;
+      const bIdReal =
+        !!b?.id &&
+        !String(b.id).startsWith('temp-') &&
+        !String(b.id).startsWith('uil-')
+          ? 1
+          : 0;
 
-  return aIdReal - bIdReal;
-});
-
-
+      return aIdReal - bIdReal;
+    });
 
     return out;
   }, [messagesProp, outreach, live, userInputs, optimistic]);
@@ -471,7 +565,9 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
   /* ---------- attachments ---------- */
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [library, setLibrary] = useState<Array<{ id: string; file_name: string; file_url: string; created_at?: string }>>([]);
+  const [library, setLibrary] = useState<
+    Array<{ id: string; file_name: string; file_url: string; created_at?: string }>
+  >([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState('');
   const [selectedDocs, setSelectedDocs] = useState<Uploaded[]>([]);
@@ -493,7 +589,9 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     setLibraryLoading(false);
   };
 
-  useEffect(() => { if (libraryOpen) void refreshLibrary(); }, [libraryOpen]); // eslint-disable-line
+  useEffect(() => {
+    if (libraryOpen) void refreshLibrary();
+  }, [libraryOpen]); // eslint-disable-line
 
   const filteredLibrary = useMemo(() => {
     const q = libraryQuery.trim().toLowerCase();
@@ -516,11 +614,15 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
       const uploaded: Uploaded[] = [];
       for (const f of attachedFiles) {
         const path = `${projectId}/${Date.now()}_${encodeURIComponent(f.name)}`;
-        const { error: upErr } = await supabase.storage.from('project-docs').upload(path, f, { cacheControl: '3600', upsert: false });
+        const { error: upErr } = await supabase.storage
+          .from('project-docs')
+          .upload(path, f, { cacheControl: '3600', upsert: false });
         if (upErr) throw upErr;
         const { data: pub } = supabase.storage.from('project-docs').getPublicUrl(path);
         const file_url = pub?.publicUrl ?? '';
-        const { error: insErr } = await supabase.from('documents').insert({ project_id: projectId, file_name: f.name, file_url });
+        const { error: insErr } = await supabase
+          .from('documents')
+          .insert({ project_id: projectId, file_name: f.name, file_url });
         if (insErr) throw insErr;
         uploaded.push({ file_name: f.name, file_url });
       }
@@ -538,19 +640,21 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
   useEffect(() => {
     if (!uiLoading || !lastSendAtRef.current) return;
-    const lastAssistant = [...combined].reverse().find(m => m.role === 'assistant');
+    const lastAssistant = [...combined].reverse().find((m) => m.role === 'assistant');
     const ts = lastAssistant ? toDateOrNow(lastAssistant).getTime() : 0;
-    if (ts && ts >= (lastSendAtRef.current - 1000)) {
+    if (ts && ts >= lastSendAtRef.current - 1000) {
       setUiLoading(false);
       lastSendAtRef.current = null;
-      if (uiLoadingTimerRef.current) { clearTimeout(uiLoadingTimerRef.current); uiLoadingTimerRef.current = null; }
+      if (uiLoadingTimerRef.current) {
+        clearTimeout(uiLoadingTimerRef.current);
+        uiLoadingTimerRef.current = null;
+      }
     }
   }, [combined, uiLoading]);
 
- const isLoading = Boolean(loading || uiLoading);
+  const isLoading = Boolean(loading || uiLoading);
 
   /* ---------- input / send ---------- */
-  
 
   const handleSend = async () => {
     const userText = normText(props.input ?? '');
@@ -575,11 +679,15 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     if (userText && !parentEcho) {
       setOptimistic((prev) => [
         ...prev,
-        { id: `temp-${Date.now()}`, role: 'user', message: userText, timestamp: new Date().toISOString(), source: 'optimistic' as const },
+        {
+          id: `temp-${Date.now()}`,
+          role: 'user',
+          message: userText,
+          timestamp: new Date().toISOString(),
+          source: 'optimistic' as const,
+        },
       ]);
     }
-
-    
 
     // Start local loading + timeout failsafe
     setUiLoading(true);
@@ -592,7 +700,9 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
 
     try {
       const allAttachments = [...selectedDocs, ...uploaded];
-      await sendMessage(allAttachments.length ? { attachments: allAttachments, verbosity } : { verbosity });
+      await sendMessage(
+        allAttachments.length ? { attachments: allAttachments, verbosity } : { verbosity }
+      );
       setSelectedDocs([]);
       setInput('');
 
@@ -604,19 +714,40 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     } catch {
       setUiLoading(false);
       lastSendAtRef.current = null;
-      if (uiLoadingTimerRef.current) { clearTimeout(uiLoadingTimerRef.current); uiLoadingTimerRef.current = null; }
+      if (uiLoadingTimerRef.current) {
+        clearTimeout(uiLoadingTimerRef.current);
+        uiLoadingTimerRef.current = null;
+      }
     }
   };
 
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') { e.preventDefault(); handleSend(); }
-    else { handleKeyDown(e); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSend();
+    } else {
+      handleKeyDown(e);
+    }
   };
 
   const togglePinMessage = (msg: any) => {
-    const key = `${normText(getMsgContent(msg))}|${toDateOrNow(msg).getTime()}|${msg?.role ?? ''}`;
-    const isPinned = pinnedMessages.some((m) => `${normText(getMsgContent(m))}|${toDateOrNow(m).getTime()}|${m?.role ?? ''}` === key);
-    setPinnedMessages((prev) => (isPinned ? prev.filter((m) => `${normText(getMsgContent(m))}|${toDateOrNow(m).getTime()}|${m?.role ?? ''}` !== key) : [...prev, msg]));
+    const key = `${normText(getMsgContent(msg))}|${toDateOrNow(msg).getTime()}|${
+      msg?.role ?? ''
+    }`;
+    const isPinned = pinnedMessages.some(
+      (m) =>
+        `${normText(getMsgContent(m))}|${toDateOrNow(m).getTime()}|${m?.role ?? ''}` === key
+    );
+    setPinnedMessages((prev) =>
+      isPinned
+        ? prev.filter(
+            (m) =>
+              `${normText(getMsgContent(m))}|${toDateOrNow(m).getTime()}|${
+                m?.role ?? ''
+              }` !== key
+          )
+        : [...prev, msg]
+    );
   };
 
   /* ---------- Today filter ---------- */
@@ -625,22 +756,54 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     if (chatView === 'pinned') return pinnedMessages;
     if (chatView === 'all') return combined;
 
-    const todayList = combined.filter((m) => sameDayInTZ(toDateOrNow(m), now, projectTZ));
+    const todayList = combined.filter((m) =>
+      sameDayInTZ(toDateOrNow(m), now, projectTZ)
+    );
     return todayList.length ? todayList : combined.slice(-200);
   }, [chatView, pinnedMessages, combined, projectTZ, now.getTime()]);
 
   /* ---------- Derived rows (messages + typing) ---------- */
-const rows = useMemo(() => {
-  // Never show the "Zeta is thinking" bubble during a manual refresh
-  if (refreshing) return displayedMessages;
+  const rows = useMemo(() => {
+    // Never show the "Zeta is thinking" bubble during a manual refresh
+    if (refreshing) return displayedMessages;
 
-  return isLoading
-    ? [...displayedMessages, { __type: 'typing' as const }]
-    : displayedMessages;
-}, [displayedMessages, isLoading, refreshing]);
+    return isLoading
+      ? [...displayedMessages, { __type: 'typing' as const }]
+      : displayedMessages;
+  }, [displayedMessages, isLoading, refreshing]);
 
   /* ---------- follow-to-bottom behavior ---------- */
 
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const prevRowsLenRef = useRef(0);
+
+  useEffect(() => {
+    const v = virtuosoRef.current;
+    if (!v) return;
+
+    const count = rows.length;
+
+    if (count === 0) {
+      prevRowsLenRef.current = 0;
+      return;
+    }
+
+    const wasEmpty = prevRowsLenRef.current === 0;
+    const grew = count > prevRowsLenRef.current;
+
+    // Auto-stick to bottom:
+    // - on first load (wasEmpty)
+    // - whenever list grows AND we were already at bottom
+    if ((wasEmpty || (grew && isAtBottom))) {
+      v.scrollToIndex({
+        index: count - 1,
+        align: 'end',
+        behavior: wasEmpty ? 'auto' : 'smooth',
+      });
+    }
+
+    prevRowsLenRef.current = count;
+  }, [rows.length, isAtBottom, rows, virtuosoRef]);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -680,7 +843,9 @@ const rows = useMemo(() => {
           <select
             className="ml-2 px-2 py-1 rounded bg-blue-900 border border-blue-500 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
             value={fontSize}
-            onChange={(e) => setFontSize(e.target.value as 'sm' | 'base' | 'lg')}
+            onChange={(e) =>
+              setFontSize(e.target.value as 'sm' | 'base' | 'lg')
+            }
           >
             <option value="sm">Small</option>
             <option value="base">Medium</option>
@@ -694,7 +859,9 @@ const rows = useMemo(() => {
         <button
           onClick={() => setChatHidden(!chatHidden)}
           className={`text-xs text-white px-3 py-1 rounded-md transition ${
-            chatHidden ? 'bg-green-600 hover:bg-green-700' : 'bg-black hover:bg-gray-800'
+            chatHidden
+              ? 'bg-green-600 hover:bg-green-700'
+              : 'bg-black hover:bg-gray-800'
           }`}
         >
           {chatHidden ? 'Show Chat' : 'Hide Chat'}
@@ -706,21 +873,23 @@ const rows = useMemo(() => {
         {!chatHidden && (
           <div className="flex-1 min-h-0 overflow-hidden">
             <Virtuoso
-  ref={virtuosoRef}
-  style={{ height: '100%' }}
-  totalCount={rows.length}
-  followOutput="auto"        // let Virtuoso handle sticking to bottom when new rows appear
-  atBottomThreshold={120}
-  increaseViewportBy={{ top: 120, bottom: 240 }}
-  overscan={120}
-  components={{ Scroller: StableScroller, Footer: FooterSpacer }}
+              ref={virtuosoRef}
+              style={{ height: '100%' }}
+              totalCount={rows.length}
+              atBottomThreshold={120}
+              increaseViewportBy={{ top: 120, bottom: 240 }}
+              overscan={120}
+              atBottomStateChange={setIsAtBottom}
+              components={{ Scroller: StableScroller, Footer: FooterSpacer }}
               computeItemKey={(index) => {
                 const r = (rows as any[])[index];
                 if (r?.__type === 'typing') return 'typing-row';
                 const m = r;
                 const key =
                   m?.id ??
-                  `${(normalizeToDate(rawTs(m)) ?? new Date()).getTime()}|${m?.role ?? 'norole'}|${index}|${normText(getMsgContent(m)).slice(0, 32)}`;
+                  `${(normalizeToDate(rawTs(m)) ?? new Date()).getTime()}|${
+                    m?.role ?? 'norole'
+                  }|${index}|${normText(getMsgContent(m)).slice(0, 32)}`;
                 return key;
               }}
               itemContent={(index) => {
@@ -738,23 +907,42 @@ const rows = useMemo(() => {
                 // Normal message
                 const msg = r;
                 const contentRaw = getMsgContent(msg);
-                const latestAssistantIndex = [...displayedMessages].reverse().findIndex((m) => m.role === 'assistant' && getMsgContent(m));
-                const isLatestAssistant = index === rows.length - 1 - latestAssistantIndex - (isLoading ? 1 : 0);
+                const latestAssistantIndex = [...displayedMessages]
+                  .reverse()
+                  .findIndex(
+                    (m) =>
+                      m.role === 'assistant' && getMsgContent(m)
+                  );
+                const isLatestAssistant =
+                  index ===
+                  rows.length -
+                    1 -
+                    latestAssistantIndex -
+                    (isLoading ? 1 : 0);
 
-                if (isLatestAssistant && msg.role === 'assistant' && contentRaw) {
+                if (
+                  isLatestAssistant &&
+                  msg.role === 'assistant' &&
+                  contentRaw
+                ) {
                   const formatted = formatMathMarkdown(contentRaw);
                   const formatCounts = detectLatexFormats(formatted);
                   console.log('📐 Latex formats:', formatCounts);
                 }
 
-                const bubbleCommon = 'relative max-w-[85%] break-words shadow-md rounded-2xl border transition';
+                const bubbleCommon =
+                  'relative max-w-[85%] break-words shadow-md rounded-2xl border transition';
                 const bubbleByRole = isUserish(msg)
                   ? 'ml-auto bg-gradient-to-br from-blue-200 to-blue-100 border-blue-300 text-blue-900'
                   : 'bg-gradient-to-br from-yellow-300 to-yellow-100 border-yellow-400 text-slate-900';
 
                 return (
                   <div className="mb-5 md:mb-6">
-                    <div className={`${bubbleCommon} ${bubbleByRole} ${textScale(fontSize)} p-4 pb-6`}>
+                    <div
+                      className={`${bubbleCommon} ${bubbleByRole} ${textScale(
+                        fontSize
+                      )} p-4 pb-6`}
+                    >
                       <button
                         onClick={() => togglePinMessage(msg)}
                         className="absolute top-1 right-2 text-[11px] text-gray-400 hover:text-yellow-500"
@@ -764,13 +952,28 @@ const rows = useMemo(() => {
                       </button>
 
                       {msg.role === 'assistant' ? (
-                        <div className={`prose ${proseScale(fontSize)} prose-headings:font-semibold prose-p:my-3 max-w-none text-slate-900`}>
-                          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                        <div
+                          className={`prose ${proseScale(
+                            fontSize
+                          )} prose-headings:font-semibold prose-p:my-3 max-w-none text-slate-900`}
+                        >
+                          <ReactMarkdown
+                            remarkPlugins={[remarkMath]}
+                            rehypePlugins={[rehypeKatex]}
+                          >
                             {formatMathMarkdown(contentRaw)}
                           </ReactMarkdown>
                         </div>
                       ) : (
-                        <div className={`prose ${proseScale(fontSize)} prose-p:my-3 max-w-none ${isUserish(msg) ? 'text-blue-900' : 'text-slate-900'}`}>
+                        <div
+                          className={`prose ${proseScale(
+                            fontSize
+                          )} prose-p:my-3 max-w-none ${
+                            isUserish(msg)
+                              ? 'text-blue-900'
+                              : 'text-slate-900'
+                          }`}
+                        >
                           <ReactMarkdown>{contentRaw}</ReactMarkdown>
                         </div>
                       )}
@@ -795,9 +998,20 @@ const rows = useMemo(() => {
         {selectedDocs.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
             {selectedDocs.map((d) => (
-              <span key={d.file_url} className="text-xs bg-blue-700 text-white/90 px-2 py-1 rounded-lg flex items-center gap-2">
-                <span className="truncate max-w-[220px]">{d.file_name}</span>
-                <button onClick={() => removeSelectedDoc(d.file_url)} className="px-1 rounded hover:bg-blue-600" title="Remove">✖</button>
+              <span
+                key={d.file_url}
+                className="text-xs bg-blue-700 text-white/90 px-2 py-1 rounded-lg flex items-center gap-2"
+              >
+                <span className="truncate max-w-[220px]">
+                  {d.file_name}
+                </span>
+                <button
+                  onClick={() => removeSelectedDoc(d.file_url)}
+                  className="px-1 rounded hover:bg-blue-600"
+                  title="Remove"
+                >
+                  ✖
+                </button>
               </span>
             ))}
           </div>
@@ -805,11 +1019,34 @@ const rows = useMemo(() => {
 
         <div className="flex items-center gap-2 relative">
           {/* Attach from library */}
-          <button onClick={() => setLibraryOpen(true)} className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm" title="Attach files">📎</button>
+          <button
+            onClick={() => setLibraryOpen(true)}
+            className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm"
+            title="Attach files"
+          >
+            📎
+          </button>
 
           {/* Upload new */}
-          <button onClick={() => fileInputRef.current?.click()} className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm" title="Upload new file">⬆️</button>
-          <input ref={fileInputRef} type="file" multiple onChange={(e) => setAttachedFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])])} className="hidden" />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm"
+            title="Upload new file"
+          >
+            ⬆️
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={(e) =>
+              setAttachedFiles((prev) => [
+                ...prev,
+                ...Array.from(e.target.files ?? []),
+              ])
+            }
+            className="hidden"
+          />
 
           {/* Emoji */}
           <EmojiButton inputRef={inputRef} setInput={setInput} />
@@ -835,18 +1072,30 @@ const rows = useMemo(() => {
         </div>
 
         {attachedFiles.length > 0 && (
-          <div className="mt-2 text-xs text-blue-100">Pending upload: {attachedFiles.map((f) => f.name).join(', ')}</div>
+          <div className="mt-2 text-xs text-blue-100">
+            Pending upload: {attachedFiles.map((f) => f.name).join(', ')}
+          </div>
         )}
       </div>
 
       {/* Library modal */}
       {libraryOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setLibraryOpen(false)} />
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setLibraryOpen(false)}
+          />
           <div className="relative bg-blue-950 border border-blue-700 rounded-2xl shadow-2xl w-[min(780px,92vw)] max-h-[80vh] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-blue-800">
-              <div className="text-white font-semibold">Attach files from Library</div>
-              <button onClick={() => setLibraryOpen(false)} className="text-blue-200 hover:text-white text-sm">Close</button>
+              <div className="text-white font-semibold">
+                Attach files from Library
+              </div>
+              <button
+                onClick={() => setLibraryOpen(false)}
+                className="text-blue-200 hover:text-white text-sm"
+              >
+                Close
+              </button>
             </div>
 
             <div className="p-4">
@@ -857,14 +1106,24 @@ const rows = useMemo(() => {
                   placeholder="Search files…"
                   className="flex-1 bg-blue-900/60 text-blue-100 border border-blue-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <button onClick={() => { setLibraryQuery(''); refreshLibrary(); }} className="text-sm bg-blue-800 text-white px-3 py-2 rounded-lg border border-blue-700 hover:bg-blue-700">Refresh</button>
+                <button
+                  onClick={() => {
+                    setLibraryQuery('');
+                    refreshLibrary();
+                  }}
+                  className="text-sm bg-blue-800 text-white px-3 py-2 rounded-lg border border-blue-700 hover:bg-blue-700"
+                >
+                  Refresh
+                </button>
               </div>
 
               <div className="overflow-auto max-h-[48vh] rounded-lg border border-blue-800">
                 {libraryLoading ? (
                   <div className="p-6 text-blue-200 text-sm">Loading…</div>
                 ) : filteredLibrary.length === 0 ? (
-                  <div className="p-6 text-blue-300 text-sm">No files found.</div>
+                  <div className="p-6 text-blue-300 text-sm">
+                    No files found.
+                  </div>
                 ) : (
                   <table className="w-full text-sm text-blue-100">
                     <thead className="bg-blue-900/60 sticky top-0">
@@ -876,20 +1135,37 @@ const rows = useMemo(() => {
                     </thead>
                     <tbody>
                       {filteredLibrary.map((doc) => {
-                        const already = selectedDocs.some((d) => d.file_url === doc.file_url);
+                        const already = selectedDocs.some(
+                          (d) => d.file_url === doc.file_url
+                        );
                         return (
-                          <tr key={doc.id} className="odd:bg-blue-900/20">
+                          <tr
+                            key={doc.id}
+                            className="odd:bg-blue-900/20"
+                          >
                             <td className="px-3 py-2">
                               <button
                                 onClick={() => addSelectedDoc(doc)}
                                 disabled={already}
-                                className={`px-2 py-1 rounded ${already ? 'bg-green-800/40 text-green-300 cursor-not-allowed' : 'bg-blue-800 hover:bg-blue-700 text-white'}`}
+                                className={`px-2 py-1 rounded ${
+                                  already
+                                    ? 'bg-green-800/40 text-green-300 cursor-not-allowed'
+                                    : 'bg-blue-800 hover:bg-blue-700 text-white'
+                                }`}
                               >
                                 {already ? 'Added' : 'Add'}
                               </button>
                             </td>
-                            <td className="px-3 py-2 truncate">{doc.file_name}</td>
-                            <td className="px-3 py-2">{doc.created_at ? new Date(doc.created_at).toLocaleString() : '—'}</td>
+                            <td className="px-3 py-2 truncate">
+                              {doc.file_name}
+                            </td>
+                            <td className="px-3 py-2">
+                              {doc.created_at
+                                ? new Date(
+                                    doc.created_at
+                                  ).toLocaleString()
+                                : '—'}
+                            </td>
                           </tr>
                         );
                       })}
@@ -901,12 +1177,27 @@ const rows = useMemo(() => {
               <div className="mt-3 flex items-center justify-between">
                 <div className="flex flex-wrap gap-2">
                   {selectedDocs.map((d) => (
-                    <span key={d.file_url} className="text-[11px] bg-blue-800 text-blue-100 px-2 py-1 rounded-md">{d.file_name}</span>
+                    <span
+                      key={d.file_url}
+                      className="text-[11px] bg-blue-800 text-blue-100 px-2 py-1 rounded-md"
+                    >
+                      {d.file_name}
+                    </span>
                   ))}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => setSelectedDocs([])} className="text-sm px-3 py-2 rounded-lg bg-blue-900 border border-blue-700 text-blue-200 hover:bg-blue-800">Clear</button>
-                  <button onClick={() => setLibraryOpen(false)} className="text-sm px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Done</button>
+                  <button
+                    onClick={() => setSelectedDocs([])}
+                    className="text-sm px-3 py-2 rounded-lg bg-blue-900 border border-blue-700 text-blue-200 hover:bg-blue-800"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => setLibraryOpen(false)}
+                    className="text-sm px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    Done
+                  </button>
                 </div>
               </div>
             </div>
@@ -971,14 +1262,22 @@ function EmojiButton({
   };
 
   return (
-    <div className="relative" data-emoji-root ref={btnWrapRef}>
+    <div
+      className="relative"
+      data-emoji-root
+      ref={btnWrapRef}
+    >
       <button
         type="button"
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
         className="bg-blue-800 text-white px-2 py-2 rounded-xl shadow hover:bg-blue-700 transition text-sm"
         title="Emoji"
       >
-        🙂</button>
+        🙂
+      </button>
 
       {open && (
         <div
@@ -1002,7 +1301,9 @@ function EmojiButton({
               </button>
             ))}
           </div>
-          <div className="text-[10px] text-blue-300 mt-2 px-1">Click an emoji to insert at cursor</div>
+          <div className="text-[10px] text-blue-300 mt-2 px-1">
+            Click an emoji to insert at cursor
+          </div>
         </div>
       )}
     </div>
@@ -1017,12 +1318,23 @@ function TypingBubble() {
         <div className="flex items-center gap-2 text-[15px]">
           <span className="font-medium">Zeta is thinking</span>
           <span className="inline-flex items-end gap-1 ml-1 h-[1em]">
-            <span className="typing-dot" style={{ animationDelay: '0ms' }} />
-            <span className="typing-dot" style={{ animationDelay: '120ms' }} />
-            <span className="typing-dot" style={{ animationDelay: '240ms' }} />
+            <span
+              className="typing-dot"
+              style={{ animationDelay: '0ms' }}
+            />
+            <span
+              className="typing-dot"
+              style={{ animationDelay: '120ms' }}
+            />
+            <span
+              className="typing-dot"
+              style={{ animationDelay: '240ms' }}
+            />
           </span>
         </div>
-        <div className="absolute bottom-2 right-2 text-[10px] text-gray-500 select-none">…</div>
+        <div className="absolute bottom-2 right-2 text-[10px] text-gray-500 select-none">
+          …
+        </div>
 
         <style jsx>{`
           .typing-dot {
@@ -1035,10 +1347,22 @@ function TypingBubble() {
             transform-origin: center;
           }
           @keyframes zeta-bounce-dot {
-            0%, 80%, 100% { transform: translateY(0); opacity: 0.7; }
-            40%           { transform: translateY(-6px); opacity: 1; }
+            0%,
+            80%,
+            100% {
+              transform: translateY(0);
+              opacity: 0.7;
+            }
+            40% {
+              transform: translateY(-6px);
+              opacity: 1;
+            }
           }
-          @media (prefers-reduced-motion: reduce) { .typing-dot { animation: none; } }
+          @media (prefers-reduced-motion: reduce) {
+            .typing-dot {
+              animation: none;
+            }
+          }
         `}</style>
       </div>
     </div>
