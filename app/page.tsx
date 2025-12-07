@@ -8,6 +8,8 @@ import Header from '@/components/Header';
 import { supabase } from '@/lib/supabaseClient';
 import { getPlanFromUser, PLAN_LIMIT, type Plan } from '@/lib/plan';
 import { PlanTag } from '@/components/ui/ZetaPremiumMark';
+import Footer from '@/components/Footer';
+
 
 // Optional XP utils. Falls back gracefully if not present.
 let getXPProgress: ((xp: number) => any) | undefined;
@@ -699,19 +701,18 @@ export default function HomePage() {
           </div>
         </section>
 
-        <footer className="mt-20 px-4 py-6 text-center text-sm text-slate-300">
-          © {new Date().getFullYear()} Pantheon. All rights reserved.
-        </footer>
+              
 
-        {/* 🔒 Overlay: any click anywhere sends to /login */}
+        {/* 🔒 Overlay: click anywhere in main area → /login (footer left clickable) */}
         <div
-          className="fixed inset-0 z-50 cursor-pointer"
+          className="fixed left-0 right-0 top-0 bottom-24 z-50 cursor-pointer"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
             router.push('/login');
           }}
         />
+
       </main>
     );
   }
@@ -979,9 +980,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="mt-16 px-4 py-6 text-center text-sm text-slate-300">
-        © {new Date().getFullYear()} Pantheon. All rights reserved.
-      </footer>
+       
     </main>
   );
 }
+
