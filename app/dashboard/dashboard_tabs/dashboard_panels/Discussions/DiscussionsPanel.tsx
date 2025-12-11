@@ -56,16 +56,17 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
     setLoading(false);
   }
 
-  // add after refreshList():
-useEffect(() => {
-  const open = (new URLSearchParams(window.location.search)).get('open');
-  if (!open || discussions.length === 0) return;
-  const d = discussions.find(x => x.thread_id === open);
-  if (d) setSelected(d);
-}, [discussions]);
+  useEffect(() => {
+    void refreshList();
+  }, [projectId]);
 
-
-  useEffect(() => { void refreshList(); }, [projectId]);
+  // open discussion via ?open=<thread_id>
+  useEffect(() => {
+    const open = new URLSearchParams(window.location.search).get('open');
+    if (!open || discussions.length === 0) return;
+    const d = discussions.find((x) => x.thread_id === open);
+    if (d) setSelected(d);
+  }, [discussions]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -77,7 +78,9 @@ useEffect(() => {
         () => void refreshList()
       )
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, [projectId]);
 
   /* ------------------------- helpers --------------------------- */
@@ -102,7 +105,9 @@ useEffect(() => {
     });
 
     let json: any = {};
-    try { json = await res.json(); } catch {}
+    try {
+      json = await res.json();
+    } catch {}
 
     if (!res.ok) {
       const msg = json?.error || `Failed to create discussion (HTTP ${res.status})`;
@@ -156,7 +161,10 @@ useEffect(() => {
   useEffect(() => {
     if (!projectId || bootHandled) return;
     const seed = seedFromQuery;
-    if (!seed) { setBootHandled(true); return; }
+    if (!seed) {
+      setBootHandled(true);
+      return;
+    }
 
     (async () => {
       if (discussions.length >= MAX_DISCUSSIONS) {
@@ -169,7 +177,9 @@ useEffect(() => {
       try {
         // seed is JSON: { notification, firstUser, title }
         let parsed: { notification?: string; firstUser?: string; title?: string } = {};
-        try { parsed = JSON.parse(seed); } catch {}
+        try {
+          parsed = JSON.parse(seed);
+        } catch {}
 
         const notif = (parsed.notification || '').trim();
         const firstUser = (parsed.firstUser || '').trim();
@@ -178,7 +188,7 @@ useEffect(() => {
         const threadId = await createDiscussionRow({
           title,
           initialAssistant: notif || undefined, // FIRST outgoing message from Zeta
-          initialUser: firstUser || undefined,  // Your mini-chat reply
+          initialUser: firstUser || undefined, // Your mini-chat reply
         });
 
         if (threadId) {
@@ -215,7 +225,12 @@ useEffect(() => {
       .channel(`realtime_discussion_${selected.thread_id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'discussion_messages', filter: `thread_id=eq.${selected.thread_id}` },
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'discussion_messages',
+          filter: `thread_id=eq.${selected.thread_id}`,
+        },
         (payload) => {
           const row = payload.new as Msg;
           setMessages((prev) => {
@@ -227,10 +242,14 @@ useEffect(() => {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, [selected?.thread_id]);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, sending]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, sending]);
 
   async function pollAssistantOnce(threadId: string, sinceIso: string): Promise<Msg | null> {
     const { data } = await supabase
@@ -251,7 +270,13 @@ useEffect(() => {
       const thread_id = selected?.thread_id || '';
       return [
         ...prev,
-        { id: `assistant-${Date.now()}`, thread_id, role: 'assistant', content: text, created_at: new Date().toISOString() },
+        {
+          id: `assistant-${Date.now()}`,
+          thread_id,
+          role: 'assistant',
+          content: text,
+          created_at: new Date().toISOString(),
+        },
       ];
     });
   }
@@ -290,7 +315,10 @@ useEffect(() => {
       } else {
         for (let i = 0; i < 8; i++) {
           const hit = await pollAssistantOnce(selected.thread_id, sinceIso);
-          if (hit) { appendAssistantIfMissing(hit.content); break; }
+          if (hit) {
+            appendAssistantIfMissing(hit.content);
+            break;
+          }
           await new Promise((r) => setTimeout(r, 800));
         }
       }
@@ -310,7 +338,9 @@ useEffect(() => {
   const atLimit = discussions.length >= MAX_DISCUSSIONS;
 
   return (
-    <div className={`h-full flex flex-col bg-gradient-to-b from-blue-950 to-blue-900 text-${fontSize} text-blue-100`}>
+    <div
+      className={`h-full min-h-0 flex flex-col bg-gradient-to-b from-blue-950 to-blue-900 text-${fontSize} text-blue-100`}
+    >
       {/* header */}
       <div className="sticky top-0 z-10 border-b border-white/10 bg-blue-950/70 backdrop-blur px-5 py-4">
         <div className="flex items-center justify-between">
@@ -318,7 +348,9 @@ useEffect(() => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setNotify(!notify)}
-              className={`rounded-lg px-3 py-2 text-sm ${notify ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-700'}`}
+              className={`rounded-lg px-3 py-2 text-sm ${
+                notify ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-700'
+              }`}
               title="Notifications toggle (UI only)"
             >
               {notify ? '🔔 On' : '🔕 Off'}
@@ -341,7 +373,11 @@ useEffect(() => {
                   const threadId = await createDiscussionRow({ title: 'New Discussion' });
                   if (threadId) {
                     await refreshList();
-                    setSelected({ thread_id: threadId, title: 'New Discussion', last_updated: new Date().toISOString() });
+                    setSelected({
+                      thread_id: threadId,
+                      title: 'New Discussion',
+                      last_updated: new Date().toISOString(),
+                    });
                     await loadMessages(threadId);
                   }
                 } finally {
@@ -351,7 +387,9 @@ useEffect(() => {
               }}
               disabled={creating || atLimit}
               title={atLimit ? `Limit ${MAX_DISCUSSIONS} reached` : 'Create new discussion'}
-              className={`rounded-lg px-3 py-2 shadow ${atLimit ? 'bg-blue-600/50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'} text-white`}
+              className={`rounded-lg px-3 py-2 shadow ${
+                atLimit ? 'bg-blue-600/50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+              } text-white`}
             >
               ➕ New
             </button>
@@ -361,15 +399,17 @@ useEffect(() => {
           <div className="mt-2 text-sm">
             {status && <span className="text-blue-200">{status}</span>}
             {error && <span className="text-red-300 ml-3">{error}</span>}
-            {atLimit && !error && <span className="text-yellow-300 ml-3">Max {MAX_DISCUSSIONS} discussions reached.</span>}
+            {atLimit && !error && (
+              <span className="text-yellow-300 ml-3">Max {MAX_DISCUSSIONS} discussions reached.</span>
+            )}
           </div>
         )}
       </div>
 
       {/* content: list + chat pane */}
-      <div className="flex-1 grid grid-cols-1 xl:grid-cols-2 gap-4 p-5">
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-4 p-5 overflow-hidden">
         {/* left */}
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto pr-1">
           {loading ? (
             <div className="space-y-3 animate-pulse">
               <div className="h-12 rounded-xl bg-blue-800/40" />
@@ -414,7 +454,17 @@ useEffect(() => {
 
         {/* right: phone-style chat */}
         <div className="flex flex-col items-center">
-          <div className="w-full max-w-sm h-[600px] rounded-2xl border border-blue-700/60 bg-blue-900/40 flex flex-col overflow-hidden shadow-lg">
+          <div
+            className="
+              w-full max-w-sm
+              flex-1
+              md:h-[600px]
+              max-h-[calc(100vh-230px)]
+              min-h-[320px]
+              rounded-2xl border border-blue-700/60
+              bg-blue-900/40 flex flex-col overflow-hidden shadow-lg
+            "
+          >
             {!selected ? (
               <div className="flex-1 grid place-items-center text-blue-300/80 p-6">
                 Select a discussion to open the conversation.
@@ -436,13 +486,20 @@ useEffect(() => {
                       {messages.map((msg) => {
                         const isUser = msg.role === 'user';
                         return (
-                          <div key={msg.id ?? `${msg.created_at}-${Math.random()}`} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                          <div
+                            key={msg.id ?? `${msg.created_at}-${Math.random()}`}
+                            className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                          >
                             <div
                               className={[
                                 'px-4 py-2 rounded-2xl shadow whitespace-pre-wrap leading-relaxed max-w-[75%]',
-                                isUser ? 'bg-purple-600 text-white rounded-br-none' : 'bg-blue-700 text-white rounded-bl-none',
+                                isUser
+                                  ? 'bg-purple-600 text-white rounded-br-none'
+                                  : 'bg-blue-700 text-white rounded-bl-none',
                               ].join(' ')}
-                              title={msg.created_at ? new Date(msg.created_at).toLocaleString() : ''}
+                              title={
+                                msg.created_at ? new Date(msg.created_at).toLocaleString() : ''
+                              }
                             >
                               {msg.content}
                             </div>
@@ -451,7 +508,9 @@ useEffect(() => {
                       })}
                       {sending && (
                         <div className="flex justify-start">
-                          <div className="bg-blue-700 text-white px-3 py-2 rounded-2xl rounded-bl-none animate-pulse">…</div>
+                          <div className="bg-blue-700 text-white px-3 py-2 rounded-2xl rounded-bl-none animate-pulse">
+                            …
+                          </div>
                         </div>
                       )}
                       <div ref={endRef} />
