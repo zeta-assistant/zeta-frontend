@@ -6,8 +6,6 @@ import { AVAILABLE_MODELS } from '@/lib/models';
 import {
   getCurrentStepPrompt,
   shouldUseOnboarding,
-  getNextOnboardingStep,
-  deriveOnboardingStatus,
   getSharedContext,
   type OnboardingKey,
 } from '@/lib/onboarding';
@@ -44,6 +42,22 @@ function stepIndexFromKey(step: OnboardingKey): number {
     case 'short_term_goals': return 3;
     case 'telegram': return 4;
     default: return 0;
+  }
+}
+
+// 🔹 map numeric onboarding_status (0–3) → logical step
+function stepFromStatus(status: number): OnboardingKey | null {
+  switch (status) {
+    case 0:
+      return 'vision';
+    case 1:
+      return 'long_term_goals';
+    case 2:
+      return 'short_term_goals';
+    case 3:
+      return 'telegram';
+    default:
+      return null; // 4+ ⇒ complete
   }
 }
 
@@ -374,7 +388,7 @@ export async function POST(req: Request) {
       await supabaseAdmin.from('threads').update({ last_active: nowISO }).eq('thread_id', threadId!);
     }
 
-    // onboarding state (prefer mainframe flag)
+    // onboarding state (prefer mainframe flag + status 0–4)
     const { data: mf } = await supabaseAdmin
       .from('mainframe_info')
       .select('onboarding_complete')
@@ -383,9 +397,24 @@ export async function POST(req: Request) {
 
     const mfComplete = mf?.onboarding_complete === true;
 
-    const statusNum = await deriveOnboardingStatus(projectId);
-    const onboardingActive = mfComplete ? false : await shouldUseOnboarding(projectId);
-    const nextStep = onboardingActive ? await getNextOnboardingStep(projectId) : null;
+    // keep mainframe flag in sync if status already 4+
+    if (projectOnboardingStatus >= 4 && !mfComplete) {
+      try {
+        await supabaseAdmin
+          .from('mainframe_info')
+          .update({ onboarding_complete: true })
+          .eq('project_id', projectId);
+      } catch (e) {
+        console.error('⚠️ failed to sync onboarding_complete from status>=4:', e);
+      }
+    }
+
+    const onboardingComplete = mfComplete || projectOnboardingStatus >= 4;
+    const onboardingActive =
+      !onboardingComplete && (await shouldUseOnboarding(projectId));
+    const nextStep: OnboardingKey | null = onboardingActive
+      ? stepFromStatus(projectOnboardingStatus)
+      : null;
 
     // ✅ log user input ASAP so even early-return flows (skip, "what step") have a server-side timestamp
     try {
@@ -527,16 +556,17 @@ export async function POST(req: Request) {
 
     // If user explicitly asks "what onboarding step am I on?"
     if (isOnboardingQuestion(message)) {
+      const displayStep = Math.min(Math.max(projectOnboardingStatus + 1, 1), 4);
+
       if (nextStep) {
         return NextResponse.json({
           status: 'onboarding',
           onboarding: true,
           step: nextStep,
-          onboarding_status: statusNum,
-          reply: `We’re still in the setup flow — you’re around step ${Math.min(
-            Math.max((statusNum as number) + 1, 1),
-            4
-          )} of 4.\nRight now we’re on **${labelForStep(nextStep)}**.\n${getCurrentStepPrompt(nextStep)}`,
+          onboarding_status: projectOnboardingStatus,
+          reply: `We’re still in the setup flow — you’re around step ${displayStep} of 4.\nRight now we’re on **${labelForStep(
+            nextStep
+          )}**.\n${getCurrentStepPrompt(nextStep)}`,
           threadId,
         });
       }
@@ -544,7 +574,7 @@ export async function POST(req: Request) {
         status: 'onboarding',
         onboarding: false,
         step: 'complete',
-        onboarding_status: statusNum,
+        onboarding_status: projectOnboardingStatus,
         reply: 'Setup is all done (4/4). ✅',
         threadId,
       });
@@ -642,7 +672,6 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
       const trimmed = message.trim();
 
       // ⛔ Don't auto-complete vision on tiny / vague messages.
-      // e.g. "i like history" should NOT count as full project vision.
       const minLenForAutoVision = 40;
       const hasVisionKeywords = /\b(vision|goal|aim|plan|project|want to|would like to|my focus is|my aim is)\b/i.test(
         trimmed
@@ -650,7 +679,6 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
 
       if (trimmed.length < minLenForAutoVision || !hasVisionKeywords) {
         // Not clearly a full vision statement -> leave onboarding at step 1 (Vision)
-        // Zeta will explicitly ask for the vision using the onboarding prompt.
       } else {
         try {
           const completion = await openai.chat.completions.create({
@@ -886,10 +914,12 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
     }
 
     // Effective onboarding display status for THIS reply
-    let effectiveStatusNum: number = statusNum as unknown as number;
-    let effectiveNextStep: OnboardingKey | null = nextStep;
+    let effectiveStatusNum: number = projectOnboardingStatus;
+    let effectiveNextStep: OnboardingKey | null = onboardingActive
+      ? stepFromStatus(projectOnboardingStatus)
+      : null;
 
-    if (projectOnboardingStatus === 0 && nextStep === 'vision') {
+    if (projectOnboardingStatus === 0 && effectiveNextStep === 'vision') {
       if (visionCaptured) {
         effectiveStatusNum = Math.max(effectiveStatusNum, 1);
         effectiveNextStep = 'long_term_goals';
@@ -899,7 +929,7 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
       }
     }
 
-    if (projectOnboardingStatus === 1 && nextStep === 'long_term_goals') {
+    if (projectOnboardingStatus === 1 && effectiveNextStep === 'long_term_goals') {
       if (longTermGoalsCaptured) {
         effectiveStatusNum = Math.max(effectiveStatusNum, 2);
         effectiveNextStep = 'short_term_goals';
@@ -909,7 +939,7 @@ You may also remove goals by including { "delete": true } and an "id" (preferred
       }
     }
 
-    if (projectOnboardingStatus === 2 && nextStep === 'short_term_goals') {
+    if (projectOnboardingStatus === 2 && effectiveNextStep === 'short_term_goals') {
       if (shortTermGoalsCaptured) {
         effectiveStatusNum = Math.max(effectiveStatusNum, 3);
         effectiveNextStep = 'telegram';

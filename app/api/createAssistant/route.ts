@@ -357,19 +357,23 @@ export async function POST(req: Request) {
     //    (Removed vision here; vision belongs in mainframe_info, not user_projects)
     {
       const { error } = await supabaseAdmin
-        .from('user_projects')
-        .update({
-          assistant_id: assistantId,
-          preferred_user_name: preferredNameToSave,
-          thread_id: threadId,
-          model_id: modelId,
-          personality_traits: cleanTraits,
-          initiative_cadence: cadence,
-          autonomy_policy: 'auto',
-          system_instructions: systemInstructions?.trim() || null, // ✅ now stored
-          template_id: templateId ?? null,                         // ✅ template wired
-        })
-        .eq('id', projectId);
+  .from('user_projects')
+  .update({
+    assistant_id: assistantId,
+    preferred_user_name: preferredNameToSave,
+    thread_id: threadId,
+    model_id: modelId,
+    personality_traits: cleanTraits,
+    initiative_cadence: cadence,
+    autonomy_policy: 'auto',
+    system_instructions: systemInstructions?.trim() || null,
+    template_id: templateId ?? null,
+
+    // 🔹 NEW: hard-reset onboarding for this fresh project
+    onboarding_status: 0,
+    onboarding_complete: false,
+  })
+  .eq('id', projectId);
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
