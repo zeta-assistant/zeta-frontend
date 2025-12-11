@@ -358,7 +358,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
             <input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search…"
+              placeholder="Search…ddd"
               className="hidden md:block px-3 py-2 rounded-lg bg-blue-900/60 border border-blue-700/60 text-blue-100 placeholder:text-blue-300/60 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
             <button
