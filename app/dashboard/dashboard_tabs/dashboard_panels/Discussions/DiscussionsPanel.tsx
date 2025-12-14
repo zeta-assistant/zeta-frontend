@@ -4,6 +4,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
+import 'katex/dist/katex.min.css';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import { formatMathMarkdown } from '@/lib/formatMathMarkdown';
+
 type Discussion = {
   thread_id: string;
   title: string;
@@ -21,13 +27,22 @@ type Msg = {
 const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
 const MAX_DISCUSSIONS = 20;
 
+const textScale = (fs: 'sm' | 'base' | 'lg') =>
+  fs === 'sm'
+    ? 'text-[13px] leading-6'
+    : fs === 'lg'
+    ? 'text-[16.5px] leading-8'
+    : 'text-[15px] leading-7';
+
+const proseScale = (fs: 'sm' | 'base' | 'lg') =>
+  fs === 'sm' ? 'prose-sm' : fs === 'lg' ? 'prose-lg' : 'prose';
+
 export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base' | 'lg' }) {
   const { projectId } = useParams<{ projectId: string }>();
   const search = useSearchParams();
   const seedFromQuery = useMemo(() => (search?.get('seed') || '').trim() || null, [search]);
 
   const [discussions, setDiscussions] = useState<Discussion[]>([]);
-  const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [bootHandled, setBootHandled] = useState(false);
@@ -40,11 +55,15 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
   const [sending, setSending] = useState(false);
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
-  const [notify, setNotify] = useState(true);
+
+  // rename state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
 
   /* ------------------------- list data ------------------------- */
   async function refreshList() {
     if (!projectId) return;
+
     const { data, error } = await supabase
       .from('discussions')
       .select('thread_id, title, last_updated')
@@ -137,25 +156,63 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
 
     try {
       await supabase.from('discussion_messages').delete().eq('thread_id', threadId);
-      await supabase
-        .from('discussions')
-        .delete()
-        .eq('project_id', projectId as string)
-        .eq('thread_id', threadId);
+      await supabase.from('discussions').delete().eq('project_id', projectId as string).eq('thread_id', threadId);
       await supabase
         .from('threads')
         .delete()
         .or(`openai_thread_id.eq.${threadId},thread_id.eq.${threadId}`)
         .eq('project_id', projectId as string);
 
-      if (selected?.thread_id === threadId) setSelected(null);
+      if (selected?.thread_id === threadId) {
+        setSelected(null);
+        setMessages([]);
+      }
+
       await refreshList();
       setStatus('Discussion deleted.');
-      setTimeout(() => setStatus(null), 1500);
+      setTimeout(() => setStatus(null), 1200);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to delete discussion.');
+      setStatus(null);
     }
   }
+
+  // rename helpers
+  const startRename = (d: Discussion) => {
+    setEditingId(d.thread_id);
+    setEditValue((d.title || '').trim());
+  };
+  const cancelRename = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
+  const saveRename = async (threadId: string) => {
+    if (!projectId) return cancelRename();
+    const newTitle = editValue.trim();
+    if (!newTitle) return cancelRename();
+
+    setError(null);
+    setStatus('Saving…');
+    const nowIso = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('discussions')
+      .update({ title: newTitle, last_updated: nowIso })
+      .eq('project_id', projectId as string)
+      .eq('thread_id', threadId);
+
+    if (error) {
+      setError(error.message);
+      setStatus(null);
+      return;
+    }
+
+    setDiscussions((prev) => prev.map((d) => (d.thread_id === threadId ? { ...d, title: newTitle } : d)));
+    if (selected?.thread_id === threadId) setSelected({ ...selected, title: newTitle });
+
+    setStatus(null);
+    cancelRename();
+  };
 
   /* -------------------- seed auto-create ---------------------- */
   useEffect(() => {
@@ -175,7 +232,6 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
 
       setCreating(true);
       try {
-        // seed is JSON: { notification, firstUser, title }
         let parsed: { notification?: string; firstUser?: string; title?: string } = {};
         try {
           parsed = JSON.parse(seed);
@@ -187,8 +243,8 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
 
         const threadId = await createDiscussionRow({
           title,
-          initialAssistant: notif || undefined, // FIRST outgoing message from Zeta
-          initialUser: firstUser || undefined, // Your mini-chat reply
+          initialAssistant: notif || undefined,
+          initialUser: firstUser || undefined,
         });
 
         if (threadId) {
@@ -213,6 +269,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
       .select('id, thread_id, role, content, created_at')
       .eq('thread_id', threadId)
       .order('created_at', { ascending: true });
+
     if (!error) setMessages(data || []);
     setMsgLoading(false);
   }
@@ -225,12 +282,7 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
       .channel(`realtime_discussion_${selected.thread_id}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'discussion_messages',
-          filter: `thread_id=eq.${selected.thread_id}`,
-        },
+        { event: 'INSERT', schema: 'public', table: 'discussion_messages', filter: `thread_id=eq.${selected.thread_id}` },
         (payload) => {
           const row = payload.new as Msg;
           setMessages((prev) => {
@@ -251,36 +303,6 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, sending]);
 
-  async function pollAssistantOnce(threadId: string, sinceIso: string): Promise<Msg | null> {
-    const { data } = await supabase
-      .from('discussion_messages')
-      .select('id, thread_id, role, content, created_at')
-      .eq('thread_id', threadId)
-      .eq('role', 'assistant')
-      .gt('created_at', sinceIso)
-      .order('created_at', { ascending: true })
-      .limit(1);
-    return (data && data[0]) || null;
-  }
-
-  function appendAssistantIfMissing(text: string) {
-    setMessages((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && last.role === 'assistant' && last.content === text) return prev;
-      const thread_id = selected?.thread_id || '';
-      return [
-        ...prev,
-        {
-          id: `assistant-${Date.now()}`,
-          thread_id,
-          role: 'assistant',
-          content: text,
-          created_at: new Date().toISOString(),
-        },
-      ];
-    });
-  }
-
   async function sendMessage() {
     const trimmed = input.trim();
     if (!trimmed || sending || !selected?.thread_id) return;
@@ -295,10 +317,9 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
       content: trimmed,
       created_at: new Date().toISOString(),
     };
+
     setMessages((m) => [...m, optimistic]);
     setInput('');
-
-    const sinceIso = new Date().toISOString();
 
     try {
       const res = await fetch('/api/discussion-reply', {
@@ -306,22 +327,8 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ threadId: selected.thread_id, message: trimmed }),
       });
-
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || `Reply failed: ${res.status}`);
-
-      if (json?.reply && typeof json.reply === 'string' && json.reply.trim()) {
-        appendAssistantIfMissing(json.reply.trim());
-      } else {
-        for (let i = 0; i < 8; i++) {
-          const hit = await pollAssistantOnce(selected.thread_id, sinceIso);
-          if (hit) {
-            appendAssistantIfMissing(hit.content);
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 800));
-        }
-      }
     } catch (e: any) {
       setError(e?.message ?? 'Failed to send');
     } finally {
@@ -329,208 +336,252 @@ export default function DiscussionsPanel({ fontSize }: { fontSize: 'sm' | 'base'
     }
   }
 
-  /* -------------------------- UI ---------------------------- */
-  const filtered = useMemo(
-    () => discussions.filter((d) => (d.title || '').toLowerCase().includes(filter.toLowerCase())),
-    [discussions, filter]
-  );
-
   const atLimit = discussions.length >= MAX_DISCUSSIONS;
 
+  /* -------------------------- UI ---------------------------- */
   return (
-    <div
-      className={`h-full min-h-0 flex flex-col bg-gradient-to-b from-blue-950 to-blue-900 text-${fontSize} text-blue-100`}
-    >
-      {/* header */}
-      <div className="sticky top-0 z-10 border-b border-white/10 bg-blue-950/70 backdrop-blur px-5 py-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">💬 Discussions</h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setNotify(!notify)}
-              className={`rounded-lg px-3 py-2 text-sm ${
-                notify ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-700'
-              }`}
-              title="Notifications toggle (UI only)"
-            >
-              {notify ? '🔔 On' : '🔕 Off'}
-            </button>
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search"
-              className="hidden md:block px-3 py-2 rounded-lg bg-blue-900/60 border border-blue-700/60 text-blue-100 placeholder:text-blue-300/60 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-            <button
-              onClick={async () => {
-                setCreating(true);
-                try {
-                  setError(null);
-                  if (atLimit) {
-                    setError(`Limit reached: you can have up to ${MAX_DISCUSSIONS} discussions per project.`);
-                    return;
+    <div className="h-full min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-blue-950 to-blue-900 text-blue-100">
+      {/* content fills full height (no header) */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4 p-5 overflow-hidden">
+        {/* left list */}
+        <div className="min-h-0 overflow-y-auto space-y-3 pr-1">
+          {/* top row: New button + count + status/error */}
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  setCreating(true);
+                  try {
+                    setError(null);
+                    if (atLimit) {
+                      setError(`Limit reached: you can have up to ${MAX_DISCUSSIONS} discussions per project.`);
+                      return;
+                    }
+                    const threadId = await createDiscussionRow({ title: 'New Discussion' });
+                    if (threadId) {
+                      await refreshList();
+                      const row: Discussion = {
+                        thread_id: threadId,
+                        title: 'New Discussion',
+                        last_updated: new Date().toISOString(),
+                      };
+                      setSelected(row);
+                      await loadMessages(threadId);
+                    }
+                  } finally {
+                    setCreating(false);
+                    setStatus(null);
                   }
-                  const threadId = await createDiscussionRow({ title: 'New Discussion' });
-                  if (threadId) {
-                    await refreshList();
-                    setSelected({
-                      thread_id: threadId,
-                      title: 'New Discussion',
-                      last_updated: new Date().toISOString(),
-                    });
-                    await loadMessages(threadId);
-                  }
-                } finally {
-                  setCreating(false);
-                  setStatus(null);
-                }
-              }}
-              disabled={creating || atLimit}
-              title={atLimit ? `Limit ${MAX_DISCUSSIONS} reached` : 'Create new discussion'}
-              className={`rounded-lg px-3 py-2 shadow ${
-                atLimit ? 'bg-blue-600/50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
-              } text-white`}
-            >
-              ➕ New
-            </button>
-          </div>
-        </div>
-        {(status || error || atLimit) && (
-          <div className="mt-2 text-sm">
-            {status && <span className="text-blue-200">{status}</span>}
-            {error && <span className="text-red-300 ml-3">{error}</span>}
-            {atLimit && !error && (
-              <span className="text-yellow-300 ml-3">Max {MAX_DISCUSSIONS} discussions reached.</span>
-            )}
-          </div>
-        )}
-      </div>
+                }}
+                disabled={creating || atLimit}
+                className={`text-sm px-3 py-2 rounded-xl border shadow transition ${
+                  creating || atLimit
+                    ? 'bg-blue-700/40 border-blue-600/40 text-blue-200 cursor-not-allowed'
+                    : 'bg-blue-700 hover:bg-blue-600 border-blue-500 text-white'
+                }`}
+                title={atLimit ? `Max ${MAX_DISCUSSIONS} discussions reached` : 'Create new discussion'}
+              >
+                ➕ New Discussion
+              </button>
 
-      {/* content: list + chat pane */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-4 p-5 overflow-hidden">
-        {/* left */}
-        <div className="space-y-4 overflow-y-auto pr-1">
+              <div className="text-xs text-blue-200/80">
+                {discussions.length}/{MAX_DISCUSSIONS}
+              </div>
+            </div>
+
+            <div className="text-sm">
+              {status && <span className="text-blue-200 mr-2">{status}</span>}
+              {error && <span className="text-red-300">{error}</span>}
+            </div>
+          </div>
+
           {loading ? (
             <div className="space-y-3 animate-pulse">
-              <div className="h-12 rounded-xl bg-blue-800/40" />
-              <div className="h-12 rounded-xl bg-blue-800/40" />
+              <div className="h-14 rounded-xl bg-blue-800/40" />
+              <div className="h-14 rounded-xl bg-blue-800/40" />
             </div>
-          ) : filtered.length === 0 ? (
-            <div className="text-blue-300/80">
-              {discussions.length === 0 ? 'No discussions yet.' : 'No results.'}
-            </div>
+          ) : discussions.length === 0 ? (
+            <div className="text-blue-300/80">No discussions yet.</div>
           ) : (
-            <div className="grid sm:grid-cols-2 gap-4">
-              {filtered.map((d) => {
-                const isActive = selected?.thread_id === d.thread_id;
-                return (
-                  <div
-                    key={d.thread_id}
-                    className={`rounded-2xl p-4 transition shadow bg-gradient-to-br from-blue-800/70 to-blue-850/70 border border-blue-700/60 ${
-                      isActive ? 'ring-2 ring-purple-500' : 'hover:from-blue-700/70 hover:to-blue-800/70'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <button onClick={() => setSelected(d)} className="text-left flex-1">
-                        <div className="font-semibold text-white line-clamp-2">
-                          {d.title || 'Untitled'}
-                        </div>
-                        <div className="mt-2 text-xs text-blue-200/80">Last: {fmt(d.last_updated)}</div>
-                      </button>
+            discussions.map((d) => {
+              const active = selected?.thread_id === d.thread_id;
+              const isEditing = editingId === d.thread_id;
+
+              return (
+                <div
+                  key={d.thread_id}
+                  className={`w-full rounded-2xl p-4 border transition shadow ${
+                    active
+                      ? 'border-purple-500 bg-blue-800/80 ring-2 ring-purple-500'
+                      : 'border-blue-700/60 bg-blue-800/60 hover:bg-blue-800/80'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={() => void saveRename(d.thread_id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') void saveRename(d.thread_id);
+                            if (e.key === 'Escape') cancelRename();
+                          }}
+                          className="w-full px-2 py-1 rounded-lg bg-blue-900 border border-blue-600 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      ) : (
+                        <button onClick={() => setSelected(d)} className="text-left w-full">
+                          <div className="font-semibold text-white line-clamp-2">{d.title || 'Untitled'}</div>
+                          <div className="text-xs text-blue-200 mt-2">Last: {fmt(d.last_updated)}</div>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="shrink-0 flex items-center gap-2">
                       <button
-                        onClick={() => deleteDiscussion(d.thread_id)}
-                        className="shrink-0 text-xs px-2 py-1 rounded-lg bg-red-600/90 hover:bg-red-700 text-white"
+                        onClick={() => (isEditing ? cancelRename() : startRename(d))}
+                        className="text-xs px-2 py-1 rounded-lg bg-blue-700/80 hover:bg-blue-700 text-white"
+                        title={isEditing ? 'Cancel rename' : 'Rename'}
+                      >
+                        ✏️
+                      </button>
+
+                      <button
+                        onClick={() => void deleteDiscussion(d.thread_id)}
+                        className="text-xs px-2 py-1 rounded-lg bg-red-600/90 hover:bg-red-700 text-white"
                         title="Delete discussion"
                       >
                         🗑️
                       </button>
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })
           )}
         </div>
 
-        {/* right: phone-style chat */}
-        <div className="flex flex-col items-center">
-          <div
-            className="
-              w-full max-w-sm
-              flex-1
-              md:h-[600px]
-              max-h-[calc(100vh-230px)]
-              min-h-[320px]
-              rounded-2xl border border-blue-700/60
-              bg-blue-900/40 flex flex-col overflow-hidden shadow-lg
-            "
-          >
+        {/* right phone */}
+        <div className="flex justify-center min-h-0 overflow-hidden">
+          <div className="w-full max-w-sm min-h-0 overflow-hidden rounded-2xl border border-blue-700 bg-blue-900/40 flex flex-col shadow-lg">
             {!selected ? (
-              <div className="flex-1 grid place-items-center text-blue-300/80 p-6">
-                Select a discussion to open the conversation.
-              </div>
+              <div className="flex-1 grid place-items-center text-blue-300 p-6">Select a discussion</div>
             ) : (
               <>
-                {/* Title chip */}
-                <div className="border-b border-blue-700/60 px-4 py-3 text-center font-semibold text-white">
-                  {selected.title || 'Discussion'}
+                {/* title row */}
+                <div className="shrink-0 border-b border-blue-700 px-4 py-3 text-white font-semibold flex items-center justify-between gap-2">
+                  {editingId === selected.thread_id ? (
+                    <input
+                      autoFocus
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => void saveRename(selected.thread_id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void saveRename(selected.thread_id);
+                        if (e.key === 'Escape') cancelRename();
+                      }}
+                      className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-blue-900 border border-blue-600 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  ) : (
+                    <div className="truncate">{selected.title || 'Discussion'}</div>
+                  )}
+
+                  <div className="shrink-0 flex items-center gap-2">
+                    <button
+                      onClick={() => (editingId === selected.thread_id ? cancelRename() : startRename(selected))}
+                      className="text-xs px-2 py-1 rounded-lg bg-blue-700/80 hover:bg-blue-700 text-white"
+                      title={editingId === selected.thread_id ? 'Cancel rename' : 'Rename'}
+                    >
+                      ✏️
+                    </button>
+
+                    <button
+                      onClick={() => void deleteDiscussion(selected.thread_id)}
+                      className="text-xs px-2 py-1 rounded-lg bg-red-600/90 hover:bg-red-700 text-white"
+                      title="Delete this discussion"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {/* messages */}
+                <div
+                  className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
+                  style={{ overscrollBehavior: 'contain', scrollbarGutter: 'stable' as any }}
+                >
                   {msgLoading ? (
                     <div className="space-y-2 animate-pulse">
                       <div className="h-12 w-10/12 rounded-xl bg-blue-800/40" />
+                      <div className="h-12 w-8/12 rounded-xl bg-blue-800/30" />
                     </div>
                   ) : (
                     <>
-                      {messages.map((msg) => {
-                        const isUser = msg.role === 'user';
+                      {messages.map((m) => {
+                        const isUser = m.role === 'user';
+                        const formatted = formatMathMarkdown(m.content ?? '');
+
                         return (
                           <div
-                            key={msg.id ?? `${msg.created_at}-${Math.random()}`}
+                            key={m.id ?? `${m.created_at}-${Math.random()}`}
                             className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                           >
                             <div
-                              className={[
-                                'px-4 py-2 rounded-2xl shadow whitespace-pre-wrap leading-relaxed max-w-[75%]',
+                              className={`max-w-[85%] rounded-2xl px-4 py-2 border shadow ${
                                 isUser
-                                  ? 'bg-purple-600 text-white rounded-br-none'
-                                  : 'bg-blue-700 text-white rounded-bl-none',
-                              ].join(' ')}
-                              title={
-                                msg.created_at ? new Date(msg.created_at).toLocaleString() : ''
-                              }
+                                  ? 'bg-purple-600 text-white border-purple-400 rounded-br-none'
+                                  : 'bg-blue-700 text-white border-blue-400 rounded-bl-none'
+                              } ${textScale(fontSize)}`}
+                              title={m.created_at ? new Date(m.created_at).toLocaleString() : ''}
                             >
-                              {msg.content}
+                              <div
+                                className={`prose max-w-none ${proseScale(
+                                  fontSize
+                                )} prose-p:my-2 prose-headings:text-white`}
+                              >
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                  {formatted}
+                                </ReactMarkdown>
+                              </div>
                             </div>
                           </div>
                         );
                       })}
+
                       {sending && (
                         <div className="flex justify-start">
-                          <div className="bg-blue-700 text-white px-3 py-2 rounded-2xl rounded-bl-none animate-pulse">
+                          <div className="bg-blue-700 text-white px-3 py-2 rounded-2xl rounded-bl-none animate-pulse border border-blue-400">
                             …
                           </div>
                         </div>
                       )}
+
                       <div ref={endRef} />
                     </>
                   )}
                 </div>
 
-                <div className="border-t border-blue-700/60 px-4 py-3">
+                {/* input (no example line) */}
+                <div className="shrink-0 border-t border-blue-700 px-4 py-3">
                   <div className="flex gap-2">
                     <input
-                      className="flex-1 p-3 rounded-xl bg-blue-900/70 border border-blue-600/70 text-white placeholder:text-blue-300/60 focus:outline-none focus:ring-2 focus:ring-purple-500"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void sendMessage();
+                        }
+                      }}
                       placeholder="Type a message…"
-                      onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                      className="flex-1 rounded-xl bg-blue-900 border border-blue-600 px-3 py-2 text-white placeholder:text-blue-300/70 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      disabled={sending}
                     />
                     <button
-                      onClick={sendMessage}
+                      onClick={() => void sendMessage()}
                       disabled={sending || !input.trim()}
-                      className="rounded-xl px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-60"
+                      className="rounded-xl bg-purple-600 px-4 text-white hover:bg-purple-700 disabled:opacity-60"
                     >
                       {sending ? '…' : 'Send'}
                     </button>
