@@ -43,7 +43,9 @@ function normalizePlanRow(row: any): Plan {
 const PREMIUM_TYPES: Array<Exclude<RuleType, 'custom'>> = ['thoughts', 'usage_frequency'];
 
 const PremiumPill = ({ className = '' }: { className?: string }) => (
-  <span className={`ml-2 inline-flex text-[11px] items-center gap-1 rounded-full bg-indigo-100 px-2 py-[2px] font-medium text-indigo-700 ${className}`}>
+  <span
+    className={`ml-2 inline-flex text-[11px] items-center gap-1 rounded-full bg-indigo-100 px-2 py-[2px] font-medium text-indigo-700 ${className}`}
+  >
     🔒 Premium
   </span>
 );
@@ -113,7 +115,9 @@ function parseSendTimeHHMM(ruleTime: string | null | undefined): { h: number; m:
   const m = Math.max(0, Math.min(59, Number((mStr || '0').slice(0, 2))));
   return { h, m };
 }
-function isWeekday(idx: number) { return idx >= 1 && idx <= 5; }
+function isWeekday(idx: number) {
+  return idx >= 1 && idx <= 5;
+}
 
 /* ──────────────────────────────────────────────────────────
    Expected-next calculator (UI-side)
@@ -129,10 +133,8 @@ function expectedNextFromRule(rule: Rule, timeZone: string, now = new Date()): D
   const addMinutes = (dt: Date, mins: number) => new Date(dt.getTime() + mins * 60_000);
 
   const minutesUntilNextDaily = () => {
-    if (nowMinutes < targetToday) {
-      return targetToday - nowMinutes;
-    }
-    return 24 * 60 - (nowMinutes - targetToday); // tomorrow
+    if (nowMinutes < targetToday) return targetToday - nowMinutes;
+    return 24 * 60 - (nowMinutes - targetToday);
   };
 
   switch (rule.frequency) {
@@ -140,22 +142,18 @@ function expectedNextFromRule(rule: Rule, timeZone: string, now = new Date()): D
       return null;
 
     case 'hourly': {
-      // next time on the same hour/minute mark
       const mm = parts.minute;
       if (mm < tgtM) return addMinutes(now, tgtM - mm);
       return addMinutes(now, 60 - (mm - tgtM));
     }
 
-    case 'daily': {
+    case 'daily':
       return addMinutes(now, minutesUntilNextDaily());
-    }
 
     case 'weekdays': {
-      // today if it's a weekday and we're before target; otherwise bump to next weekday
       if (isWeekday(parts.weekday) && nowMinutes < targetToday) {
         return addMinutes(now, targetToday - nowMinutes);
       }
-      // find next weekday
       let days = 1;
       let idx = (parts.weekday + 1) % 7;
       while (!isWeekday(idx)) {
@@ -166,11 +164,11 @@ function expectedNextFromRule(rule: Rule, timeZone: string, now = new Date()): D
     }
 
     case 'weekly': {
-      const targetDow = typeof rule.day_of_week === 'number' ? rule.day_of_week : 1; // Monday default
+      const targetDow = typeof rule.day_of_week === 'number' ? rule.day_of_week : 1;
       const todayDow = parts.weekday;
       const deltaDays = (targetDow - todayDow + 7) % 7;
+
       if (deltaDays === 0) {
-        // today — choose today if we haven't passed the time, else +7 days
         if (nowMinutes < targetToday) return addMinutes(now, targetToday - nowMinutes);
         return addMinutes(now, 7 * 1440 + (targetToday - nowMinutes + 1440) % 1440);
       }
@@ -178,7 +176,6 @@ function expectedNextFromRule(rule: Rule, timeZone: string, now = new Date()): D
     }
 
     case 'monthly': {
-      // naive: run same day-of-month as "today" at target time. If already passed, add 30 days.
       if (nowMinutes < targetToday) return addMinutes(now, targetToday - nowMinutes);
       return addMinutes(now, 30 * 1440 + (targetToday - nowMinutes + 1440) % 1440);
     }
@@ -192,6 +189,70 @@ function expectedNextFromRule(rule: Rule, timeZone: string, now = new Date()): D
    Jobs
 ─────────────────────────────────────────────────────────── */
 type JobRow = { rule_id: string; next_run_at: string | null; status?: string | null };
+
+/* ──────────────────────────────────────────────────────────
+   Discussions (bottom section)
+─────────────────────────────────────────────────────────── */
+type MiniDiscussion = {
+  id: string;
+  name: string;
+};
+
+async function fetchDiscussionsBestEffort(projectId: string): Promise<MiniDiscussion[]> {
+  // We try a few likely tables/column sets so this doesn’t hard-crash if your schema differs.
+  const attempts: Array<{
+    table: string;
+    select: string;
+    map: (row: any) => MiniDiscussion | null;
+  }> = [
+    {
+      table: 'discussions',
+      select: 'id,title,project_id,thread_id,name',
+      map: (r) => {
+        const id = String(r.id ?? r.thread_id ?? '').trim();
+        const name = String(r.title ?? r.name ?? 'Untitled').trim();
+        if (!id) return null;
+        return { id, name };
+      },
+    },
+    {
+      table: 'discussion_threads',
+      select: 'thread_id,title,project_id',
+      map: (r) => {
+        const id = String(r.thread_id ?? '').trim();
+        const name = String(r.title ?? 'Untitled').trim();
+        if (!id) return null;
+        return { id, name };
+      },
+    },
+    {
+      table: 'threads',
+      select: 'id,thread_id,title,name,project_id',
+      map: (r) => {
+        const id = String(r.thread_id ?? r.id ?? '').trim();
+        const name = String(r.title ?? r.name ?? 'Untitled').trim();
+        if (!id) return null;
+        return { id, name };
+      },
+    },
+  ];
+
+  for (const a of attempts) {
+    try {
+      const q = supabase.from(a.table).select(a.select).eq('project_id', projectId).limit(50);
+      const { data, error } = await q;
+      if (error) continue;
+      const list = (data || [])
+        .map(a.map)
+        .filter(Boolean) as MiniDiscussion[];
+      if (list.length) return list;
+    } catch {
+      // ignore and try next
+    }
+  }
+
+  return [];
+}
 
 /* ──────────────────────────────────────────────────────────
    Props
@@ -243,6 +304,13 @@ export default function NotificationsPanel({ projectId }: Props) {
   const SB_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
   const URLS = buildUrls(projectId, SB_URL);
 
+  /* ---------- discussions bottom section ---------- */
+  const [discussions, setDiscussions] = useState<MiniDiscussion[]>([]);
+  const refreshDiscussions = useCallback(async () => {
+    const list = await fetchDiscussionsBestEffort(projectId);
+    setDiscussions(list);
+  }, [projectId]);
+
   /* ---------- data ---------- */
   const fetchRules = useCallback(async () => {
     const { data } = await runtimeFetchRules(supabase, projectId);
@@ -260,44 +328,57 @@ export default function NotificationsPanel({ projectId }: Props) {
   const fetchPlan = useCallback(async () => {
     try {
       const { data: projById } = await supabase.from('user_projects').select('is_premium, plan').eq('id', projectId).limit(1);
-      if (projById && projById.length) { setPlan(normalizePlanRow(projById[0])); return; }
+      if (projById && projById.length) {
+        setPlan(normalizePlanRow(projById[0]));
+        return;
+      }
 
       const { data: projByPid } = await supabase.from('user_projects').select('is_premium, plan').eq('project_id', projectId).limit(1);
-      if (projByPid && projByPid.length) { setPlan(normalizePlanRow(projByPid[0])); return; }
+      if (projByPid && projByPid.length) {
+        setPlan(normalizePlanRow(projByPid[0]));
+        return;
+      }
 
       const { data: mfRow } = await supabase.from('mainframe_info').select('capabilities').eq('project_id', projectId).limit(1);
       const capPlan = (mfRow?.[0] as any)?.capabilities?.plan ?? 'free';
       setPlan(normalizePlanRow({ plan: capPlan }));
-    } catch { setPlan('free'); }
+    } catch {
+      setPlan('free');
+    }
   }, [projectId]);
 
   // map rule_id -> job row
   const [jobMap, setJobMap] = useState<Record<string, JobRow>>({});
-  const fetchNextRuns = useCallback(async (ruleIds?: string[]) => {
-    const ids = (ruleIds && ruleIds.length ? ruleIds : rules.map(r => r.id)).filter(Boolean);
-    if (!ids.length) return;
-    const { data, error } = await supabase
-      .from('notification_jobs')
-      .select('rule_id,next_run_at,status')
-      .in('rule_id', ids);
-    if (error) return;
-    const map: Record<string, JobRow> = {};
-    (data || []).forEach((r: any) => { map[r.rule_id] = r as JobRow; });
-    setJobMap(map);
-  }, [rules]);
+  const fetchNextRuns = useCallback(
+    async (ruleIds?: string[]) => {
+      const ids = (ruleIds && ruleIds.length ? ruleIds : rules.map((r) => r.id)).filter(Boolean);
+      if (!ids.length) return;
+      const { data, error } = await supabase.from('notification_jobs').select('rule_id,next_run_at,status').in('rule_id', ids);
+      if (error) return;
+      const map: Record<string, JobRow> = {};
+      (data || []).forEach((r: any) => {
+        map[r.rule_id] = r as JobRow;
+      });
+      setJobMap(map);
+    },
+    [rules]
+  );
 
   useEffect(() => {
     fetchRules();
     refreshTelegramState();
     refreshEmailState();
     fetchPlan();
+    refreshDiscussions();
     (async () => {
       try {
         const tz = await fetchProjectTimezone(projectId);
         setProjectTz(tz);
-      } catch { setProjectTz(null); }
+      } catch {
+        setProjectTz(null);
+      }
     })();
-  }, [projectId, fetchRules, refreshTelegramState, refreshEmailState, fetchPlan]);
+  }, [projectId, fetchRules, refreshTelegramState, refreshEmailState, fetchPlan, refreshDiscussions]);
 
   // refresh job next-run whenever rules change, and every 60s thereafter
   useEffect(() => {
@@ -344,12 +425,8 @@ export default function NotificationsPanel({ projectId }: Props) {
     let showDate: Date | null = null;
     if (jobIso) {
       const jobDt = new Date(jobIso);
-      // if job differs from expected by >5 minutes, prefer expected (likely stale job)
-      if (expected && Math.abs(jobDt.getTime() - expected.getTime()) > 5 * 60 * 1000) {
-        showDate = expected;
-      } else {
-        showDate = jobDt;
-      }
+      if (expected && Math.abs(jobDt.getTime() - expected.getTime()) > 5 * 60 * 1000) showDate = expected;
+      else showDate = jobDt;
     } else {
       showDate = expected;
     }
@@ -365,20 +442,28 @@ export default function NotificationsPanel({ projectId }: Props) {
       minute: '2-digit',
       hour12: false,
     }).format(showDate);
+
     return { rel, local };
   }
 
   async function ensureBuiltIn(type: Exclude<RuleType, 'custom'>) {
     setFeedback('');
     const res = await runtimeEnsureBuiltIn(supabase, projectId, type);
-    if (!res.ok) { console.error(res.error); setFeedback(`❌ ${res.message || 'Failed to activate'}`); return null; }
+    if (!res.ok) {
+      console.error(res.error);
+      setFeedback(`❌ ${res.message || 'Failed to activate'}`);
+      return null;
+    }
     setFeedback(res.message || '✅ Done');
     await fetchRules();
+
     if (res.rule) {
-      // optimistic "next" update
       const nextLocal = expectedNextFromRule(res.rule as Rule, effectiveTz);
       if (nextLocal) {
-        setJobMap(prev => ({ ...prev, [res.rule!.id]: { rule_id: res.rule!.id, next_run_at: nextLocal.toISOString(), status: 'scheduled' } }));
+        setJobMap((prev) => ({
+          ...prev,
+          [res.rule!.id]: { rule_id: res.rule!.id, next_run_at: nextLocal.toISOString(), status: 'scheduled' },
+        }));
       }
       try {
         await fetch(URLS.rearmNotification, {
@@ -395,16 +480,22 @@ export default function NotificationsPanel({ projectId }: Props) {
   const toggleActive = async (rule: Rule) => {
     setFeedback('');
     const res = await runtimeToggleActive(supabase, rule);
-    if (!res.ok) { console.error(res.error); setFeedback('❌ Could not update status'); }
-    else {
+    if (!res.ok) {
+      console.error(res.error);
+      setFeedback('❌ Could not update status');
+    } else {
       setFeedback(`✅ ${!rule.is_enabled ? 'Activated' : 'Deactivated'}`);
-      // optimistic: update jobMap if enabling
+
       if (!rule.is_enabled) {
         const nextLocal = expectedNextFromRule({ ...rule, is_enabled: true }, effectiveTz);
         if (nextLocal) {
-          setJobMap(prev => ({ ...prev, [rule.id]: { rule_id: rule.id, next_run_at: nextLocal.toISOString(), status: 'scheduled' } }));
+          setJobMap((prev) => ({
+            ...prev,
+            [rule.id]: { rule_id: rule.id, next_run_at: nextLocal.toISOString(), status: 'scheduled' },
+          }));
         }
       }
+
       fetchRules();
       try {
         await fetch(URLS.rearmNotification, {
@@ -423,9 +514,13 @@ export default function NotificationsPanel({ projectId }: Props) {
     setEditState({ ...rule, channels: rule.channels || defaultChannels, template: rule.template ?? '' });
     setFeedback('');
   };
-  const cancelEdit = () => { setEditingId(null); setEditState({}); };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditState({});
+  };
   const saveEdit = async () => {
     if (!editingId) return;
+
     const normalizeTime = (t?: string | null) => {
       const { h, m } = parseSendTimeHHMM(t || '12:00');
       const hh = String(h).padStart(2, '0');
@@ -433,25 +528,27 @@ export default function NotificationsPanel({ projectId }: Props) {
       return `${hh}:${mm}:00`;
     };
 
-    const coercedFreq: Frequency =
-      (!isPremium ? 'daily' : ((editState.frequency as Frequency) ?? 'daily'));
+    const coercedFreq: Frequency = !isPremium ? 'daily' : ((editState.frequency as Frequency) ?? 'daily');
 
     const payload: Partial<Rule> = {
       name: editState.name ?? '',
       type: (editState.type as RuleType) ?? 'custom',
       frequency: coercedFreq,
       send_time: normalizeTime(editState.send_time),
-      day_of_week: (coercedFreq === 'weekly') ? ((editState.day_of_week as number | null) ?? 1) : null,
+      day_of_week: coercedFreq === 'weekly' ? ((editState.day_of_week as number | null) ?? 1) : null,
       is_enabled: (editState.is_enabled as boolean) ?? true,
       channels: (editState.channels as NotificationChannels) ?? defaultChannels,
       template: editState.template ?? '',
     };
 
     const { error } = await supabase.from('notification_rules').update(payload).eq('id', editingId);
-    if (error) { console.error('Failed to update:', error); setFeedback('❌ Update failed'); return; }
+    if (error) {
+      console.error('Failed to update:', error);
+      setFeedback('❌ Update failed');
+      return;
+    }
     setFeedback('✅ Saved');
 
-    // optimistic "next" update using the edited values
     const optimisticRule: Rule = {
       ...(editState as any),
       id: editingId,
@@ -467,9 +564,13 @@ export default function NotificationsPanel({ projectId }: Props) {
       created_at: (editState as any).created_at ?? '',
       updated_at: (editState as any).updated_at ?? '',
     };
+
     const nextLocal = expectedNextFromRule(optimisticRule, effectiveTz);
     if (nextLocal) {
-      setJobMap(prev => ({ ...prev, [editingId]: { rule_id: editingId, next_run_at: nextLocal.toISOString(), status: 'scheduled' } }));
+      setJobMap((prev) => ({
+        ...prev,
+        [editingId]: { rule_id: editingId, next_run_at: nextLocal.toISOString(), status: 'scheduled' },
+      }));
     }
 
     try {
@@ -479,6 +580,7 @@ export default function NotificationsPanel({ projectId }: Props) {
         body: JSON.stringify({ rule_id: editingId }),
       });
     } catch {}
+
     cancelEdit();
     fetchRules();
     fetchNextRuns([editingId]);
@@ -488,9 +590,7 @@ export default function NotificationsPanel({ projectId }: Props) {
   const sendTest = async (rule: Rule) => {
     setFeedback('');
     try {
-      const { feedback } = await runtimeSendTest(
-        supabase, rule, URLS, SB_KEY, getFirstProjectEmail, projectId
-      );
+      const { feedback } = await runtimeSendTest(supabase, rule, URLS, SB_KEY, getFirstProjectEmail, projectId);
       setFeedback(feedback);
     } catch (e: any) {
       setFeedback(`❌ ${e?.message ?? String(e)}`);
@@ -554,36 +654,57 @@ export default function NotificationsPanel({ projectId }: Props) {
       let slotKey = `${now.ymd}@${String(tgtH).padStart(2, '0')}:${String(tgtM).padStart(2, '0')}`;
 
       switch (rule.frequency) {
-        case 'off': return { due: false, slotKey: '' };
+        case 'off':
+          return { due: false, slotKey: '' };
         case 'hourly': {
-          const minuteReached = now.minute >= tgtM && (now.minute - tgtM) <= GRACE;
+          const minuteReached = now.minute >= tgtM && now.minute - tgtM <= GRACE;
           slotKey = `${now.ymd}@${String(now.hour).padStart(2, '0')}:${String(tgtM).padStart(2, '0')}`;
           return { due: minuteReached, slotKey };
         }
-        case 'weekdays': activeToday = isWeekday(now.weekday); break;
-        case 'weekly':   activeToday = typeof rule.day_of_week === 'number' ? rule.day_of_week === now.weekday : true; break;
+        case 'weekdays':
+          activeToday = isWeekday(now.weekday);
+          break;
+        case 'weekly':
+          activeToday = typeof rule.day_of_week === 'number' ? rule.day_of_week === now.weekday : true;
+          break;
         case 'monthly': {
-          const dom = 1; const today = Number(now.ymd.split('-')[2]); activeToday = today === dom; break;
+          const dom = 1;
+          const today = Number(now.ymd.split('-')[2]);
+          activeToday = today === dom;
+          break;
         }
       }
 
-      const minuteReached = curMins >= tgtMins && (curMins - tgtMins) <= GRACE;
+      const minuteReached = curMins >= tgtMins && curMins - tgtMins <= GRACE;
       return { due: activeToday && minuteReached, slotKey };
     }
 
     const autoRun = async (rule: Rule) => {
       try {
         switch (rule.type) {
-          case 'relevant_discussion': await runRelevantDiscussion(supabase, rule, URLS, SB_KEY, getFirstProjectEmail); break;
-        case 'thoughts':            await runThoughts(supabase, rule, URLS, SB_KEY); break;
-          case 'usage_frequency':     await runUsageFrequency(supabase, rule, URLS, SB_KEY, getFirstProjectEmail); break;
-          case 'outreach':            await runOutreach(supabase, rule, URLS, SB_KEY, getFirstProjectEmail); break;
+          case 'relevant_discussion':
+            await runRelevantDiscussion(supabase, rule, URLS, SB_KEY, getFirstProjectEmail);
+            break;
+          case 'thoughts':
+            await runThoughts(supabase, rule, URLS, SB_KEY);
+            break;
+          case 'usage_frequency':
+            await runUsageFrequency(supabase, rule, URLS, SB_KEY, getFirstProjectEmail);
+            break;
+          case 'outreach':
+            await runOutreach(supabase, rule, URLS, SB_KEY, getFirstProjectEmail);
+            break;
           case 'calendar': {
-            const fn = (runtimeDefault as any).runCalendarDigest; if (fn) await fn(supabase, rule, URLS, SB_KEY); break;
+            const fn = (runtimeDefault as any).runCalendarDigest;
+            if (fn) await fn(supabase, rule, URLS, SB_KEY);
+            break;
           }
-          default:                    await runGeneric(supabase, rule, URLS, SB_KEY, getFirstProjectEmail);
+          default:
+            await runGeneric(supabase, rule, URLS, SB_KEY, getFirstProjectEmail);
         }
-      } catch (e) { console.warn('[auto scheduler] run failed', e); }
+      } catch (e) {
+        console.warn('[auto scheduler] run failed', e);
+      }
     };
 
     const tick = () => {
@@ -600,6 +721,7 @@ export default function NotificationsPanel({ projectId }: Props) {
     tick();
     const id = setInterval(tick, 60_000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules, effectiveTz, URLS, SB_KEY]);
 
   /* ---------- cards ---------- */
@@ -613,21 +735,22 @@ export default function NotificationsPanel({ projectId }: Props) {
         <Section>{children}</Section>
       );
 
-    const inputCls = 'w-full rounded-md border border-slate-300 bg-white text-slate-900 placeholder-slate-400 px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
+    const inputCls =
+      'w-full rounded-md border border-slate-300 bg-white text-slate-900 placeholder-slate-400 px-3 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
     const helpCls = 'text-xs text-slate-500';
     const selectWrap = 'relative';
     const selectCls = inputCls + ' pr-9 appearance-none';
-    const Chevron = () => (<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">▾</span>);
+    const Chevron = () => <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">▾</span>;
 
     const set = (patch: Partial<Rule>) => setEditState((prev) => ({ ...prev, ...patch }));
-    const telegramChecked = !!editState.channels?.telegram;
 
     const NowLine = () => {
       const { time, date, offset } = nowInTzLabels(effectiveTz);
       return (
         <p className="text-xs text-slate-500">
           Now in <span className="font-medium">{effectiveTz}</span>: {time} · {date}
-          {offset ? ` (${offset})` : ''}{projectTz ? '' : ' • using your browser timezone'}
+          {offset ? ` (${offset})` : ''}
+          {projectTz ? '' : ' • using your browser timezone'}
         </p>
       );
     };
@@ -643,18 +766,19 @@ export default function NotificationsPanel({ projectId }: Props) {
           )}
         </div>
 
-        {/* Name */}
         <div className="grid gap-2">
           <label className="text-sm text-slate-700">Name</label>
-          <input className={inputCls} value={editState.name || ''} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Telegram Digest" />
+          <input
+            className={inputCls}
+            value={editState.name || ''}
+            onChange={(e) => set({ name: e.target.value })}
+            placeholder="e.g. Telegram Digest"
+          />
         </div>
 
-        {/* Frequency + Time */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
           <div className="grid gap-2">
-            <label className="text-sm text-slate-700 flex items-center gap-2">
-              Frequency {!isPremium && <PremiumPill />}
-            </label>
+            <label className="text-sm text-slate-700 flex items-center gap-2">Frequency {!isPremium && <PremiumPill />}</label>
             <div className={selectWrap}>
               <select
                 className={selectCls}
@@ -675,16 +799,19 @@ export default function NotificationsPanel({ projectId }: Props) {
             <p className={helpCls}>How often to send.</p>
           </div>
 
-          {/* Send Time */}
           <div className="grid gap-2">
             <label className="text-sm text-slate-700">Send Time</label>
-            <input type="time" value={(editState.send_time || '12:00').slice(0, 5)} onChange={(e) => set({ send_time: e.target.value })} className={inputCls} />
+            <input
+              type="time"
+              value={(editState.send_time || '12:00').slice(0, 5)}
+              onChange={(e) => set({ send_time: e.target.value })}
+              className={inputCls}
+            />
             <p className={helpCls}>Local time for this project/user.</p>
             <NowLine />
           </div>
         </div>
 
-        {/* Day of week (only when weekly) */}
         {editState.frequency === 'weekly' && (
           <div className="grid gap-2 mt-3 sm:max-w-xs">
             <label className="text-sm text-slate-700">Day of week</label>
@@ -703,7 +830,6 @@ export default function NotificationsPanel({ projectId }: Props) {
           </div>
         )}
 
-        {/* Channels */}
         <div className="grid gap-2 mt-3">
           <label className="text-sm text-slate-700">Channels</label>
           <div className="flex gap-6">
@@ -732,6 +858,7 @@ export default function NotificationsPanel({ projectId }: Props) {
               );
             })}
           </div>
+
           {!!editState.channels?.telegram && !tgState.connected && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block mt-1">
               Telegram channel selected, but no verified chat_id. Connect it in <b>Functions → APIs</b>.
@@ -739,7 +866,6 @@ export default function NotificationsPanel({ projectId }: Props) {
           )}
         </div>
 
-        {/* Template */}
         {(editState.type as RuleType) !== 'relevant_discussion' && (
           <div className="grid gap-2 mt-3">
             <label className="text-sm text-slate-700">Message Template</label>
@@ -752,7 +878,6 @@ export default function NotificationsPanel({ projectId }: Props) {
           </div>
         )}
 
-        {/* Enabled */}
         <div className="grid gap-2 mt-3">
           <label className="text-sm text-slate-700">Enabled</label>
           <label className="flex items-center gap-2 text-sm text-slate-900">
@@ -761,10 +886,13 @@ export default function NotificationsPanel({ projectId }: Props) {
           </label>
         </div>
 
-        {/* Buttons */}
         <div className="mt-4 flex flex-wrap gap-2">
-          <button onClick={saveEdit} className="rounded bg-blue-600 text-white px-4 py-2 hover:bg-blue-700">Save</button>
-          <button onClick={cancelEdit} className="rounded bg-slate-200 text-slate-900 px-4 py-2 hover:bg-slate-300">Cancel</button>
+          <button onClick={saveEdit} className="rounded bg-blue-600 text-white px-4 py-2 hover:bg-blue-700">
+            Save
+          </button>
+          <button onClick={cancelEdit} className="rounded bg-slate-200 text-slate-900 px-4 py-2 hover:bg-slate-300">
+            Cancel
+          </button>
         </div>
       </Wrapper>
     );
@@ -784,29 +912,45 @@ export default function NotificationsPanel({ projectId }: Props) {
       <div className={`relative flex items-center justify-between rounded-lg border bg-white px-4 py-3 ${isGated ? 'border-indigo-200' : 'border-slate-200'}`}>
         <div className={`min-w-0 ${isGated ? 'relative z-20' : ''}`}>
           <div className="font-semibold text-slate-900 truncate">
-            {t.label}{' '} <span className="text-slate-500 font-normal text-sm">{t.subtitle}</span>
-            {isGated && (<span className="ml-2 inline-flex text-xs text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">Premium</span>)}
+            {t.label}{' '}
+            <span className="text-slate-500 font-normal text-sm">{t.subtitle}</span>
+            {isGated && <span className="ml-2 inline-flex text-xs text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">Premium</span>}
           </div>
+
           <div className="text-sm text-slate-600">
-            {rule ? <>⏰ {rule.frequency} at {(rule.send_time || '').slice(0, 8)}</> : <>Inactive — <span className="italic">{t.type}</span></>}
+            {rule ? (
+              <>
+                ⏰ {rule.frequency} at {(rule.send_time || '').slice(0, 8)}
+              </>
+            ) : (
+              <>
+                Inactive — <span className="italic">{t.type}</span>
+              </>
+            )}
           </div>
+
           <div className="text-xs text-slate-500 mt-1">
             {rule
               ? (rule.is_enabled ? '🟢 Active' : '⚪ Inactive') +
                 ' • 📢 ' +
-                (rule.channels
-                  ? Object.entries(rule.channels).filter(([, v]) => v).map(([k]) => k).join(', ')
-                  : 'No method selected')
+                (rule.channels ? Object.entries(rule.channels).filter(([, v]) => v).map(([k]) => k).join(', ') : 'No method selected')
               : 'Not configured yet'}
           </div>
 
           {rule && !isGated && rule.is_enabled && (
             <div className="text-xs text-slate-600 mt-1">
-              {nextInfo
-                ? (nextInfo.local
-                    ? <>🕒 Next: <span className="font-medium">{nextInfo.rel}</span> — {nextInfo.local} <span className="text-slate-400">({effectiveTz})</span></>
-                    : <>🕒 Next: <span className="text-slate-500">scheduling…</span></>)
-                : null}
+              {nextInfo ? (
+                nextInfo.local ? (
+                  <>
+                    🕒 Next: <span className="font-medium">{nextInfo.rel}</span> — {nextInfo.local}{' '}
+                    <span className="text-slate-400">({effectiveTz})</span>
+                  </>
+                ) : (
+                  <>
+                    🕒 Next: <span className="text-slate-500">scheduling…</span>
+                  </>
+                )
+              ) : null}
             </div>
           )}
 
@@ -819,34 +963,54 @@ export default function NotificationsPanel({ projectId }: Props) {
 
         <div className="flex flex-wrap gap-2 justify-end">
           {!rule ? (
-            <button onClick={() => !isGated && ensureBuiltIn(t.type)} disabled={isGated}
-              className={`text-sm rounded px-3 py-1.5 ${isGated ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>
+            <button
+              onClick={() => !isGated && ensureBuiltIn(t.type)}
+              disabled={isGated}
+              className={`text-sm rounded px-3 py-1.5 ${isGated ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+            >
               Activate
             </button>
           ) : (
             <>
-              <button onClick={() => !isGated && toggleActive(rule)} disabled={isGated}
+              <button
+                onClick={() => !isGated && toggleActive(rule)}
+                disabled={isGated}
                 className={`text-sm rounded px-3 py-1.5 ${
                   rule.is_enabled
-                    ? isGated ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-slate-200 text-slate-900 hover:bg-slate-300'
-                    : isGated ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                }`}>
+                    ? isGated
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      : 'bg-slate-200 text-slate-900 hover:bg-slate-300'
+                    : isGated
+                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                }`}
+              >
                 {rule.is_enabled ? 'Deactivate' : 'Activate'}
               </button>
 
-              <button onClick={() => !isGated && sendTest(rule)} disabled={isGated || disableSendTest}
+              <button
+                onClick={() => !isGated && sendTest(rule)}
+                disabled={isGated || disableSendTest}
                 className={`text-sm rounded px-3 py-1.5 text-white ${isGated || disableSendTest ? 'bg-blue-400 cursor-not-allowed opacity-60' : 'bg-blue-600 hover:bg-blue-700'}`}
-                title={isGated ? 'Premium feature' : disableSendTest ? 'Connect Telegram in Functions → APIs' : 'Send a test message'}>
+                title={isGated ? 'Premium feature' : disableSendTest ? 'Connect Telegram in Functions → APIs' : 'Send a test message'}
+              >
                 Send Test
               </button>
 
-              <button onClick={() => !runLocked && runNow(rule)} disabled={runLocked}
+              <button
+                onClick={() => !runLocked && runNow(rule)}
+                disabled={runLocked}
                 className={`text-sm rounded px-3 py-1.5 text-white relative ${runLocked ? 'bg-slate-400 cursor-not-allowed opacity-70' : 'bg-slate-600 hover:bg-slate-700'}`}
-                title={runLocked ? 'Premium feature' : 'Run this notification now'}>
+                title={runLocked ? 'Premium feature' : 'Run this notification now'}
+              >
                 Run Now {runLocked && <PremiumPill className="ml-1" />}
               </button>
-              <button onClick={() => !isGated && startEdit(rule)} disabled={isGated}
-                className={`text-sm ${isGated ? 'text-slate-400 cursor-not-allowed' : 'text-indigo-600 hover:underline'}`}>
+
+              <button
+                onClick={() => !isGated && startEdit(rule)}
+                disabled={isGated}
+                className={`text-sm ${isGated ? 'text-slate-400 cursor-not-allowed' : 'text-indigo-600 hover:underline'}`}
+              >
                 Edit
               </button>
             </>
@@ -855,17 +1019,13 @@ export default function NotificationsPanel({ projectId }: Props) {
 
         {isGated && (
           <div className="absolute inset-0 z-10 rounded-lg bg-white/60 backdrop-blur-sm flex items-center justify-center pointer-events-auto">
-            <div className="flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-indigo-700 text-sm">
-              🔒 Premium feature
-            </div>
+            <div className="flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-indigo-700 text-sm">🔒 Premium feature</div>
           </div>
         )}
       </div>
     );
 
-    if (rule && editingId === rule.id) {
-      return <EditCard bare />;
-    }
+    if (rule && editingId === rule.id) return <EditCard bare />;
     return CardBody;
   };
 
@@ -879,16 +1039,86 @@ export default function NotificationsPanel({ projectId }: Props) {
 
   const builtInList = (
     <div className="space-y-3">
-      {BUILT_INS.map((b) => (<BuiltInCard key={b.type} t={b} />))}
+      {BUILT_INS.map((b) => (
+        <BuiltInCard key={b.type} t={b} />
+      ))}
     </div>
   );
+
+  /* ---------- bottom discussions UI ---------- */
+  const DiscussionsSection = () => {
+    const CompactSwitch = ({ on }: { on: boolean }) => (
+      <span
+        className={`inline-flex items-center px-2 py-[2px] rounded-full text-[11px] font-medium ${
+          on ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+        }`}
+      >
+        {on ? 'On' : 'Off'}
+      </span>
+    );
+
+    return (
+      <div className="rounded-xl border border-slate-200/70 bg-white/80 shadow-sm p-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="font-semibold text-slate-900">💬 Discussions</div>
+          <button
+            onClick={refreshDiscussions}
+            className="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700"
+            title="Refresh list"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="text-xs text-slate-500 mb-3">
+          (Prep for per-discussion notification toggles — we’ll wire the real switch later.)
+        </div>
+
+        {!discussions.length ? (
+          <div className="text-sm text-slate-600">No discussions found for this project.</div>
+        ) : (
+          <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+            <div className="grid grid-cols-12 gap-2 px-3 py-2 text-[11px] font-semibold text-slate-500">
+              <div className="col-span-7">Discussion</div>
+              <div className="col-span-3">Frequency</div>
+              <div className="col-span-2 text-right">Notify</div>
+            </div>
+
+            {discussions.slice(0, 6).map((d) => {
+              // placeholders for now — ready for you to wire later to a discussion_notifications table / rule
+              const freqLabel = '—';
+              const isOn = false;
+
+              return (
+                <div key={d.id} className="grid grid-cols-12 gap-2 px-3 py-2 items-center">
+                  <div className="col-span-7 min-w-0">
+                    <div className="text-sm text-slate-900 truncate">{d.name}</div>
+                    <div className="text-[11px] text-slate-400 truncate font-mono">{d.id}</div>
+                  </div>
+                  <div className="col-span-3 text-sm text-slate-700">{freqLabel}</div>
+                  <div className="col-span-2 flex justify-end">
+                    <CompactSwitch on={isOn} />
+                  </div>
+                </div>
+              );
+            })}
+
+            {discussions.length > 6 && (
+              <div className="px-3 py-2 text-xs text-slate-500">
+                Showing 6 of {discussions.length}.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="p-6 overflow-y-auto space-y-4 scroll-smoothbar">
       <div className="rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 shadow flex items-center justify-between">
         <h2 className="text-xl sm:text-2xl font-bold text-white">🛎️ Notifications</h2>
 
-        {/* Status pills */}
         <div className="flex items-center gap-2">
           {tgState.connected ? (
             <span className="text-xs sm:text-sm inline-flex items-center gap-2 bg-green-600/90 text-white px-3 py-1 rounded-full">
@@ -910,9 +1140,12 @@ export default function NotificationsPanel({ projectId }: Props) {
         </div>
       </div>
 
-      {feedback && (<div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">{feedback}</div>)}
+      {feedback && <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">{feedback}</div>}
 
       <Section>{editingBuiltIn ? <EditCard bare /> : builtInList}</Section>
+
+      {/* ✅ New bottom section */}
+      <DiscussionsSection />
 
       <style jsx global>{`
         .scroll-smoothbar { scrollbar-width: thin; scrollbar-color: #c7d2fe transparent; }

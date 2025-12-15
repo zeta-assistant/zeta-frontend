@@ -15,6 +15,8 @@ import GeneratorView from './Icons/GeneratorView';
 import InterpreterView from './Icons/InterpreterView';
 import MemoryView from './Icons/MemoryView';
 import { SectionCard } from './Icons/common';
+import DataCenterView from './Icons/DataCenterView';
+
 
 /* ─────────────────────────────────────────────────────────
    Types + helpers
@@ -33,8 +35,11 @@ type BuiltInFolder =
   | 'converter'
   | 'generator'
   | 'interpreter'
-  | 'memory';
+  | 'memory'
+  | 'datacenter';
+
 type FolderId = BuiltInFolder | `custom:${string}`;
+
 type CustomFolder = { id: `custom:${string}`; name: string };
 
 type Plan = 'loading' | 'free' | 'premium' | 'pro';
@@ -44,9 +49,9 @@ function normalizePlanValue(raw: any): Plan {
   if (!v) return 'free';
   if (v === 'pro') return 'pro';
   if (['premium', 'plus', 'paid', 'trial_premium'].includes(v)) return 'premium';
-  if (v === 'free') return 'free';
   return 'free';
 }
+
 
 /** remove a single outer ``` fenced block if present */
 function stripOuterFences(text: string) {
@@ -95,10 +100,14 @@ function titleFor(view: FolderId | null, customFolders: CustomFolder[]) {
   if (view === 'generator') return 'File Generator';
   if (view === 'interpreter') return 'File Interpreter';
   if (view === 'memory') return 'Memory Files';
-  if (view?.startsWith('custom:'))
+  if (view === 'datacenter') return 'Data Center';
+
+  if (view.startsWith('custom:')) {
     return customFolders.find((f) => f.id === view)?.name || 'Folder';
+  }
   return 'Files';
 }
+
 
 function downloadUrl(url: string, fallbackName = 'download') {
   const a = document.createElement('a');
@@ -1019,6 +1028,11 @@ export default function FilesPanel({
             <GeneratorView projectId={projectId} onGenerated={loadGenerated} />
           </ViewErrorBoundary>
         )}
+{view === 'datacenter' && (
+  <ViewErrorBoundary label="Data Center">
+    <DataCenterView projectId={projectId} />
+  </ViewErrorBoundary>
+)}
 
         {view === 'interpreter' &&
           (isFree ? (
@@ -1322,6 +1336,14 @@ function DesktopGrid({
       subtitle: pluralize(memoryCount),
       onOpen: () => onOpen('memory'),
     },
+    {
+  id: 'datacenter',
+  icon: '🗄️',
+  title: 'Data Center',
+  subtitle: 'Relevant knowledge',
+  onOpen: () => onOpen('datacenter'),
+},
+
     ...customFolders.map((f) => ({
       id: f.id,
       icon: '📁',

@@ -66,7 +66,7 @@ export const BUILT_INS: Array<{
     type: 'relevant_discussion',
     label: 'Relevant Discussion',
     subtitle: ' ',
-    defaults: { frequency: 'hourly', send_time: '15:00' },
+    defaults: { frequency: 'daily', send_time: '15:00' },
   },
   {
     type: 'calendar',
@@ -895,6 +895,34 @@ export async function runOutreach(
 ): Promise<{ result: any; feedback: string }> {
   await assertManualRunAllowed(supabase, rule.project_id, opts);
 
+  // 🔒 Debounce: avoid spamming outreach if one just went out recently
+  try {
+    const { data: recentRows } = await supabase
+      .from('custom_notifications')
+      .select('id, sent_at, type')
+      .eq('project_id', rule.project_id)
+      .eq('type', 'outreach')
+      .order('sent_at', { ascending: false })
+      .limit(1);
+
+    const recent = Array.isArray(recentRows) ? recentRows[0] : recentRows;
+    if (recent?.sent_at) {
+      const last = new Date(recent.sent_at).getTime();
+      const now = Date.now();
+      const diffMinutes = (now - last) / 60000;
+
+      // if we sent an outreach in the last 2 minutes, skip this run
+      if (diffMinutes < 2) {
+        return {
+          result: { skipped: 'recent_outreach', last_sent_at: recent.sent_at },
+          feedback: 'ℹ️ Outreach suppressed (recent message already sent).',
+        };
+      }
+    }
+  } catch {
+    // best-effort; don't crash if this check fails
+  }
+
   // 1) trigger generator (edge fn) — ask it to produce the line
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 25_000);
@@ -912,24 +940,38 @@ export async function runOutreach(
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         apikey: (process?.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY as string) || '',
       },
-      body: JSON.stringify({ project_id: rule.project_id, trigger: opts?.manual ? 'manual' : 'auto' }),
+      body: JSON.stringify({
+        project_id: rule.project_id,
+        trigger: opts?.manual ? 'manual' : 'auto',
+      }),
       keepalive: true,
     });
-    try { triggerJson = await res.json(); } catch { triggerJson = null; }
+    try {
+      triggerJson = await res.json();
+    } catch {
+      triggerJson = null;
+    }
     if (!res.ok) {
       clearTimeout(timer);
-      return { result: { trigger: { status: res.status, body: triggerJson } }, feedback: `❌ daily-chat-message failed (${res.status}).` };
+      return {
+        result: { trigger: { status: res.status, body: triggerJson } },
+        feedback: `❌ daily-chat-message failed (${res.status}).`,
+      };
     }
   } catch (e: any) {
     clearTimeout(timer);
-    if (e?.name === 'AbortError') return { result: { trigger: 'timeout-local' }, feedback: '⏳ Processing in the background…' };
+    if (e?.name === 'AbortError') {
+      return {
+        result: { trigger: 'timeout-local' },
+        feedback: '⏳ Processing in the background…',
+      };
+    }
     return { result: null, feedback: `❌ ${e?.message || String(e)}` };
   } finally {
     clearTimeout(timer);
   }
 
   // 2) choose freshest text
-  // Prefer the edge fn's returned text if it looks like a real line (not the old placeholder)
   const looksReal = (s: any) =>
     typeof s === 'string' &&
     s.trim().length > 5 &&
@@ -969,7 +1011,7 @@ export async function runOutreach(
     } catch {}
   }
 
-  // fallback: zeta_conversation_log latest assistant line (order by id to avoid missing created_at)
+  // fallback: zeta_conversation_log latest assistant line (order by id)
   if (!text) {
     try {
       const { data: zl } = await supabase
@@ -994,7 +1036,12 @@ export async function runOutreach(
   }
 
   const clean = sanitize(text || '');
-  if (!clean) return { result: { trigger: triggerJson }, feedback: 'ℹ️ Outreach suppressed (no fresh text).' };
+  if (!clean) {
+    return {
+      result: { trigger: triggerJson },
+      feedback: 'ℹ️ Outreach suppressed (no fresh text).',
+    };
+  }
 
   // 3) deliver
   const wantsTelegram = rule.channels?.telegram ?? true;
@@ -1006,7 +1053,11 @@ export async function runOutreach(
     if (chatId) {
       const res = await fetch(urls.sendTelegram, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: sbKey,
+          Authorization: `Bearer ${sbKey}`,
+        },
         body: JSON.stringify({
           id: `outreach_${rule.id}_${Date.now()}`,
           projectId: rule.project_id,
@@ -1017,7 +1068,9 @@ export async function runOutreach(
       });
       const tgOut = await res.json().catch(() => ({}));
       result.telegram = tgOut;
-      if (!res.ok) return { result, feedback: `❌ Telegram send failed (${res.status}).` };
+      if (!res.ok) {
+        return { result, feedback: `❌ Telegram send failed (${res.status}).` };
+      }
     } else {
       result.telegram = { skipped: 'no verified chat_id' };
     }
@@ -1028,23 +1081,37 @@ export async function runOutreach(
     if (to) {
       const res = await fetch(urls.sendEmail, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: sbKey, Authorization: `Bearer ${sbKey}` },
-        body: JSON.stringify({ to, subject: '🔔 Outreach Message', message: clean }),
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: sbKey,
+          Authorization: `Bearer ${sbKey}`,
+        },
+        body: JSON.stringify({
+          to,
+          subject: '🔔 Outreach Message',
+          message: clean,
+        }),
       });
       const emailOut = await res.json().catch(() => ({}));
       result.email = emailOut;
-      if (!res.ok) return { result, feedback: `❌ Email send failed (${res.status}).` };
+      if (!res.ok) {
+        return { result, feedback: `❌ Email send failed (${res.status}).` };
+      }
     } else {
       result.email = { skipped: 'no project email saved' };
     }
   }
 
   if (!wantsTelegram && !wantsEmail && !(rule.channels?.inapp ?? false)) {
-    return { result, feedback: 'ℹ️ Triggered, but no delivery channel selected.' };
+    return {
+      result,
+      feedback: 'ℹ️ Triggered, but no delivery channel selected.',
+    };
   }
 
   return { result, feedback: '✅ Message sent.' };
 }
+
 
 
 
