@@ -540,7 +540,7 @@ export default function HomePage() {
           </h1>
           <p className="mt-4 text-lg text-slate-200 max-w-2xl mx-auto">
             Pantheon is home to Zeta, your customizable AI assistant. Able to
-            customize its preset features, personality, and tone, Zeta is you're
+            customize its preset features, personality, and tone, Zeta is your
             personal superintelligence here to help you achieve your goals in
             whatever way you use AI!
           </p>

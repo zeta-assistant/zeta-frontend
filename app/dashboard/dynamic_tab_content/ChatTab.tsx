@@ -264,13 +264,11 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     }
   }, [projectId]);
 
-  // If we mount with no messages yet (fresh project / startConversation), pull from DB
+    // Always pull from DB on mount / project change; we now ignore parent messagesProp
   useEffect(() => {
-    if (!projectId) return;
-    if (!messagesProp || messagesProp.length === 0) {
-      void hardRefreshConvo();
-    }
-  }, [projectId, messagesProp, hardRefreshConvo]);
+  if (!projectId) return;
+  void hardRefreshConvo();
+}, [projectId, hardRefreshConvo]);
 
   // Realtime: zeta_conversation_log (new inserts)
   useEffect(() => {
@@ -422,145 +420,106 @@ const ChatTab: React.FC<ChatTabProps> = (props) => {
     };
   }, [projectId]);
 
-  /* ---------- Reconcile optimistic vs incoming ---------- */
-  useEffect(() => {
-    if (!optimistic.length) return;
-    setOptimistic((prev) =>
-      prev.filter((o) => {
-        const oRole = o.role ?? 'user';
-        const oText = normText(getMsgContent(o));
-        const oTime = toDateOrNow(o).getTime();
-        const within = (m: any) =>
-          (m?.role ?? 'assistant') === oRole &&
-          normText(getMsgContent(m)) === oText &&
-          Math.abs(toDateOrNow(m).getTime() - oTime) < 120000;
+ /* ---------- Reconcile optimistic vs incoming ---------- */
+useEffect(() => {
+  if (!optimistic.length) return;
 
-        const base = Array.isArray(messagesProp) ? messagesProp : [];
-        const matchedInParent = base.some(within);
-        const matchedInLive = live.some(within);
-        const matchedInUIL = userInputs.some(within);
+  setOptimistic((prev) =>
+    prev.filter((o) => {
+      const oRole = o.role ?? 'user';
+      const oText = normText(getMsgContent(o));
+      const oTime = toDateOrNow(o).getTime();
 
-        return !(matchedInParent || matchedInLive || matchedInUIL);
-      })
-    );
-  }, [messagesProp, live, userInputs]); // eslint-disable-line react-hooks/exhaustive-deps
+      const within = (m: any) =>
+        (m?.role ?? 'assistant') === oRole &&
+        normText(getMsgContent(m)) === oText &&
+        Math.abs(toDateOrNow(m).getTime() - oTime) < 120000;
 
-  /* ---------- Combine feeds ---------- */
-  const combined = useMemo(() => {
-    const base = (Array.isArray(messagesProp) ? messagesProp : []).map((m) => ({
-      ...m,
-      source: 'base' as const,
-    }));
-    const merged = [...base, ...outreach, ...live, ...userInputs, ...optimistic];
+      const matchedInLive = live.some(within);
+      const matchedInUIL = userInputs.some(within);
 
-    const out: any[] = [];
-    const byId = new Map<string, number>();
+      // drop optimistic once it shows up in DB / user_input_log
+      return !(matchedInLive || matchedInUIL);
+    })
+  );
+}, [live, userInputs, optimistic.length]);
 
-    const sourcePriority: Record<string, number> = {
-      live: 4,
-      base: 3,
-      user_input_log: 2,
-      outreach: 1,
-      optimistic: 0,
-    };
-    const roleRank = (r?: string) => (r === 'user' ? 0 : r === 'assistant' ? 1 : 2);
+  
+/* ---------- Combine feeds (hard de-dupe) ---------- */
+const combined = useMemo(() => {
+  // Single source of truth: DB + realtime + outreach + optimistic
+  const merged = [...outreach, ...live, ...userInputs, ...optimistic];
 
-    const pushOrMerge = (m: any) => {
-      const id = m?.id && String(m.id);
-      const role = m?.role ?? 'assistant';
-      const text = normText(getMsgContent(m));
-      const time = toDateOrNow(m).getTime();
-      const src = m?.source ?? 'base';
+  const out: any[] = [];
 
-      const hasRealId = !!id && !id.startsWith('temp-') && !id.startsWith('uil-');
+  const sourcePriority: Record<string, number> = {
+    live: 4,
+    user_input_log: 3,
+    outreach: 2,
+    optimistic: 1,
+    base: 0,
+  };
 
-      // If we already have this real DB row by id, just merge into it.
-      if (id && hasRealId) {
-        const existingIndex = byId.get(id);
-        if (existingIndex != null) {
-          out[existingIndex] = { ...out[existingIndex], ...m };
-          return;
-        }
-      }
+  const roleRank = (r?: string) =>
+    r === 'user' ? 0 : r === 'assistant' ? 1 : 2;
 
-      // Only collapse by text/time when at least one side is NOT a real DB row.
-      const idx = out.findIndex((u) => {
-        const uId = u?.id && String(u.id);
-        const uHasRealId =
-          !!uId && !uId.startsWith('temp-') && !uId.startsWith('uil-');
+  const pushOrMerge = (m: any) => {
+    const role = m?.role ?? 'assistant';
+    const text = normText(getMsgContent(m));
+    const time = toDateOrNow(m).getTime();
+    const src = m?.source ?? 'base';
 
-        // If both have real, different IDs, treat them as separate messages.
-        if (hasRealId && uHasRealId && uId !== id) return false;
-
-        return (
-          (u?.role ?? 'assistant') === role &&
-          normText(getMsgContent(u)) === text &&
-          Math.abs(toDateOrNow(u).getTime() - time) < 120000
-        );
-      });
-
-      if (idx === -1) {
-        const newIndex = out.push(m) - 1;
-        if (id && hasRealId) byId.set(id, newIndex);
-        return;
-      }
-
-      const existing = out[idx];
-      const existingHasRealId =
-        !!existing?.id &&
-        !String(existing.id).startsWith('temp-') &&
-        !String(existing.id).startsWith('uil-');
-      const existingTime = toDateOrNow(existing).getTime();
-      const existingSrc = existing?.source ?? 'base';
-
-      const incomingWins =
-        (!existingHasRealId && hasRealId) ||
-        time > existingTime ||
-        (time === existingTime &&
-          (sourcePriority[src] ?? 0) > (sourcePriority[existingSrc] ?? 0));
-
-      if (incomingWins) {
-        out[idx] = m;
-        if (id && hasRealId) byId.set(id, idx);
-      }
-    };
-    merged.forEach(pushOrMerge);
-
-    out.sort((a, b) => {
-      const ta = toDateOrNow(a).getTime();
-      const tb = toDateOrNow(b).getTime();
-      const pa = sourcePriority[a?.source ?? 'base'] ?? 0;
-      const pb = sourcePriority[b?.source ?? 'base'] ?? 0;
-
-      // 1) Primary: chronological order
-      if (ta !== tb) return ta - tb;
-
-      // 2) Same exact timestamp: prefer user before assistant
-      const rr = roleRank(a?.role) - roleRank(b?.role); // user(0) < assistant(1)
-      if (rr !== 0) return rr;
-
-      // 3) Then more "authoritative" source
-      if (pa !== pb) return pa - pb;
-
-      // 4) Finally, stable-ish tie-breaker on having a real DB id
-      const aIdReal =
-        !!a?.id &&
-        !String(a.id).startsWith('temp-') &&
-        !String(a.id).startsWith('uil-')
-          ? 1
-          : 0;
-      const bIdReal =
-        !!b?.id &&
-        !String(b.id).startsWith('temp-') &&
-        !String(b.id).startsWith('uil-')
-          ? 1
-          : 0;
-
-      return aIdReal - bIdReal;
+    // Look for an existing message with same role + text
+    // within a 2-minute window, regardless of DB id.
+    const idx = out.findIndex((u) => {
+      return (
+        (u?.role ?? 'assistant') === role &&
+        normText(getMsgContent(u)) === text &&
+        Math.abs(toDateOrNow(u).getTime() - time) < 120000
+      );
     });
 
-    return out;
-  }, [messagesProp, outreach, live, userInputs, optimistic]);
+    if (idx === -1) {
+      out.push(m);
+      return;
+    }
+
+    const existing = out[idx];
+    const existingTime = toDateOrNow(existing).getTime();
+    const existingSrc = existing?.source ?? 'base';
+
+    // Choose the “better” one to keep
+    const incomingWins =
+      time > existingTime ||
+      (time === existingTime &&
+        (sourcePriority[src] ?? 0) > (sourcePriority[existingSrc] ?? 0));
+
+    if (incomingWins) {
+      out[idx] = m;
+    }
+  };
+
+  merged.forEach(pushOrMerge);
+
+  // Final sort: chronological, then user before assistant
+  out.sort((a, b) => {
+    const ta = toDateOrNow(a).getTime();
+    const tb = toDateOrNow(b).getTime();
+    if (ta !== tb) return ta - tb;
+
+    const ra = roleRank(a?.role);
+    const rb = roleRank(b?.role);
+    if (ra !== rb) return ra - rb;
+
+    const pa = sourcePriority[a?.source ?? 'base'] ?? 0;
+    const pb = sourcePriority[b?.source ?? 'base'] ?? 0;
+    return pa - pb;
+  });
+
+  return out;
+}, [outreach, live, userInputs, optimistic]);
+
+
 
   /* ---------- attachments ---------- */
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
