@@ -9,7 +9,6 @@ import { supabase } from '@/lib/supabaseClient';
 import { getPlanFromUser, PLAN_LIMIT, type Plan } from '@/lib/plan';
 import { PlanTag } from '@/components/ui/ZetaPremiumMark';
 
-
 // Optional XP utils. Falls back gracefully if not present.
 let getXPProgress: ((xp: number) => any) | undefined;
 let LEVELS: Array<{ level: number; title: string }> | undefined;
@@ -37,326 +36,75 @@ type SessionSummary = {
 
 type ProjectRowRaw = Record<string, any>;
 
-type Template =
-  | 'zeta build'
-  | 'zeta learn'
-  | 'zeta chef'
-  | 'zeta trainer'
-  | 'zeta engineer'
-  | 'zeta writer'
-  | 'zeta motivation'
-  | 'zeta quant';
-
 type Project = {
   id: string;
   name: string;
-  template: Template;
   levelNum?: number;
   levelTitle?: string;
+  createdAt?: string | null;
 };
 
-type UseCase = {
-  key: string;
-  label: string;
-  description: string;
-  emoji: string;
-  href: string;
-  recommendedTemplate: Template;
-  color: string; // tailwind bg class
+type FeaturedTemplate = {
+  key: string; // e.g. 'zeta learn'
+  title: string; // e.g. 'Zeta Learn'
+  tagline: string; // short one-liner
+  description: string; // hero paragraph
+  primaryCtaText: string;
+  primaryHref: string; // e.g. '/onboarding?template=zeta%20learn'
+  secondaryCtaText: string;
+  secondaryHref: string; // usually login or learn more
+  imageSrc: string; // big hero image
+  bullets: Array<{ icon: string; title: string; desc: string }>; // 3 cards
 };
 
 /* ========================= Constants ========================= */
 
 const DEFAULT_AVATAR_SRC = '/user-faceless.svg';
+const ZETA_SHOWCASE_SRC = '/framed-agents/zeta-framed.png';
 
-const TEMPLATE_ICONS: Record<Template, string> = {
-  'zeta build': '/templates/zeta-build.png',
-  'zeta learn': '/templates/zeta-learn.png',
-  'zeta chef': '/templates/zeta-chef.png',
-  'zeta trainer': '/templates/zeta-trainer.png',
-  'zeta engineer': '/templates/zeta-engineer.png',
-  'zeta writer': '/templates/zeta-writer.png',
-  'zeta motivation': '/templates/zeta-motivation.png',
-  'zeta quant': '/templates/zeta-quant.png',
-};
-
-const TEMPLATE_DISPLAY: Record<
-  Template,
-  { title: string; sub: string; href: string }
-> = {
-  'zeta build': {
-    title: 'Zeta Build',
-    sub: 'Plan, ship, and track progress.',
-    href: '/onboarding?template=zeta%20build',
-  },
-  'zeta learn': {
-    title: 'Zeta Learn',
-    sub: 'Study, research, and write faster.',
-    href: '/onboarding?template=zeta%20learn',
-  },
-  'zeta chef': {
-    title: 'Zeta Chef',
-    sub: 'Plan meals and generate smart recipes.',
-    href: '/onboarding?template=zeta%20chef',
-  },
-  'zeta trainer': {
-    title: 'Zeta Trainer',
-    sub: 'Programs, tracking, and coaching.',
-    href: '/onboarding?template=zeta%20trainer',
-  },
-  'zeta engineer': {
-    title: 'Zeta Engineer',
-    sub: 'Code, debug, and design systems.',
-    href: '/onboarding?template=zeta%20engineer',
-  },
-  'zeta writer': {
-    title: 'Zeta Writer',
-    sub: 'Concept to outline to polished draft.',
-    href: '/onboarding?template=zeta%20writer',
-  },
-  'zeta motivation': {
-    title: 'Zeta Motivation',
-    sub: 'Mindset, focus, and momentum.',
-    href: '/onboarding?template=zeta%20motivation',
-  },
-  'zeta quant': {
-    title: 'Zeta Quant',
-    sub: 'Data, finance, accounting & analysis.',
-    href: '/onboarding?template=zeta%20quant',
-  },
-};
-
-// 5-trait lists shown under each template card
-const TEMPLATE_TRAITS: Record<Template, string[]> = {
-  'zeta learn': [
-    'Math Whiz',
-    'Concept Simplifier',
-    'Patient Teacher',
-    'Pattern Spotter',
-    'Curious Explorer',
-  ],
-  'zeta build': [
-    'Goal-Driven',
-    'Organized Planner',
-    'Strategic Thinker',
-    'Visionary Leader',
-    'Outcome Oriented',
-  ],
-  'zeta engineer': [
-    'Analytical Mind',
-    'Code Architect',
-    'Problem Solver',
-    'Logical Thinker',
-    'Efficiency Optimizer',
-  ],
-  'zeta writer': [
-    'Idea Generator',
-    'Creative Thinker',
-    'Expressive Communicator',
-    'Storyteller',
-    'Wordsmith',
-  ],
-  'zeta trainer': [
-    'Motivator',
-    'Performance Coach',
-    'Habit Architect',
-    'Disciplined',
-    'Results-Focused',
-  ],
-  'zeta chef': [
-    'Creative Cook',
-    'Resourceful Planner',
-    'Flavor Experimenter',
-    'Nutritional Thinker',
-    'Precision Maker',
-  ],
-  'zeta motivation': [
-    'Drive Igniter',
-    'Resilience Coach',
-    'Mindset Shifter',
-    'Focus Builder',
-    'Purpose Finder',
-  ],
-  'zeta quant': [
-    'Data Analyst',
-    'Financial Thinker',
-    'Risk Evaluator',
-    'Precision Calculator',
-    'Insight Generator',
+// ✅ Change THIS later to feature Chef/Trainer/etc.
+// Example swap later:
+// key:'zeta chef', title:'Zeta Chef', primaryHref:'/onboarding?template=zeta%20chef', bullets:[...]
+const FEATURED_TEMPLATE: FeaturedTemplate = {
+  key: 'zeta learn',
+  title: 'Zeta Learn',
+  tagline: 'Your AI study coach',
+  description:
+    'Upload notes. Get quizzes. Stay on schedule. Zeta can check in, track weak topics, and keep you consistent until exam day.',
+  primaryCtaText: 'Try Zeta Learn →',
+  primaryHref: '/onboarding?template=zeta%20learn',
+  secondaryCtaText: 'Login',
+  secondaryHref: '/login',
+  imageSrc: ZETA_SHOWCASE_SRC,
+  bullets: [
+    {
+      icon: '📝',
+      title: 'Quizzes from your notes',
+      desc: 'Turn lectures, PDFs, and dot points into flashcards, MCQs, and short-answer quizzes in seconds.',
+    },
+    {
+      icon: '📅',
+      title: 'Deadlines → a real plan',
+      desc: 'Zeta turns “exam on the 12th” into a weekly plan, reminders, and daily study blocks you can follow.',
+    },
+    {
+      icon: '⚡',
+      title: 'Accountability + progress',
+      desc: 'Zeta messages you first, checks in daily, tracks weak areas, and adapts your revision plan over time.',
+    },
   ],
 };
-
-const KNOWN_TEMPLATES: Template[] = [
-  'zeta build',
-  'zeta learn',
-  'zeta engineer',
-  'zeta writer',
-  'zeta trainer',
-  'zeta chef',
-  'zeta motivation',
-  'zeta quant',
-];
-
-const USE_CASES: UseCase[] = [
-  {
-    key: 'cooking',
-    label: 'Cooking',
-    description: 'Plan meals, recipes, and shopping.',
-    emoji: '🍳',
-    color: 'bg-[#FFEEDB]', // warm cream
-    href: '/onboarding?template=zeta%20chef',
-    recommendedTemplate: 'zeta chef',
-  },
-  {
-    key: 'learning',
-    label: 'Learning',
-    description: 'Explore new topics and ideas.',
-    emoji: '🧠',
-    color: 'bg-[#E3F2FD]', // light blue
-    href: '/onboarding?template=zeta%20learn',
-    recommendedTemplate: 'zeta learn',
-  },
-  {
-    key: 'studying',
-    label: 'Studying',
-    description: 'Revise smarter for exams.',
-    emoji: '📚',
-    color: 'bg-[#F3E5F5]', // soft purple
-    href: '/onboarding?template=zeta%20learn',
-    recommendedTemplate: 'zeta learn',
-  },
-  {
-    key: 'personal_conversations',
-    label: 'Personal Conversations',
-    description: 'Talk through situations, get social help, or think out loud.',
-    emoji: '💬',
-    color: 'bg-[#E8F5E9]', // light mint
-    href: '/onboarding?template=zeta%20motivation',
-    recommendedTemplate: 'zeta motivation',
-  },
-  {
-    key: 'projects_planning',
-    label: 'Projects & Planning',
-    description: 'Organize goals, tasks, and life structure.',
-    emoji: '📋',
-    color: 'bg-[#FFF3CD]', // soft yellow
-    href: '/onboarding?template=zeta%20build',
-    recommendedTemplate: 'zeta build',
-  },
-  {
-    key: 'exercising',
-    label: 'Fitness & Training',
-    description: 'Training plans and habit tracking.',
-    emoji: '🏋️',
-    color: 'bg-[#FDEDEC]', // soft red
-    href: '/onboarding?template=zeta%20trainer',
-    recommendedTemplate: 'zeta trainer',
-  },
-  {
-    key: 'writing',
-    label: 'Writing',
-    description: 'Essays, content, and scripts.',
-    emoji: '✍️',
-    color: 'bg-[#E8EAF6]', // light indigo
-    href: '/onboarding?template=zeta%20writer',
-    recommendedTemplate: 'zeta writer',
-  },
-  {
-    key: 'money_analysis',
-    label: 'Money & Analysis',
-    description: 'Track spending, analyze trends, and make informed decisions.',
-    emoji: '💹',
-    color: 'bg-[#E2F7F6]', // aqua teal
-    href: '/onboarding?template=zeta%20quant',
-    recommendedTemplate: 'zeta quant',
-  },
-];
-
-/* ========================= Helpers ========================= */
-
-function classifyTemplateValue(raw: unknown): Template | null {
-  const s = (raw ?? '').toString().trim().toLowerCase();
-  if (!s) return null;
-
-  // exact matches
-  if (KNOWN_TEMPLATES.includes(s as Template)) return s as Template;
-
-  // friendly aliasing
-  if (/\bexercise\b/.test(s)) return 'zeta trainer';
-  if (/\btrainer\b/.test(s)) return 'zeta trainer';
-  if (/\bbuild\b/.test(s)) return 'zeta build';
-  if (/\blearn\b/.test(s)) return 'zeta learn';
-  if (/\bchef|cook|kitchen|recipe\b/.test(s)) return 'zeta chef';
-  if (/\bengineer|code|coder|dev|developer\b/.test(s)) return 'zeta engineer';
-  if (/\bwriter|writing|author|copy\b/.test(s)) return 'zeta writer';
-  if (/\bmotivation|mindset|sage|emotion\b/.test(s)) return 'zeta motivation';
-  if (/\bquant|finance|accounting|analytics|data\b/.test(s)) return 'zeta quant';
-
-  // sometimes template_id is a human slug like "zeta_build" or "build"
-  if (/zeta[_\s-]*build/.test(s)) return 'zeta build';
-  if (/zeta[_\s-]*learn/.test(s)) return 'zeta learn';
-  if (/zeta[_\s-]*chef/.test(s)) return 'zeta chef';
-  if (/zeta[_\s-]*trainer|zeta[_\s-]*exercise/.test(s)) return 'zeta trainer';
-  if (/zeta[_\s-]*engineer|zeta[_\s-]*code/.test(s)) return 'zeta engineer';
-  if (/zeta[_\s-]*writer/.test(s)) return 'zeta writer';
-  if (/zeta[_\s-]*motivation|zeta[_\s-]*sage|zeta[_\s-]*emotion/.test(s))
-    return 'zeta motivation';
-  if (/zeta[_\s-]*quant/.test(s)) return 'zeta quant';
-
-  return null;
-}
-
-function normStr(v: any): string {
-  return (v ?? '').toString().trim();
-}
-
-function normalizeTemplateFromAny(row: ProjectRowRaw): Template {
-  // Prefer template_id if present
-  const idCandidates = [
-    row.template_id,
-    row.templateId,
-    row.project_template_id,
-    row.template_key,
-  ];
-
-  for (const c of idCandidates) {
-    const t = classifyTemplateValue(c);
-    if (t) return t;
-  }
-
-  // Then check name-ish fields
-  const nameCandidates = [
-    row.template,
-    row.project_template,
-    row.zeta_template,
-    row.template_name,
-    row.templateSlug,
-    row.template_type,
-    row.assistant_type, // legacy
-    row.agent, // legacy
-    row.type, // legacy
-  ];
-  for (const c of nameCandidates) {
-    const t = classifyTemplateValue(c);
-    if (t) return t;
-  }
-
-  // Last resort: scan all strings in the row
-  const hay = Object.values(row)
-    .filter((v) => typeof v === 'string')
-    .map(normStr)
-    .join(' | ');
-  const t = classifyTemplateValue(hay);
-  if (t) return t;
-
-  // Failsafe: default to Build so nothing goes to "Other"
-  return 'zeta build';
-}
 
 // Lightweight fallback in case XP utils aren't available
 const fallbackLevelFromXP = (xp: number) =>
   Math.max(1, Math.min(10, Math.floor(xp / 100) + 1));
 const fallbackTitleFromLevel = (lvl: number) => `Lv ${lvl}`;
+
+/* ========================= Helpers ========================= */
+
+function normStr(v: any): string {
+  return (v ?? '').toString().trim();
+}
 
 function getProjectLevel(row: ProjectRowRaw): {
   levelNum: number;
@@ -368,6 +116,7 @@ function getProjectLevel(row: ProjectRowRaw): {
       LEVELS?.find((l) => l.level === direct)?.title ?? `Lv ${direct}`;
     return { levelNum: direct, levelTitle: title };
   }
+
   const xp = Number(row.xp ?? row.total_xp ?? row.project_xp ?? Number.NaN);
   if (Number.isFinite(xp) && xp >= 0) {
     if (typeof getXPProgress === 'function') {
@@ -385,6 +134,7 @@ function getProjectLevel(row: ProjectRowRaw): {
     const lvl = fallbackLevelFromXP(xp);
     return { levelNum: lvl, levelTitle: fallbackTitleFromLevel(lvl) };
   }
+
   return null;
 }
 
@@ -394,15 +144,22 @@ function normalizeProject(row: ProjectRowRaw): Project {
     (typeof crypto !== 'undefined'
       ? crypto.randomUUID()
       : `tmp_${Date.now()}`);
+
   const name =
     normStr(row.name) ||
     normStr(row.title) ||
     normStr(row.project_name) ||
     normStr(row.projectTitle) ||
     'Untitled';
-  const template = normalizeTemplateFromAny(row);
+
   const lvl = getProjectLevel(row);
-  return { id, name, template, ...(lvl ?? {}) };
+
+  return {
+    id,
+    name,
+    ...(lvl ?? {}),
+    createdAt: row.created_at ?? row.createdAt ?? null,
+  };
 }
 
 /* ========================= Page ========================= */
@@ -419,6 +176,7 @@ export default function HomePage() {
       try {
         const { data } = await supabase.auth.getSession();
         const session = data?.session ?? null;
+
         if (!session?.user) {
           setSessionInfo(null);
           setProjects([]);
@@ -460,11 +218,12 @@ export default function HomePage() {
           limit,
         });
 
-        // fetch projects (all columns)
+        // fetch projects
         const { data: rows, error: projErr } = await supabase
           .from('user_projects')
           .select('*')
-          .eq('user_id', u.id);
+          .eq('user_id', u.id)
+          .order('created_at', { ascending: false });
 
         if (projErr) {
           console.error('projects fetch error', projErr);
@@ -482,24 +241,6 @@ export default function HomePage() {
       }
     })();
   }, []);
-
-  // Group by template (no "unknown" bucket anymore)
-  const byTemplate = useMemo(() => {
-    const base: Record<Template, Project[]> = {
-      'zeta build': [],
-      'zeta learn': [],
-      'zeta chef': [],
-      'zeta trainer': [],
-      'zeta engineer': [],
-      'zeta writer': [],
-      'zeta motivation': [],
-      'zeta quant': [],
-    };
-    for (const p of projects) {
-      base[p.template]?.push(p);
-    }
-    return base;
-  }, [projects]);
 
   const PlanBadge = useMemo(
     () =>
@@ -532,135 +273,116 @@ export default function HomePage() {
       <main className="relative min-h-screen bg-gradient-to-br from-[#0f1b3d] via-[#1d2d6b] to-[#2438a6] text-white">
         <Header authed={false} />
 
-        {/* Hero */}
+        {/* Platform Hero */}
         <section className="mx-auto w-full max-w-6xl px-4 mt-10 text-center">
-          <h1 className="text-4xl md:text-5xl font-extrabold text-white">
-            Pantheon{' '}
-            <span className="text-indigo-300">Personal Superintelligence</span>
-          </h1>
-          <p className="mt-4 text-lg text-slate-200 max-w-2xl mx-auto">
-            Pantheon is home to Zeta, your customizable AI assistant. Able to
-            customize its preset features, personality, and tone, Zeta is your
-            personal superintelligence here to help you achieve your goals in
-            whatever way you use AI!
-          </p>
-        </section>
+          <div className="mx-auto flex flex-col items-center">
+            <Image
+              src={ZETA_SHOWCASE_SRC}
+              alt="Zeta"
+              width={170}
+              height={170}
+              className="rounded-2xl"
+              priority
+            />
 
-        {/* What do you use AI for? */}
-        <section className="mx-auto mt-12 w-full max-w-5xl px-4">
-          <h2 className="text-2xl font-bold text-white text-center">
-            What do you use AI for?
-          </h2>
-          <p className="mt-2 text-sm text-slate-200 text-center max-w-xl mx-auto">
-            Tap a tile below and we&rsquo;ll match you to the Zeta agent that
-            fits best.
-          </p>
-          <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {USE_CASES.map((c) => {
-              const rec = TEMPLATE_DISPLAY[c.recommendedTemplate];
-              const recIcon = TEMPLATE_ICONS[c.recommendedTemplate];
-              return (
-                <div
-                  key={c.key}
-                  className={`group relative flex h-full flex-col justify-between rounded-2xl p-5 text-left shadow-md ring-1 ring-black/10 transition transform hover:-translate-y-1 hover:shadow-lg ${c.color}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/70 text-2xl">
-                      <span aria-hidden>{c.emoji}</span>
-                    </div>
-                    <div>
-                      <div className="text-sm md:text-base font-semibold text-gray-900">
-                        {c.label}
-                      </div>
-                      <div className="mt-1 text-[13px] md:text-sm text-gray-800/90">
-                        {c.description}
-                      </div>
-                    </div>
-                  </div>
+            <h1 className="mt-5 text-4xl md:text-5xl font-extrabold text-white">
+              Pantheon{' '}
+              <span className="text-indigo-300">Personal Superintelligence</span>
+            </h1>
 
-                  <div className="mt-4 flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-[12px] md:text-sm text-gray-900">
-                    <div className="min-w-0">
-                      <div className="font-semibold leading-tight">
-                        Recommended: {rec.title}
-                      </div>
-                      <div className="mt-0.5 text-[11px] md:text-xs text-gray-700 line-clamp-2">
-                        {rec.sub}
-                      </div>
-                    </div>
-                    <Image
-                      src={encodeURI(recIcon)}
-                      alt={rec.title}
-                      width={34}
-                      height={34}
-                      className="ml-2 shrink-0 rounded-md"
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Agents / Templates */}
-        <section className="mx-auto mt-12 w-full max-w-5xl px-4">
-          <div className="text-center mb-4">
-            <h2 className="text-2xl font-bold text-white">Agents</h2>
-            <p className="mt-1 text-sm text-slate-200">
-              Each Zeta agent is tuned for a different part of your life.
+            <p className="mt-4 text-lg text-slate-200 max-w-3xl mx-auto">
+              Pantheon is home to Zeta — your customizable AI assistant. Zeta can
+              take initiative, send reminders, and help you make real progress on
+              goals.
             </p>
-          </div>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
-            {(
-              ['zeta build', 'zeta learn', 'zeta chef', 'zeta trainer'] as
-              Template[]
-            ).map((tpl) => {
-              const icon = TEMPLATE_ICONS[tpl];
-              const { title, sub } = TEMPLATE_DISPLAY[tpl];
-              const traits = TEMPLATE_TRAITS[tpl];
-              return (
-                <div
-                  key={tpl}
-                  className="rounded-xl bg-white p-6 shadow hover:shadow-md"
-                >
-                  <Image
-                    src={encodeURI(icon)}
-                    alt={title}
-                    width={96}
-                    height={96}
-                    className="mx-auto mb-3 rounded-lg"
-                  />
-                  <h3 className="text-center text-lg font-semibold text-gray-800">
-                    {title}
-                  </h3>
-                  <p className="mt-1 text-center text-sm text-gray-600">
-                    {sub}
-                  </p>
-                  <ul className="mt-3 grid grid-cols-1 gap-1 text-xs text-gray-700">
-                    {traits.map((t) => (
-                      <li
-                        key={t}
-                        className="mx-auto w-fit rounded-full border px-2 py-0.5"
-                      >
-                        {t}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => router.push('/login')}
+                className="rounded-full bg-white px-6 py-3 text-[#0f1b3d] font-semibold hover:bg-slate-100 transition"
+              >
+                Get started →
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push('/login')}
+                className="rounded-full bg-indigo-500 px-6 py-3 text-white font-medium hover:bg-indigo-600 transition"
+              >
+                Login
+              </button>
+            </div>
           </div>
         </section>
 
-        {/* Browse Templates Button */}
-        <div className="text-center mt-10">
-          <button
-            type="button"
-            className="inline-block rounded-full bg-indigo-500 px-6 py-3 text-white font-medium hover:bg-indigo-600 transition"
-          >
-            Browse All Zeta Templates →
-          </button>
-        </div>
+        {/* Featured Template */}
+        <section className="mx-auto mt-12 w-full max-w-6xl px-4">
+          <div className="rounded-3xl bg-white/10 ring-1 ring-white/15 p-6 md:p-8">
+            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <div className="text-left">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-slate-100 ring-1 ring-white/10">
+                  <span aria-hidden>⭐</span>
+                  <span className="font-semibold">Featured Template</span>
+                </div>
+
+                <h2 className="mt-3 text-2xl md:text-3xl font-extrabold text-white">
+                  {FEATURED_TEMPLATE.title}{' '}
+                  <span className="text-indigo-300">
+                    — {FEATURED_TEMPLATE.tagline}
+                  </span>
+                </h2>
+
+                <p className="mt-3 text-slate-200 max-w-2xl">
+                  {FEATURED_TEMPLATE.description}
+                </p>
+
+                <div className="mt-5 flex flex-col sm:flex-row gap-3">
+                  <Link
+                    href={FEATURED_TEMPLATE.primaryHref}
+                    className="w-fit rounded-full bg-white px-6 py-3 text-[#0f1b3d] font-semibold hover:bg-slate-100 transition"
+                  >
+                    {FEATURED_TEMPLATE.primaryCtaText}
+                  </Link>
+                  <Link
+                    href={FEATURED_TEMPLATE.secondaryHref}
+                    className="w-fit rounded-full bg-indigo-500 px-6 py-3 text-white font-medium hover:bg-indigo-600 transition"
+                  >
+                    {FEATURED_TEMPLATE.secondaryCtaText}
+                  </Link>
+                </div>
+              </div>
+
+              <div className="flex justify-center md:justify-end">
+                <Image
+                  src={FEATURED_TEMPLATE.imageSrc}
+                  alt={FEATURED_TEMPLATE.title}
+                  width={160}
+                  height={160}
+                  className="rounded-2xl"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+              {FEATURED_TEMPLATE.bullets.map((b) => (
+                <div
+                  key={b.title}
+                  className="rounded-2xl bg-white p-6 shadow ring-1 ring-black/5"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-xl">
+                      <span aria-hidden>{b.icon}</span>
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {b.title}
+                    </h3>
+                  </div>
+                  <p className="mt-3 text-sm text-gray-600">{b.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
         {/* Premium */}
         <section className="mx-auto mt-16 flex flex-col md:flex-row items-center justify-center gap-8 max-w-5xl px-4 text-center md:text-left">
@@ -674,14 +396,10 @@ export default function HomePage() {
             />
           </div>
           <div>
-            <h2 className="text-3xl font-bold text-white mb-2">
-              Zeta Premium
-            </h2>
+            <h2 className="text-3xl font-bold text-white mb-2">Zeta Premium</h2>
             <p className="text-slate-200 text-lg max-w-md">
-              Unlock the full power of Pantheon — access more AI agents, deeper
-              customization, higher limits, and exclusive premium tools. Premium
-              gives you elite capabilities to turn ideas into outcomes faster,
-              smarter, and with greater precision.
+              Higher limits, deeper memory, and stronger autonomy — built for
+              people who want Zeta to run alongside them daily.
             </p>
 
             <ul className="mt-3 text-slate-100 text-sm space-y-1">
@@ -693,6 +411,7 @@ export default function HomePage() {
 
             <button
               type="button"
+              onClick={() => router.push('/login')}
               className="mt-5 inline-block rounded-full bg-amber-500 px-6 py-3 text-white font-semibold hover:bg-amber-600 transition"
             >
               Upgrade to Premium
@@ -700,9 +419,7 @@ export default function HomePage() {
           </div>
         </section>
 
-              
-
-        {/* 🔒 Overlay: click anywhere in main area → /login (footer left clickable) */}
+        {/* 🔒 Overlay: click anywhere in main area → /login */}
         <div
           className="fixed left-0 right-0 top-0 bottom-24 z-50 cursor-pointer"
           onClick={(e) => {
@@ -711,31 +428,18 @@ export default function HomePage() {
             router.push('/login');
           }}
         />
-
       </main>
     );
   }
 
   /* ===================== Logged-IN Home ===================== */
-  const { plan, username, selfDescription, avatarUrl, used, limit } =
-    sessionInfo;
+  const { plan, username, selfDescription, avatarUrl, used, limit } = sessionInfo;
   const remaining = Math.max(0, limit - used);
   const avatarSrc = avatarUrl || DEFAULT_AVATAR_SRC;
   const progressPct = Math.min(
     100,
     Math.round((used / Math.max(1, limit)) * 100)
   );
-
-  const TEMPLATE_ORDER: Template[] = [
-    'zeta build',
-    'zeta learn',
-    'zeta engineer',
-    'zeta writer',
-    'zeta trainer',
-    'zeta chef',
-    'zeta motivation',
-    'zeta quant',
-  ];
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-[#0f1b3d] via-[#1d2d6b] to-[#2438a6] text-white">
@@ -829,158 +533,135 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* What do you use AI for? (authed) */}
+      {/* Featured Template (authed) */}
       <section className="mx-auto mt-10 w-full max-w-6xl px-4">
-        <h2 className="text-xl font-semibold text-white text-center md:text-left">
-          What do you use AI for?
-        </h2>
-        <p className="mt-1 text-xs text-slate-200 text-center md:text-left max-w-xl">
-          Choose a tile to jump straight into creating a project with the right
-          Zeta agent.
-        </p>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {USE_CASES.map((c) => {
-            const rec = TEMPLATE_DISPLAY[c.recommendedTemplate];
-            const recIcon = TEMPLATE_ICONS[c.recommendedTemplate];
-            return (
-              <Link
-                key={c.key}
-                href={c.href}
-                className={`group relative flex h-full flex-col justify-between rounded-2xl p-4 text-left shadow-md ring-1 ring-black/10 transition transform hover:-translate-y-1 hover:shadow-lg ${c.color}`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/70 text-xl mb-0.5">
-                    <span aria-hidden>{c.emoji}</span>
-                  </div>
-                  <div>
-                    <div className="text-sm md:text-base font-semibold text-gray-900">
-                      {c.label}
-                    </div>
-                    <div className="mt-1 text-[12px] md:text-sm text-gray-900/90">
-                      {c.description}
-                    </div>
-                  </div>
-                </div>
+        <div className="rounded-3xl bg-white/10 ring-1 ring-white/15 p-6 md:p-8">
+          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+            <div className="text-left">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-slate-100 ring-1 ring-white/10">
+                <span aria-hidden>⭐</span>
+                <span className="font-semibold">Featured Template</span>
+              </div>
 
-                <div className="mt-3 flex items-center justify-between rounded-xl bg-white/70 px-3 py-2 text-[12px] md:text-sm text-gray-900">
-                  <div className="min-w-0">
-                    <div className="font-semibold leading-tight">
-                      Recommended: {rec.title}
-                    </div>
-                    <div className="mt-0.5 text-[11px] md:text-xs text-gray-700 line-clamp-2">
-                      {rec.sub}
-                    </div>
-                  </div>
-                  <Image
-                    src={encodeURI(recIcon)}
-                    alt={rec.title}
-                    width={26}
-                    height={26}
-                    className="ml-2 shrink-0 rounded-md"
-                  />
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
+              <h2 className="mt-3 text-2xl md:text-3xl font-extrabold text-white">
+                {FEATURED_TEMPLATE.title}{' '}
+                <span className="text-indigo-300">
+                  — {FEATURED_TEMPLATE.tagline}
+                </span>
+              </h2>
 
-      {/* Agents / Templates grid */}
-      <section className="mx-auto mt-10 w-full max-w-6xl px-4">
-        <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h2 className="text-2xl font-bold text-white">Agents</h2>
-            <p className="mt-1 text-sm text-slate-200">
-              Your projects are grouped by Zeta agent so you can see where your
-              time and progress lives.
-            </p>
+              <p className="mt-3 text-slate-200 max-w-2xl">
+                {FEATURED_TEMPLATE.description}
+              </p>
+
+              <div className="mt-5 flex flex-col sm:flex-row gap-3">
+                <Link
+                  href={FEATURED_TEMPLATE.primaryHref}
+                  className="w-fit rounded-full bg-white px-6 py-3 text-[#0f1b3d] font-semibold hover:bg-slate-100 transition"
+                >
+                  {FEATURED_TEMPLATE.primaryCtaText}
+                </Link>
+                <Link
+                  href="/projects"
+                  className="w-fit rounded-full bg-indigo-500 px-6 py-3 text-white font-medium hover:bg-indigo-600 transition"
+                >
+                  View projects
+                </Link>
+              </div>
+            </div>
+
+            <div className="flex justify-center md:justify-end">
+              <Image
+                src={FEATURED_TEMPLATE.imageSrc}
+                alt={FEATURED_TEMPLATE.title}
+                width={140}
+                height={140}
+                className="rounded-2xl"
+              />
+            </div>
           </div>
         </div>
-
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-          {TEMPLATE_ORDER.map((tpl) => {
-            const icon = TEMPLATE_ICONS[tpl];
-            const { title, sub, href } = TEMPLATE_DISPLAY[tpl];
-            const items = byTemplate[tpl] || [];
-            const traits = TEMPLATE_TRAITS[tpl];
-            return (
-              <div
-                key={tpl}
-                className="rounded-2xl bg-white p-6 shadow ring-1 ring-black/5"
-              >
-                <div className="relative flex items-center justify-center">
-                  <Image
-                    src={encodeURI(icon)}
-                    alt={title}
-                    width={96}
-                    height={96}
-                    className="mb-3 rounded-lg"
-                  />
-                  <span className="absolute -left-2 -top-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs text-white">
-                    {items.length}
-                  </span>
-                </div>
-                <h3 className="text-center text-lg font-semibold text-gray-800">
-                  {title}
-                </h3>
-                <p className="mt-1 text-center text-xs text-gray-500">{sub}</p>
-
-                {/* Traits */}
-                <ul className="mt-3 grid grid-cols-1 gap-1 text-xs text-gray-700">
-                  {traits.map((t) => (
-                    <li
-                      key={t}
-                      className="mx-auto w-fit rounded-full border px-2 py-0.5"
-                    >
-                      {t}
-                    </li>
-                  ))}
-                </ul>
-
-                {/* Project list */}
-                <ul className="mt-3 max-h-36 space-y-1 overflow-auto text-sm text-gray-700">
-                  {items.length === 0 ? (
-                    <li className="text-center text-gray-400">
-                      No projects yet
-                    </li>
-                  ) : (
-                    items.map((p) => (
-                      <li
-                        key={p.id}
-                        className="flex items-center justify-between gap-2"
-                      >
-                        <span className="truncate">• {p.name}</span>
-                        {p.levelNum ? (
-                          <span className="flex shrink-0 items-center gap-2">
-                            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
-                              Lv {p.levelNum}
-                            </span>
-                            <span className="whitespace-nowrap rounded-full border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-700">
-                              {p.levelTitle ?? `Lv ${p.levelNum}`}
-                            </span>
-                          </span>
-                        ) : null}
-                      </li>
-                    ))
-                  )}
-                </ul>
-
-                <div className="mt-4 flex items-center justify-center">
-                  <Link
-                    href={href}
-                    className="rounded-md bg-black px-3 py-1.5 text-xs text-white hover:bg-gray-800"
-                  >
-                    New {title.replace('Zeta ', '')} Project
-                  </Link>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </section>
 
-       
+      {/* Projects list */}
+      <section className="mx-auto mt-8 w-full max-w-6xl px-4 pb-12">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-xl font-semibold text-white">Recent Projects</h3>
+          <Link
+            href="/onboarding"
+            className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-[#0f1b3d] hover:bg-slate-100 transition"
+          >
+            Create a new project →
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {projects.length === 0 ? (
+            <div className="rounded-2xl bg-white p-6 text-gray-800 shadow ring-1 ring-black/5">
+              <div className="flex items-center gap-3">
+                <Image
+                  src={ZETA_SHOWCASE_SRC}
+                  alt="Zeta"
+                  width={44}
+                  height={44}
+                  className="rounded-xl"
+                />
+                <div>
+                  <div className="font-semibold">No projects yet</div>
+                  <div className="text-sm text-gray-600">
+                    Create your first project and let Zeta start organizing it.
+                  </div>
+                </div>
+              </div>
+              <Link
+                href="/onboarding"
+                className="mt-4 inline-block rounded-md bg-black px-3 py-2 text-xs text-white hover:bg-gray-800"
+              >
+                + New Project
+              </Link>
+            </div>
+          ) : (
+            projects.map((p) => (
+              <Link
+                key={p.id}
+                href={`/dashboard/${p.id}`}
+                className="group rounded-2xl bg-white p-6 text-gray-800 shadow ring-1 ring-black/5 hover:shadow-md transition"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-lg font-semibold">{p.name}</div>
+                    <div className="mt-1 text-xs text-gray-600">
+                      Open with Zeta →
+                    </div>
+                  </div>
+
+                  {p.levelNum ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] text-indigo-700">
+                        Lv {p.levelNum}
+                      </span>
+                      <span className="whitespace-nowrap rounded-full border border-slate-300 px-2 py-0.5 text-[10px] text-slate-700">
+                        {p.levelTitle ?? `Lv ${p.levelNum}`}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
+                  <Image
+                    src={ZETA_SHOWCASE_SRC}
+                    alt="Zeta"
+                    width={18}
+                    height={18}
+                    className="rounded-md"
+                  />
+                  <span>Zeta-powered</span>
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+      </section>
     </main>
   );
 }
-
