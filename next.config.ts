@@ -1,12 +1,15 @@
 // next.config.ts
 
+const withPWA = require("next-pwa")({
+  dest: "public",
+  register: true,
+  skipWaiting: true,
+  disable: process.env.NODE_ENV === "development",
+});
+
 const nextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  // typescript: {
-  //   ignoreBuildErrors: true,
-  // },
+  // ✅ This silences the Next 16 turbopack/webpack mismatch error
+  turbopack: {},
 };
 
-export default nextConfig;
+export default withPWA(nextConfig);

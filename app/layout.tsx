@@ -8,6 +8,22 @@ import { SupabaseProvider } from '../components/SupabaseProvider';
 export const metadata: Metadata = {
   title: 'Zeta',
   description: 'Your adaptive AI assistant',
+
+  // ✅ PWA
+  manifest: '/manifest.webmanifest',
+  themeColor: '#0B1220',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Pantheon',
+  },
+  icons: {
+    icon: [
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/icon-192.png' }],
+  },
 };
 
 export default function RootLayout({
@@ -25,16 +41,12 @@ export default function RootLayout({
           src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"
         />
       </head>
-      {/* 👇 flex column so footer sticks to bottom */}
+
       <body className="bg-slate-950 text-slate-50">
         <SupabaseProvider>
           <div className="flex min-h-screen flex-col">
-            {/* Main page content */}
-            <main className="flex-1">
-              {children}
-            </main>
+            <main className="flex-1">{children}</main>
 
-            {/* Global footer */}
             <footer className="w-full border-t border-slate-800 bg-slate-950">
               <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-4 text-[11px] text-slate-400 sm:flex-row sm:items-center sm:justify-between">
                 <span>© {new Date().getFullYear()} Pantheon / Zeta.</span>
