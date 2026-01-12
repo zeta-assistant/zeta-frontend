@@ -344,45 +344,41 @@ setFeedback('✅ Push enabled.');
   };
 
   const sendTestPush = async () => {
-    setFeedback('');
-    setPushStatus('');
-    setPushBusy(true);
+  setFeedback('');
+  setPushStatus('');
+  setPushBusy(true);
 
-    try {
-      const { data, error } = await supabase.functions.invoke('push-send-test', {
-  body: { projectId },
-});
+  try {
+    const res = await supabase.functions.invoke('push-send-test', {
+      body: { projectId },
+    });
 
-console.log('push-send-test raw:', { data, error });
+    // IMPORTANT: log the full object
+    console.log('push-send-test raw:', res);
 
-if (error) {
-  // @ts-ignore
-  const status = error?.context?.status ?? error?.status ?? 'unknown';
-  // @ts-ignore
-  const body = error?.context?.body ?? error?.context ?? error;
+    const { data, error } = res;
 
-  console.error('push-send-test failed:', { status, body });
-  throw new Error(`push-send-test failed (status=${status}): ${JSON.stringify(body)}`);
-}
-
-const status = (data as any)?.push_status;
-const ok = (data as any)?.ok;
-
-setPushStatus(
-  ok
-    ? `Push request accepted ✅ (push_status=${status ?? 'n/a'})`
-    : `Push not ok ❌ (push_status=${status ?? 'n/a'})`
-);
-
-setFeedback('✅ Test push request sent (check notification).');
-
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'unknown error';
-      fail(`❌ Test push failed: ${msg}`);
-    } finally {
-      setPushBusy(false);
+    if (error) {
+      // show every field we can
+      console.error('push-send-test error:', {
+        message: error.message,
+        name: (error as any).name,
+        context: (error as any).context,
+        details: (error as any).details,
+        stack: (error as any).stack,
+        cause: (error as any).cause,
+      });
+      throw new Error(error.message || 'Unknown invoke error');
     }
-  };
+
+    setPushStatus(`✅ push-send-test OK: ${JSON.stringify(data)}`);
+    setFeedback('✅ Test push request sent.');
+  } catch (e: any) {
+    setFeedback(`❌ Test push failed: ${e?.message ?? String(e)}`);
+  } finally {
+    setPushBusy(false);
+  }
+};
 
   /* ---------- UI ---------- */
   return (
