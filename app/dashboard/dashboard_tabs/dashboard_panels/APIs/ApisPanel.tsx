@@ -259,9 +259,34 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
   /* ---------- Push (Web Push) ---------- */
   const getSWRegistration = async () => {
     if (!('serviceWorker' in navigator)) throw new Error('Service workers not supported on this device.');
-    // next-pwa registers automatically, but we still request the active reg.
     const reg = await navigator.serviceWorker.ready;
     return reg;
+  };
+
+  const debugSW = async () => {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sw = reg?.active?.scriptURL || 'none';
+      const scope = reg?.scope || 'none';
+      console.log('SW active:', sw);
+      console.log('SW scope:', scope);
+      alert(`SW: ${sw}\nScope: ${scope}\nPermission: ${Notification?.permission ?? 'n/a'}`);
+    } catch (e: any) {
+      alert(`SW debug failed: ${e?.message ?? String(e)}`);
+    }
+  };
+
+  const manualNotifyTest = async () => {
+    setFeedback('');
+    setPushStatus('');
+    try {
+      const reg = await getSWRegistration();
+      if (!reg?.active) throw new Error('No active service worker found.');
+      reg.active.postMessage({ type: 'SHOW_TEST_NOTIFICATION' });
+      setPushStatus('Sent message to SW ✅ (a notification should appear immediately)');
+    } catch (e: any) {
+      fail(`❌ Manual notify test failed: ${e?.message ?? String(e)}`);
+    }
   };
 
   const enablePush = async () => {
@@ -270,9 +295,7 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     setPushBusy(true);
 
     try {
-      if (!VAPID_PUBLIC_KEY) {
-        throw new Error('Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY env var.');
-      }
+      if (!VAPID_PUBLIC_KEY) throw new Error('Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY env var.');
       if (!('Notification' in window)) throw new Error('Notifications not supported in this browser.');
 
       const permission = await Notification.requestPermission();
@@ -283,27 +306,22 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
 
       const reg = await getSWRegistration();
 
-      const existing = await reg.pushManager.getSubscription();
-      if (existing) {
-        setPushStatus('Already subscribed ✅');
-        // Optional: you can re-save to DB here if you want
-        return;
+      // If already subscribed, re-save it to DB so the server uses the correct endpoint.
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
       }
 
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-
-      // Store subscription in your DB via an Edge Function (recommended)
-      // Create a Supabase Edge Function: "push-subscribe"
-      // that validates auth and upserts { projectId, subscription }
-      const { error } = await supabase.functions.invoke('push-subscribe', {
+      const { data, error } = await supabase.functions.invoke('push-subscribe', {
         body: { projectId, subscription: sub },
       });
 
-      if (error) throw new Error(error.message || JSON.stringify(error));
+      console.log('push-subscribe:', { data, error });
 
+      if (error) throw new Error(error.message || JSON.stringify(error));
       setPushStatus('Subscribed + saved ✅');
       setFeedback('✅ Push enabled.');
     } catch (e: unknown) {
@@ -320,16 +338,25 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     setPushBusy(true);
 
     try {
-      // Create a Supabase Edge Function: "push-send-test"
-      // that sends a test push to the current project's saved subscription(s).
-      const { error } = await supabase.functions.invoke('push-send-test', {
+      const { data, error } = await supabase.functions.invoke('push-send-test', {
         body: { projectId },
       });
 
+      console.log('push-send-test:', { data, error });
+
       if (error) throw new Error(error.message || JSON.stringify(error));
 
-      setPushStatus('Test push sent ✅ (check iPhone)');
-      setFeedback('✅ Test push sent.');
+      // If your Edge returns push_status, show it.
+      const status = (data as any)?.push_status;
+      const ok = (data as any)?.ok;
+
+      setPushStatus(
+        ok
+          ? `Push request accepted ✅ (push_status=${status ?? 'n/a'})`
+          : `Push not ok ❌ (push_status=${status ?? 'n/a'})`
+      );
+
+      setFeedback('✅ Test push request sent (check notification).');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'unknown error';
       fail(`❌ Test push failed: ${msg}`);
@@ -341,7 +368,6 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
   /* ---------- UI ---------- */
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6">
-      {/* Clean header (removed big banner) */}
       <div className="mb-5 flex items-end justify-between gap-4">
         <div>
           <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
@@ -508,6 +534,24 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
               Send test push
             </button>
 
+            {/* Debug tools */}
+            <button
+              type="button"
+              onClick={manualNotifyTest}
+              disabled={pushBusy}
+              className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-white hover:bg-white/10 disabled:opacity-50"
+            >
+              Manual notify test (SW)
+            </button>
+
+            <button
+              type="button"
+              onClick={debugSW}
+              className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-white hover:bg-white/10"
+            >
+              Debug SW (show active SW URL)
+            </button>
+
             {pushStatus && (
               <div className="mt-2 text-xs text-white/70">
                 <span className="font-mono">{pushStatus}</span>
@@ -521,8 +565,8 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
             )}
 
             <div className="mt-2 text-xs text-white/55">
-              Note: you still need Edge Functions <span className="font-mono">push-subscribe</span> and{' '}
-              <span className="font-mono">push-send-test</span> for storing/sending pushes.
+              Needs Edge Functions: <span className="font-mono">push-subscribe</span> and{' '}
+              <span className="font-mono">push-send-test</span>.
             </div>
           </div>
         </SectionCard>
