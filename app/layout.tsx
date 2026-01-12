@@ -4,6 +4,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import 'katex/dist/katex.min.css';
 import { SupabaseProvider } from '../components/SupabaseProvider';
+import SwRegister from '../components/SwRegister';
 
 export const metadata: Metadata = {
   title: 'Zeta',
@@ -43,6 +44,9 @@ export default function RootLayout({
       </head>
 
       <body className="bg-slate-950 text-slate-50">
+        {/* 🔔 Register Service Worker (client-only, silent) */}
+        <SwRegister />
+
         <SupabaseProvider>
           <div className="flex min-h-screen flex-col">
             <main className="flex-1">{children}</main>
