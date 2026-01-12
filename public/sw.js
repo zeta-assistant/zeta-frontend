@@ -9,9 +9,9 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Manual test (your UI button posts this message)
 self.addEventListener('message', (event) => {
   const msg = event?.data || {};
+
   if (msg?.type === 'SHOW_TEST_NOTIFICATION') {
     event.waitUntil(
       self.registration.showNotification('Pantheon', {
@@ -21,8 +21,25 @@ self.addEventListener('message', (event) => {
         data: { url: '/' },
       })
     );
+    return;
+  }
+
+  if (msg?.type === 'SHOW_CUSTOM_NOTIFICATION') {
+    const title = msg?.title || 'Pantheon';
+    const body = msg?.body || 'New notification';
+    const url = msg?.url || '/';
+
+    event.waitUntil(
+      self.registration.showNotification(title, {
+        body,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        data: { url },
+      })
+    );
   }
 });
+
 
 // ✅ THIS is what you’re missing: handle real web-push events
 self.addEventListener('push', (event) => {

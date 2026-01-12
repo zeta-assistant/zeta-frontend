@@ -24,18 +24,8 @@ const isUUID = (s: string) => /^[0-9a-fA-F-]{36}$/.test(s || '');
 const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'yogizeta_bot';
 const FROM_HINT = 'Emails are sent by your function using zeta@pantheonagents.com';
 
-// Put your VAPID public key in env (must be exposed to client):
-// NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
+// Optional: keep this in case you re-enable true web push later
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
-
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
-}
 
 type SectionCardProps = {
   title: string;
@@ -45,22 +35,22 @@ type SectionCardProps = {
 };
 
 const SectionCard = ({ title, subtitle, icon, children }: SectionCardProps) => (
-  <div className="w-full h-full min-w-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
-    <div className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3 border-b border-white/10 min-w-0">
-      <div className="flex items-start gap-3 min-w-0">
+  <div className="w-full h-full rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_10px_30px_rgba(0,0,0,0.25)] overflow-hidden">
+    <div className="px-5 pt-5 pb-3 border-b border-white/10">
+      <div className="flex items-start gap-3">
         {icon && (
           <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-lg">
             {icon}
           </div>
         )}
         <div className="min-w-0">
-          <h3 className="text-lg font-semibold text-white leading-tight truncate">{title}</h3>
-          {subtitle && <p className="text-sm text-white/70 mt-1 break-words">{subtitle}</p>}
+          <h3 className="text-lg font-semibold text-white leading-tight">{title}</h3>
+          {subtitle && <p className="text-sm text-white/70 mt-1">{subtitle}</p>}
         </div>
       </div>
     </div>
 
-    <div className="p-4 sm:p-5 min-w-0">{children}</div>
+    <div className="p-5">{children}</div>
   </div>
 );
 
@@ -72,11 +62,13 @@ type ItemRowProps = {
 
 const ItemRow = ({ i, onDelete, onSendTest }: ItemRowProps) => {
   const display =
-    i.type === 'email' ? i.email_address ?? i.value ?? '' : i.value ?? i.user_chat_id ?? '';
+    i.type === 'email'
+      ? i.email_address ?? i.value ?? ''
+      : i.value ?? i.user_chat_id ?? '';
   const verified = Boolean(i.is_verified);
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3 min-w-0">
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
       <div className="min-w-0">
         <div className="text-sm font-medium text-white truncate">
           {i.type === 'telegram' ? 'Telegram' : 'Email'} — {display}
@@ -121,9 +113,10 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
   const [emailInput, setEmailInput] = useState('');
   const [testBusy, setTestBusy] = useState(false);
 
-  // Push UI state
+  // Notifications UI
   const [pushBusy, setPushBusy] = useState(false);
   const [pushStatus, setPushStatus] = useState<string>('');
+  const [notifText, setNotifText] = useState<string>('Test notification ✅');
 
   const telegramIntegrations = useMemo(
     () => integrations.filter((i) => i.type === 'telegram'),
@@ -146,7 +139,9 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
         .order('created_at', { ascending: false });
 
       if (error) {
-        return fail(`❌ Fetch failed: ${error.message || error.code || 'unknown'} ${error.details ?? ''}`);
+        return fail(
+          `❌ Fetch failed: ${error.message || error.code || 'unknown'} ${error.details ?? ''}`
+        );
       }
       setIntegrations((data || []) as Integration[]);
     } catch (e: unknown) {
@@ -252,46 +247,18 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     }
   };
 
-  /* ---------- Push (Web Push) ---------- */
+  /* ---------- Notifications (Local via SW postMessage) ---------- */
   const getSWRegistration = async () => {
     if (!('serviceWorker' in navigator)) throw new Error('Service workers not supported on this device.');
-    const reg = await navigator.serviceWorker.ready;
-    return reg;
+    return await navigator.serviceWorker.ready;
   };
 
-  const debugSW = async () => {
-    try {
-      const reg = await navigator.serviceWorker.getRegistration();
-      const sw = reg?.active?.scriptURL || 'none';
-      const scope = reg?.scope || 'none';
-      console.log('SW active:', sw);
-      console.log('SW scope:', scope);
-      alert(`SW: ${sw}\nScope: ${scope}\nPermission: ${Notification?.permission ?? 'n/a'}`);
-    } catch (e: any) {
-      alert(`SW debug failed: ${e?.message ?? String(e)}`);
-    }
-  };
-
-  const manualNotifyTest = async () => {
-    setFeedback('');
-    setPushStatus('');
-    try {
-      const reg = await getSWRegistration();
-      if (!reg?.active) throw new Error('No active service worker found.');
-      reg.active.postMessage({ type: 'SHOW_TEST_NOTIFICATION' });
-      setPushStatus('Sent message to SW ✅ (a notification should appear immediately)');
-    } catch (e: any) {
-      fail(`❌ Manual notify test failed: ${e?.message ?? String(e)}`);
-    }
-  };
-
-  const enablePush = async () => {
+  const enableNotifications = async () => {
     setFeedback('');
     setPushStatus('');
     setPushBusy(true);
 
     try {
-      if (!VAPID_PUBLIC_KEY) throw new Error('Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY env var.');
       if (!('Notification' in window)) throw new Error('Notifications not supported in this browser.');
 
       const permission = await Notification.requestPermission();
@@ -300,72 +267,65 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
         return;
       }
 
-      const reg = await getSWRegistration();
+      // Optional: keep subscription save for later web push
+      if (VAPID_PUBLIC_KEY) {
+        const reg = await getSWRegistration();
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          const padding = '='.repeat((4 - (VAPID_PUBLIC_KEY.length % 4)) % 4);
+          const base64 = (VAPID_PUBLIC_KEY + padding).replace(/-/g, '+').replace(/_/g, '/');
+          const rawData = atob(base64);
+          const outputArray = new Uint8Array(rawData.length);
+          for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
 
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: outputArray,
+          });
+        }
+
+        await supabase.functions.invoke('push-subscribe', {
+          body: { projectId, subscription: sub, replaceOthers: true },
         });
       }
 
-      const { data, error } = await supabase.functions.invoke('push-subscribe', {
-        body: { projectId, subscription: sub },
-      });
-
-      console.log('push-subscribe raw:', { data, error });
-
-      if (error) {
-        // @ts-ignore
-        const status = error?.context?.status ?? error?.status ?? 'unknown';
-        // @ts-ignore
-        const body = error?.context?.body ?? error?.context ?? error;
-
-        console.error('push-subscribe failed:', { status, body });
-        throw new Error(`push-subscribe failed (status=${status}): ${JSON.stringify(body)}`);
-      }
-
-      setPushStatus('Subscribed + saved ✅');
-      setFeedback('✅ Push enabled.');
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'unknown error';
-      fail(`❌ Push setup failed: ${msg}`);
+      setPushStatus('Notifications enabled ✅');
+      setFeedback('✅ Notifications enabled.');
+    } catch (e: any) {
+      fail(`❌ Enable failed: ${e?.message ?? String(e)}`);
     } finally {
       setPushBusy(false);
     }
   };
 
-  const sendTestPush = async () => {
+  const sendLocalNotification = async () => {
     setFeedback('');
     setPushStatus('');
     setPushBusy(true);
 
     try {
-      const res = await supabase.functions.invoke('push-send-test', {
-        body: { projectId },
-      });
-
-      console.log('push-send-test raw:', res);
-
-      const { data, error } = res;
-
-      if (error) {
-        console.error('push-send-test error:', {
-          message: error.message,
-          name: (error as any).name,
-          context: (error as any).context,
-          details: (error as any).details,
-          stack: (error as any).stack,
-          cause: (error as any).cause,
-        });
-        throw new Error(error.message || 'Unknown invoke error');
+      if (Notification?.permission !== 'granted') {
+        throw new Error(`Permission not granted (current: ${Notification?.permission ?? 'n/a'})`);
       }
 
-      setPushStatus(`✅ push-send-test OK: ${JSON.stringify(data)}`);
-      setFeedback('✅ Test push request sent.');
+      const reg = await getSWRegistration();
+      if (!reg?.active) throw new Error('No active service worker found.');
+
+      const body = notifText.trim();
+      if (!body) throw new Error('Type a message first.');
+
+      // ✅ THIS is the key: send custom message to SW
+      reg.active.postMessage({
+        type: 'SHOW_CUSTOM_NOTIFICATION',
+        title: 'Pantheon',
+        body,
+        url: '/dashboard',
+      });
+
+      setPushStatus('Notification sent ✅');
+      setFeedback('✅ Notification displayed.');
     } catch (e: any) {
-      setFeedback(`❌ Test push failed: ${e?.message ?? String(e)}`);
+      fail(`❌ Send failed: ${e?.message ?? String(e)}`);
     } finally {
       setPushBusy(false);
     }
@@ -373,13 +333,9 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
 
   /* ---------- UI ---------- */
   return (
-    // Key fixes:
-    // - overflow-x-hidden prevents right cut-off from inner elements
-    // - max-w-none + w-full ensures the panel never exceeds viewport
-    // - min-w-0 on containers prevents grid children forcing overflow
-    <div className="w-full max-w-none px-3 sm:px-4 py-5 overflow-x-hidden">
-      <div className="mb-4 flex items-end justify-between gap-3 min-w-0">
-        <div className="min-w-0">
+    <div className="mx-auto w-full max-w-6xl px-4 py-6">
+      <div className="mb-5 flex items-end justify-between gap-4">
+        <div>
           <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Integrations</h2>
           <p className="mt-1 text-sm text-white/70">Connect channels for notifications and project updates.</p>
         </div>
@@ -393,22 +349,21 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
       </div>
 
       {feedback && (
-        <div className="mb-4 rounded-xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-amber-100">
+        <div className="mb-5 rounded-xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-amber-100">
           {feedback}
         </div>
       )}
 
-      {/* More conservative breakpoints so 3 columns only appears on very wide screens */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 sm:gap-5 items-stretch min-w-0">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch">
         {/* Telegram */}
         <SectionCard icon="✈️" title="Telegram" subtitle="Receive DMs from your Zeta project.">
-          <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/80 min-w-0">
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/80">
             <p className="font-semibold text-white">Connect (10 seconds)</p>
             <ol className="list-decimal ml-5 mt-2 space-y-1">
               <li>Open Telegram.</li>
-              <li className="min-w-0">
+              <li>
                 In <span className="font-mono">@{BOT_USERNAME}</span>, send:{' '}
-                <span className="font-mono break-all">/start proj_{projectId}</span>
+                <span className="font-mono">/start proj_{projectId}</span>
               </li>
               <li>Hit Refresh → you’ll see “Verified”.</li>
             </ol>
@@ -442,11 +397,11 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
 
         {/* Email */}
         <SectionCard icon="📧" title="Email" subtitle={`Save emails to receive notifications. ${FROM_HINT}`}>
-          <div className="space-y-3 min-w-0">
-            <div className="flex gap-2 min-w-0">
+          <div className="space-y-3">
+            <div className="flex gap-2">
               <input
                 type="email"
-                className="flex-1 min-w-0 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/20"
+                className="flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/20"
                 placeholder="name@example.com"
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
@@ -454,7 +409,7 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
               <button
                 onClick={addEmail}
                 disabled={loading}
-                className="shrink-0 rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? 'Adding…' : 'Add'}
               </button>
@@ -491,19 +446,28 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
           </div>
         </SectionCard>
 
-        {/* Push Notifications */}
-        <SectionCard icon="🔔" title="Push Notifications" subtitle="Enable iPhone home-screen push alerts for this app.">
+        {/* Notifications (local) */}
+        <SectionCard icon="🔔" title="Notifications" subtitle="Local notification (works reliably).">
           <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/80">
-            <ul className="list-disc ml-5 space-y-1">
-              <li>Must be installed via “Add to Home Screen”.</li>
-              <li>Permission appears after you press Enable.</li>
-            </ul>
+            <div className="font-semibold text-white">Message</div>
+
+            <textarea
+              value={notifText}
+              onChange={(e) => setNotifText(e.target.value)}
+              rows={4}
+              className="mt-2 w-full resize-none rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/20"
+              placeholder="Type what the notification should say…"
+            />
+
+            <div className="mt-2 text-xs text-white/55">
+              This sends a message to your Service Worker and shows a notification instantly.
+            </div>
           </div>
 
           <div className="mt-4 flex flex-col gap-2">
             <button
               type="button"
-              onClick={enablePush}
+              onClick={enableNotifications}
               disabled={pushBusy}
               className="rounded-xl bg-indigo-600 px-4 py-2 text-white shadow hover:bg-indigo-700 disabled:opacity-50"
             >
@@ -512,46 +476,18 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
 
             <button
               type="button"
-              onClick={sendTestPush}
+              onClick={sendLocalNotification}
               disabled={pushBusy}
               className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-white hover:bg-white/10 disabled:opacity-50"
             >
-              Send test push
-            </button>
-
-            <button
-              type="button"
-              onClick={manualNotifyTest}
-              disabled={pushBusy}
-              className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-white hover:bg-white/10 disabled:opacity-50"
-            >
-              Manual notify test (SW)
-            </button>
-
-            <button
-              type="button"
-              onClick={debugSW}
-              className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-white hover:bg-white/10"
-            >
-              Debug SW (show active SW URL)
+              Send notification
             </button>
 
             {pushStatus && (
               <div className="mt-2 text-xs text-white/70">
-                <span className="font-mono break-all">{pushStatus}</span>
+                <span className="font-mono">{pushStatus}</span>
               </div>
             )}
-
-            {!VAPID_PUBLIC_KEY && (
-              <div className="mt-2 text-xs text-red-300">
-                Missing env: <span className="font-mono">NEXT_PUBLIC_VAPID_PUBLIC_KEY</span>
-              </div>
-            )}
-
-            <div className="mt-2 text-xs text-white/55">
-              Needs Edge Functions: <span className="font-mono">push-subscribe</span> and{' '}
-              <span className="font-mono">push-send-test</span>.
-            </div>
           </div>
         </SectionCard>
       </div>
