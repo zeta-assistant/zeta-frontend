@@ -316,14 +316,25 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
       }
 
       const { data, error } = await supabase.functions.invoke('push-subscribe', {
-        body: { projectId, subscription: sub },
-      });
+  body: { projectId, subscription: sub },
+});
 
-      console.log('push-subscribe:', { data, error });
+console.log('push-subscribe raw:', { data, error });
 
-      if (error) throw new Error(error.message || JSON.stringify(error));
-      setPushStatus('Subscribed + saved ✅');
-      setFeedback('✅ Push enabled.');
+// IMPORTANT: show real status + body (iPhone hides this otherwise)
+if (error) {
+  // @ts-ignore
+  const status = error?.context?.status ?? error?.status ?? 'unknown';
+  // @ts-ignore
+  const body = error?.context?.body ?? error?.context ?? error;
+
+  console.error('push-subscribe failed:', { status, body });
+  throw new Error(`push-subscribe failed (status=${status}): ${JSON.stringify(body)}`);
+}
+
+setPushStatus('Subscribed + saved ✅');
+setFeedback('✅ Push enabled.');
+
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'unknown error';
       fail(`❌ Push setup failed: ${msg}`);
@@ -339,24 +350,32 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
 
     try {
       const { data, error } = await supabase.functions.invoke('push-send-test', {
-        body: { projectId },
-      });
+  body: { projectId },
+});
 
-      console.log('push-send-test:', { data, error });
+console.log('push-send-test raw:', { data, error });
 
-      if (error) throw new Error(error.message || JSON.stringify(error));
+if (error) {
+  // @ts-ignore
+  const status = error?.context?.status ?? error?.status ?? 'unknown';
+  // @ts-ignore
+  const body = error?.context?.body ?? error?.context ?? error;
 
-      // If your Edge returns push_status, show it.
-      const status = (data as any)?.push_status;
-      const ok = (data as any)?.ok;
+  console.error('push-send-test failed:', { status, body });
+  throw new Error(`push-send-test failed (status=${status}): ${JSON.stringify(body)}`);
+}
 
-      setPushStatus(
-        ok
-          ? `Push request accepted ✅ (push_status=${status ?? 'n/a'})`
-          : `Push not ok ❌ (push_status=${status ?? 'n/a'})`
-      );
+const status = (data as any)?.push_status;
+const ok = (data as any)?.ok;
 
-      setFeedback('✅ Test push request sent (check notification).');
+setPushStatus(
+  ok
+    ? `Push request accepted ✅ (push_status=${status ?? 'n/a'})`
+    : `Push not ok ❌ (push_status=${status ?? 'n/a'})`
+);
+
+setFeedback('✅ Test push request sent (check notification).');
+
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'unknown error';
       fail(`❌ Test push failed: ${msg}`);
