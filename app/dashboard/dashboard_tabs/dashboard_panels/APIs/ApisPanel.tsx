@@ -45,22 +45,22 @@ type SectionCardProps = {
 };
 
 const SectionCard = ({ title, subtitle, icon, children }: SectionCardProps) => (
-  <div className="w-full h-full rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
-    <div className="px-5 pt-5 pb-3 border-b border-white/10">
-      <div className="flex items-start gap-3">
+  <div className="w-full h-full min-w-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
+    <div className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3 border-b border-white/10 min-w-0">
+      <div className="flex items-start gap-3 min-w-0">
         {icon && (
           <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-lg">
             {icon}
           </div>
         )}
         <div className="min-w-0">
-          <h3 className="text-lg font-semibold text-white leading-tight">{title}</h3>
-          {subtitle && <p className="text-sm text-white/70 mt-1">{subtitle}</p>}
+          <h3 className="text-lg font-semibold text-white leading-tight truncate">{title}</h3>
+          {subtitle && <p className="text-sm text-white/70 mt-1 break-words">{subtitle}</p>}
         </div>
       </div>
     </div>
 
-    <div className="p-5">{children}</div>
+    <div className="p-4 sm:p-5 min-w-0">{children}</div>
   </div>
 );
 
@@ -72,13 +72,11 @@ type ItemRowProps = {
 
 const ItemRow = ({ i, onDelete, onSendTest }: ItemRowProps) => {
   const display =
-    i.type === 'email'
-      ? i.email_address ?? i.value ?? ''
-      : i.value ?? i.user_chat_id ?? '';
+    i.type === 'email' ? i.email_address ?? i.value ?? '' : i.value ?? i.user_chat_id ?? '';
   const verified = Boolean(i.is_verified);
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3 min-w-0">
       <div className="min-w-0">
         <div className="text-sm font-medium text-white truncate">
           {i.type === 'telegram' ? 'Telegram' : 'Email'} — {display}
@@ -148,9 +146,7 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
         .order('created_at', { ascending: false });
 
       if (error) {
-        return fail(
-          `❌ Fetch failed: ${error.message || error.code || 'unknown'} ${error.details ?? ''}`
-        );
+        return fail(`❌ Fetch failed: ${error.message || error.code || 'unknown'} ${error.details ?? ''}`);
       }
       setIntegrations((data || []) as Integration[]);
     } catch (e: unknown) {
@@ -306,7 +302,6 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
 
       const reg = await getSWRegistration();
 
-      // If already subscribed, re-save it to DB so the server uses the correct endpoint.
       let sub = await reg.pushManager.getSubscription();
       if (!sub) {
         sub = await reg.pushManager.subscribe({
@@ -316,25 +311,23 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
       }
 
       const { data, error } = await supabase.functions.invoke('push-subscribe', {
-  body: { projectId, subscription: sub },
-});
+        body: { projectId, subscription: sub },
+      });
 
-console.log('push-subscribe raw:', { data, error });
+      console.log('push-subscribe raw:', { data, error });
 
-// IMPORTANT: show real status + body (iPhone hides this otherwise)
-if (error) {
-  // @ts-ignore
-  const status = error?.context?.status ?? error?.status ?? 'unknown';
-  // @ts-ignore
-  const body = error?.context?.body ?? error?.context ?? error;
+      if (error) {
+        // @ts-ignore
+        const status = error?.context?.status ?? error?.status ?? 'unknown';
+        // @ts-ignore
+        const body = error?.context?.body ?? error?.context ?? error;
 
-  console.error('push-subscribe failed:', { status, body });
-  throw new Error(`push-subscribe failed (status=${status}): ${JSON.stringify(body)}`);
-}
+        console.error('push-subscribe failed:', { status, body });
+        throw new Error(`push-subscribe failed (status=${status}): ${JSON.stringify(body)}`);
+      }
 
-setPushStatus('Subscribed + saved ✅');
-setFeedback('✅ Push enabled.');
-
+      setPushStatus('Subscribed + saved ✅');
+      setFeedback('✅ Push enabled.');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'unknown error';
       fail(`❌ Push setup failed: ${msg}`);
@@ -344,53 +337,51 @@ setFeedback('✅ Push enabled.');
   };
 
   const sendTestPush = async () => {
-  setFeedback('');
-  setPushStatus('');
-  setPushBusy(true);
+    setFeedback('');
+    setPushStatus('');
+    setPushBusy(true);
 
-  try {
-    const res = await supabase.functions.invoke('push-send-test', {
-      body: { projectId },
-    });
-
-    // IMPORTANT: log the full object
-    console.log('push-send-test raw:', res);
-
-    const { data, error } = res;
-
-    if (error) {
-      // show every field we can
-      console.error('push-send-test error:', {
-        message: error.message,
-        name: (error as any).name,
-        context: (error as any).context,
-        details: (error as any).details,
-        stack: (error as any).stack,
-        cause: (error as any).cause,
+    try {
+      const res = await supabase.functions.invoke('push-send-test', {
+        body: { projectId },
       });
-      throw new Error(error.message || 'Unknown invoke error');
-    }
 
-    setPushStatus(`✅ push-send-test OK: ${JSON.stringify(data)}`);
-    setFeedback('✅ Test push request sent.');
-  } catch (e: any) {
-    setFeedback(`❌ Test push failed: ${e?.message ?? String(e)}`);
-  } finally {
-    setPushBusy(false);
-  }
-};
+      console.log('push-send-test raw:', res);
+
+      const { data, error } = res;
+
+      if (error) {
+        console.error('push-send-test error:', {
+          message: error.message,
+          name: (error as any).name,
+          context: (error as any).context,
+          details: (error as any).details,
+          stack: (error as any).stack,
+          cause: (error as any).cause,
+        });
+        throw new Error(error.message || 'Unknown invoke error');
+      }
+
+      setPushStatus(`✅ push-send-test OK: ${JSON.stringify(data)}`);
+      setFeedback('✅ Test push request sent.');
+    } catch (e: any) {
+      setFeedback(`❌ Test push failed: ${e?.message ?? String(e)}`);
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   /* ---------- UI ---------- */
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6">
-      <div className="mb-5 flex items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            Integrations
-          </h2>
-          <p className="mt-1 text-sm text-white/70">
-            Connect channels for notifications and project updates.
-          </p>
+    // Key fixes:
+    // - overflow-x-hidden prevents right cut-off from inner elements
+    // - max-w-none + w-full ensures the panel never exceeds viewport
+    // - min-w-0 on containers prevents grid children forcing overflow
+    <div className="w-full max-w-none px-3 sm:px-4 py-5 overflow-x-hidden">
+      <div className="mb-4 flex items-end justify-between gap-3 min-w-0">
+        <div className="min-w-0">
+          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Integrations</h2>
+          <p className="mt-1 text-sm text-white/70">Connect channels for notifications and project updates.</p>
         </div>
 
         <button
@@ -402,25 +393,22 @@ setFeedback('✅ Push enabled.');
       </div>
 
       {feedback && (
-        <div className="mb-5 rounded-xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-amber-100">
+        <div className="mb-4 rounded-xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-amber-100">
           {feedback}
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch">
+      {/* More conservative breakpoints so 3 columns only appears on very wide screens */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 sm:gap-5 items-stretch min-w-0">
         {/* Telegram */}
-        <SectionCard
-          icon="✈️"
-          title="Telegram"
-          subtitle="Receive DMs from your Zeta project."
-        >
-          <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/80">
+        <SectionCard icon="✈️" title="Telegram" subtitle="Receive DMs from your Zeta project.">
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/80 min-w-0">
             <p className="font-semibold text-white">Connect (10 seconds)</p>
             <ol className="list-decimal ml-5 mt-2 space-y-1">
               <li>Open Telegram.</li>
-              <li>
+              <li className="min-w-0">
                 In <span className="font-mono">@{BOT_USERNAME}</span>, send:{' '}
-                <span className="font-mono">/start proj_{projectId}</span>
+                <span className="font-mono break-all">/start proj_{projectId}</span>
               </li>
               <li>Hit Refresh → you’ll see “Verified”.</li>
             </ol>
@@ -445,9 +433,7 @@ setFeedback('✅ Push enabled.');
 
           <div className="mt-4 space-y-2 max-h-40 overflow-auto pr-1">
             {telegramIntegrations.length > 0 ? (
-              telegramIntegrations.map((i) => (
-                <ItemRow key={i.id} i={i} onDelete={deleteIntegration} />
-              ))
+              telegramIntegrations.map((i) => <ItemRow key={i.id} i={i} onDelete={deleteIntegration} />)
             ) : (
               <div className="text-sm text-white/60">No Telegram recipients yet.</div>
             )}
@@ -455,16 +441,12 @@ setFeedback('✅ Push enabled.');
         </SectionCard>
 
         {/* Email */}
-        <SectionCard
-          icon="📧"
-          title="Email"
-          subtitle={`Save emails to receive notifications. ${FROM_HINT}`}
-        >
-          <div className="space-y-3">
-            <div className="flex gap-2">
+        <SectionCard icon="📧" title="Email" subtitle={`Save emails to receive notifications. ${FROM_HINT}`}>
+          <div className="space-y-3 min-w-0">
+            <div className="flex gap-2 min-w-0">
               <input
                 type="email"
-                className="flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/20"
+                className="flex-1 min-w-0 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/20"
                 placeholder="name@example.com"
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
@@ -472,7 +454,7 @@ setFeedback('✅ Push enabled.');
               <button
                 onClick={addEmail}
                 disabled={loading}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 disabled:opacity-50"
+                className="shrink-0 rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? 'Adding…' : 'Add'}
               </button>
@@ -480,10 +462,7 @@ setFeedback('✅ Push enabled.');
 
             <button
               onClick={() => {
-                const to =
-                  emailIntegrations[0]?.email_address ||
-                  emailIntegrations[0]?.value ||
-                  emailInput.trim();
+                const to = emailIntegrations[0]?.email_address || emailIntegrations[0]?.value || emailInput.trim();
                 if (!to || !isEmail(to)) {
                   fail('❌ Add a valid email first.');
                   return;
@@ -503,12 +482,7 @@ setFeedback('✅ Push enabled.');
             <div className="mt-3 space-y-2 max-h-40 overflow-auto pr-1">
               {emailIntegrations.length > 0 ? (
                 emailIntegrations.map((i) => (
-                  <ItemRow
-                    key={i.id}
-                    i={i}
-                    onDelete={deleteIntegration}
-                    onSendTest={sendTestEmail}
-                  />
+                  <ItemRow key={i.id} i={i} onDelete={deleteIntegration} onSendTest={sendTestEmail} />
                 ))
               ) : (
                 <div className="text-sm text-white/60">No email recipients yet.</div>
@@ -518,11 +492,7 @@ setFeedback('✅ Push enabled.');
         </SectionCard>
 
         {/* Push Notifications */}
-        <SectionCard
-          icon="🔔"
-          title="Push Notifications"
-          subtitle="Enable iPhone home-screen push alerts for this app."
-        >
+        <SectionCard icon="🔔" title="Push Notifications" subtitle="Enable iPhone home-screen push alerts for this app.">
           <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/80">
             <ul className="list-disc ml-5 space-y-1">
               <li>Must be installed via “Add to Home Screen”.</li>
@@ -549,7 +519,6 @@ setFeedback('✅ Push enabled.');
               Send test push
             </button>
 
-            {/* Debug tools */}
             <button
               type="button"
               onClick={manualNotifyTest}
@@ -569,7 +538,7 @@ setFeedback('✅ Push enabled.');
 
             {pushStatus && (
               <div className="mt-2 text-xs text-white/70">
-                <span className="font-mono">{pushStatus}</span>
+                <span className="font-mono break-all">{pushStatus}</span>
               </div>
             )}
 
