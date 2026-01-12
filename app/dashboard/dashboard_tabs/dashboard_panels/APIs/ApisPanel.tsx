@@ -24,14 +24,43 @@ const isUUID = (s: string) => /^[0-9a-fA-F-]{36}$/.test(s || '');
 const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || 'yogizeta_bot';
 const FROM_HINT = 'Emails are sent by your function using zeta@pantheonagents.com';
 
-type SectionCardProps = { title: string; subtitle?: string; children: React.ReactNode };
-const SectionCard = ({ title, subtitle, children }: SectionCardProps) => (
-  <div className="rounded-2xl border border-slate-200/70 bg-white/80 shadow-sm backdrop-blur p-5 max-w-xl w-full">
-    <div className="mb-4">
-      <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
-      {subtitle && <p className="text-sm text-slate-600 mt-1">{subtitle}</p>}
+// Put your VAPID public key in env (must be exposed to client):
+// NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+type SectionCardProps = {
+  title: string;
+  subtitle?: string;
+  icon?: string;
+  children: React.ReactNode;
+};
+
+const SectionCard = ({ title, subtitle, icon, children }: SectionCardProps) => (
+  <div className="w-full h-full rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
+    <div className="px-5 pt-5 pb-3 border-b border-white/10">
+      <div className="flex items-start gap-3">
+        {icon && (
+          <div className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-lg">
+            {icon}
+          </div>
+        )}
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold text-white leading-tight">{title}</h3>
+          {subtitle && <p className="text-sm text-white/70 mt-1">{subtitle}</p>}
+        </div>
+      </div>
     </div>
-    {children}
+
+    <div className="p-5">{children}</div>
   </div>
 );
 
@@ -40,6 +69,7 @@ type ItemRowProps = {
   onDelete: (id: string) => void;
   onSendTest?: (to: string) => void;
 };
+
 const ItemRow = ({ i, onDelete, onSendTest }: ItemRowProps) => {
   const display =
     i.type === 'email'
@@ -48,35 +78,35 @@ const ItemRow = ({ i, onDelete, onSendTest }: ItemRowProps) => {
   const verified = Boolean(i.is_verified);
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-3">
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
       <div className="min-w-0">
-        <div className="text-sm font-medium text-slate-900 truncate">
+        <div className="text-sm font-medium text-white truncate">
           {i.type === 'telegram' ? 'Telegram' : 'Email'} — {display}
         </div>
-        <div className="mt-1">
+        <div className="mt-2">
           {verified ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-200">
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-200 ring-1 ring-inset ring-green-400/20">
               ✓ Verified
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-100 ring-1 ring-inset ring-amber-400/20">
               ⏳ Pending
             </span>
           )}
         </div>
       </div>
 
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         {i.type === 'email' && onSendTest && display && (
           <button
-            className="text-sm rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50"
+            className="text-sm rounded-xl border border-white/15 bg-white/5 px-3 py-1.5 text-white hover:bg-white/10"
             onClick={() => onSendTest(display)}
           >
             Send test
           </button>
         )}
         <button
-          className="text-sm font-medium text-red-600 hover:underline"
+          className="text-sm font-medium text-red-300 hover:text-red-200 hover:underline"
           onClick={() => onDelete(i.id)}
         >
           Remove
@@ -92,6 +122,10 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
   const [feedback, setFeedback] = useState<string>('');
   const [emailInput, setEmailInput] = useState('');
   const [testBusy, setTestBusy] = useState(false);
+
+  // Push UI state
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushStatus, setPushStatus] = useState<string>('');
 
   const telegramIntegrations = useMemo(
     () => integrations.filter((i) => i.type === 'telegram'),
@@ -109,9 +143,7 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     try {
       const { data, error } = await supabase
         .from('project_integrations')
-        .select(
-          'id, project_id, type, value, email_address, is_verified, user_chat_id, created_at'
-        )
+        .select('id, project_id, type, value, email_address, is_verified, user_chat_id, created_at')
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
 
@@ -164,33 +196,24 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     setFeedback('');
     const value = emailInput.trim();
 
-    if (!projectId || !isUUID(projectId)) {
-      return fail('❌ Invalid project id (must be a UUID).');
-    }
+    if (!projectId || !isUUID(projectId)) return fail('❌ Invalid project id (must be a UUID).');
     if (!value) return fail('❌ Please enter an email address.');
     if (!isEmail(value)) return fail('❌ Please enter a valid email.');
-    setLoading(true);
 
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('project_integrations')
-        .insert([
-          {
-            project_id: projectId,
-            type: 'email',
-            value,
-            email_address: value,
-            is_verified: true,
-          },
-        ])
-        .select()
-        .single();
+      const { error } = await supabase.from('project_integrations').insert([
+        {
+          project_id: projectId,
+          type: 'email',
+          value,
+          email_address: value,
+          is_verified: true,
+        },
+      ]);
 
       if (error) {
-        fail(
-          `❌ Failed to add Email: ${error.message || error.code || 'unknown'} ${error.details ?? ''}`
-        );
-        setLoading(false);
+        fail(`❌ Failed to add Email: ${error.message || error.code || 'unknown'} ${error.details ?? ''}`);
         return;
       }
 
@@ -207,9 +230,7 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
 
   const deleteIntegration = async (id: string) => {
     const { error } = await supabase.from('project_integrations').delete().eq('id', id);
-    if (error) {
-      return fail(`❌ Failed to remove: ${error.message || error.code}`);
-    }
+    if (error) return fail(`❌ Failed to remove: ${error.message || error.code}`);
     fetchIntegrations();
   };
 
@@ -217,19 +238,16 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     setFeedback('');
     setTestBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke('send-email-message', {
+      const { error } = await supabase.functions.invoke('send-email-message', {
         body: {
           to,
           subject: 'Zeta test email',
-          message:
-            'Hello from Zeta! This is a test notification via Resend (zeta@pantheonagents.com).',
+          message: 'Hello from Zeta! This is a test notification via Resend (zeta@pantheonagents.com).',
         },
       });
-      if (error) {
-        fail(`❌ Failed to send: ${error.message || JSON.stringify(error)}`);
-      } else {
-        setFeedback('✅ Test email sent. Check your inbox/spam.');
-      }
+
+      if (error) fail(`❌ Failed to send: ${error.message || JSON.stringify(error)}`);
+      else setFeedback('✅ Test email sent. Check your inbox/spam.');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
       fail(`❌ Failed to send: ${msg}`);
@@ -238,90 +256,174 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
     }
   };
 
+  /* ---------- Push (Web Push) ---------- */
+  const getSWRegistration = async () => {
+    if (!('serviceWorker' in navigator)) throw new Error('Service workers not supported on this device.');
+    // next-pwa registers automatically, but we still request the active reg.
+    const reg = await navigator.serviceWorker.ready;
+    return reg;
+  };
+
+  const enablePush = async () => {
+    setFeedback('');
+    setPushStatus('');
+    setPushBusy(true);
+
+    try {
+      if (!VAPID_PUBLIC_KEY) {
+        throw new Error('Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY env var.');
+      }
+      if (!('Notification' in window)) throw new Error('Notifications not supported in this browser.');
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setPushStatus(`Permission: ${permission}`);
+        return;
+      }
+
+      const reg = await getSWRegistration();
+
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        setPushStatus('Already subscribed ✅');
+        // Optional: you can re-save to DB here if you want
+        return;
+      }
+
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+
+      // Store subscription in your DB via an Edge Function (recommended)
+      // Create a Supabase Edge Function: "push-subscribe"
+      // that validates auth and upserts { projectId, subscription }
+      const { error } = await supabase.functions.invoke('push-subscribe', {
+        body: { projectId, subscription: sub },
+      });
+
+      if (error) throw new Error(error.message || JSON.stringify(error));
+
+      setPushStatus('Subscribed + saved ✅');
+      setFeedback('✅ Push enabled.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'unknown error';
+      fail(`❌ Push setup failed: ${msg}`);
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const sendTestPush = async () => {
+    setFeedback('');
+    setPushStatus('');
+    setPushBusy(true);
+
+    try {
+      // Create a Supabase Edge Function: "push-send-test"
+      // that sends a test push to the current project's saved subscription(s).
+      const { error } = await supabase.functions.invoke('push-send-test', {
+        body: { projectId },
+      });
+
+      if (error) throw new Error(error.message || JSON.stringify(error));
+
+      setPushStatus('Test push sent ✅ (check iPhone)');
+      setFeedback('✅ Test push sent.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'unknown error';
+      fail(`❌ Test push failed: ${msg}`);
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
   /* ---------- UI ---------- */
   return (
-    <div className="max-w-6xl mx-auto space-y-8 px-4">
-      <div className="rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 shadow">
-        <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-          🔌 Connected Integrations
-        </h2>
+    <div className="mx-auto w-full max-w-6xl px-4 py-6">
+      {/* Clean header (removed big banner) */}
+      <div className="mb-5 flex items-end justify-between gap-4">
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+            Integrations
+          </h2>
+          <p className="mt-1 text-sm text-white/70">
+            Connect channels for notifications and project updates.
+          </p>
+        </div>
+
+        <button
+          onClick={fetchIntegrations}
+          className="shrink-0 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm text-white hover:bg-white/10"
+        >
+          Refresh
+        </button>
       </div>
 
       {feedback && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+        <div className="mb-5 rounded-xl border border-amber-300/30 bg-amber-500/10 px-4 py-3 text-amber-100">
           {feedback}
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 justify-items-center">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch">
         {/* Telegram */}
-        <SectionCard title="Telegram" subtitle="Receive DMs from your Zeta project.">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 mb-4">
-            <p className="font-medium">Connect (10 seconds)</p>
+        <SectionCard
+          icon="✈️"
+          title="Telegram"
+          subtitle="Receive DMs from your Zeta project."
+        >
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/80">
+            <p className="font-semibold text-white">Connect (10 seconds)</p>
             <ol className="list-decimal ml-5 mt-2 space-y-1">
-              <li>Open Telegram in a new tab.</li>
+              <li>Open Telegram.</li>
               <li>
-                In the bot chat <span className="font-mono">@{BOT_USERNAME}</span>, send:{' '}
+                In <span className="font-mono">@{BOT_USERNAME}</span>, send:{' '}
                 <span className="font-mono">/start proj_{projectId}</span>
               </li>
-              <li>Hit Refresh here → you’ll see “Verified”.</li>
+              <li>Hit Refresh → you’ll see “Verified”.</li>
             </ol>
 
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
                 onClick={openTelegramForProject}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700"
               >
-                Open Telegram (new tab)
+                Open Telegram
               </button>
               <button
                 type="button"
                 onClick={copyStartCommand}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-slate-700 hover:bg-slate-50"
+                className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-white hover:bg-white/10"
               >
-                Copy “/start proj…”
-              </button>
-              <button
-                onClick={fetchIntegrations}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-slate-700 hover:bg-slate-50"
-              >
-                Refresh
+                Copy “/start …”
               </button>
             </div>
           </div>
 
-          <div className="space-y-2 w-full">
+          <div className="mt-4 space-y-2 max-h-40 overflow-auto pr-1">
             {telegramIntegrations.length > 0 ? (
               telegramIntegrations.map((i) => (
                 <ItemRow key={i.id} i={i} onDelete={deleteIntegration} />
               ))
             ) : (
-              <div className="text-sm text-slate-500">No Telegram recipients yet.</div>
+              <div className="text-sm text-white/60">No Telegram recipients yet.</div>
             )}
           </div>
         </SectionCard>
 
         {/* Email */}
-        <SectionCard title="Email" subtitle={`Save emails to receive notifications. ${FROM_HINT}`}>
-          <div className="space-y-3 w-full">
-            {emailIntegrations.length > 0 && (
-              <div className="space-y-2">
-                {emailIntegrations.map((i) => (
-                  <ItemRow
-                    key={i.id}
-                    i={i}
-                    onDelete={deleteIntegration}
-                    onSendTest={sendTestEmail}
-                  />
-                ))}
-              </div>
-            )}
-
-            <div className="flex gap-3">
+        <SectionCard
+          icon="📧"
+          title="Email"
+          subtitle={`Save emails to receive notifications. ${FROM_HINT}`}
+        >
+          <div className="space-y-3">
+            <div className="flex gap-2">
               <input
                 type="email"
-                className="flex-1 rounded-lg border border-slate-300 bg-white p-2 text-black"
+                className="flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/20"
                 placeholder="name@example.com"
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
@@ -329,35 +431,99 @@ export default function APIsTab({ fontSize = 'base', projectId }: Props) {
               <button
                 onClick={addEmail}
                 disabled={loading}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-white shadow hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? 'Adding…' : 'Add'}
               </button>
             </div>
 
-            <div className="pt-2">
-              <button
-                onClick={() => {
-                  const to =
-                    emailIntegrations[0]?.email_address ||
-                    emailIntegrations[0]?.value ||
-                    emailInput.trim();
-                  if (!to || !isEmail(to)) {
-                    fail('❌ Add a valid email first.');
-                    return;
-                  }
-                  if (!testBusy) sendTestEmail(to);
-                }}
-                disabled={testBusy}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                {testBusy ? 'Sending…' : 'Send test to first email'}
-              </button>
+            <button
+              onClick={() => {
+                const to =
+                  emailIntegrations[0]?.email_address ||
+                  emailIntegrations[0]?.value ||
+                  emailInput.trim();
+                if (!to || !isEmail(to)) {
+                  fail('❌ Add a valid email first.');
+                  return;
+                }
+                if (!testBusy) sendTestEmail(to);
+              }}
+              disabled={testBusy}
+              className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-white hover:bg-white/10 disabled:opacity-50"
+            >
+              {testBusy ? 'Sending…' : 'Send test to first email'}
+            </button>
+
+            <div className="mt-1 text-xs text-white/55">
+              We’re skipping email verification for now — add multiple and remove anytime.
             </div>
 
-            <p className="text-xs text-slate-500">
-              We’re skipping email verification for now — add multiple and remove anytime.
-            </p>
+            <div className="mt-3 space-y-2 max-h-40 overflow-auto pr-1">
+              {emailIntegrations.length > 0 ? (
+                emailIntegrations.map((i) => (
+                  <ItemRow
+                    key={i.id}
+                    i={i}
+                    onDelete={deleteIntegration}
+                    onSendTest={sendTestEmail}
+                  />
+                ))
+              ) : (
+                <div className="text-sm text-white/60">No email recipients yet.</div>
+              )}
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* Push Notifications */}
+        <SectionCard
+          icon="🔔"
+          title="Push Notifications"
+          subtitle="Enable iPhone home-screen push alerts for this app."
+        >
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/80">
+            <ul className="list-disc ml-5 space-y-1">
+              <li>Must be installed via “Add to Home Screen”.</li>
+              <li>Permission appears after you press Enable.</li>
+            </ul>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={enablePush}
+              disabled={pushBusy}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-white shadow hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {pushBusy ? 'Working…' : 'Enable Notifications'}
+            </button>
+
+            <button
+              type="button"
+              onClick={sendTestPush}
+              disabled={pushBusy}
+              className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-white hover:bg-white/10 disabled:opacity-50"
+            >
+              Send test push
+            </button>
+
+            {pushStatus && (
+              <div className="mt-2 text-xs text-white/70">
+                <span className="font-mono">{pushStatus}</span>
+              </div>
+            )}
+
+            {!VAPID_PUBLIC_KEY && (
+              <div className="mt-2 text-xs text-red-300">
+                Missing env: <span className="font-mono">NEXT_PUBLIC_VAPID_PUBLIC_KEY</span>
+              </div>
+            )}
+
+            <div className="mt-2 text-xs text-white/55">
+              Note: you still need Edge Functions <span className="font-mono">push-subscribe</span> and{' '}
+              <span className="font-mono">push-send-test</span> for storing/sending pushes.
+            </div>
           </div>
         </SectionCard>
       </div>
