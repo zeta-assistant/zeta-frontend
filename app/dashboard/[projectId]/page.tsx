@@ -10,7 +10,7 @@ import ChatboardTab from '../dashboard_tabs/ChatboardTab';
 import WorkspaceTabs from '../dashboard_tabs/WorkspaceTabs';
 import PlannerTabs from '../dashboard_tabs/PlannerTabs';
 import IntelligenceTabs from '../dashboard_tabs/IntelligenceTabs';
-import FunctionsTabs from '../dashboard_tabs/FunctionsTabs';
+
 import ChatTab from '../dynamic_tab_content/ChatTab';
 
 import ZetaLeftSidePanel from '../zeta-left-side-panel/left-side-panel';
@@ -479,46 +479,44 @@ export default function DashboardPage() {
               />
 
               {/* === Equal-width tabs on desktop === */}
-              <div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
-                <div
-                  className="
-                    grid grid-cols-5 gap-4
-                    [&_button]:w-full [&_button]:justify-center [&_button]:px-4
-                    [&_button]:whitespace-nowrap
-                  "
-                >
-                  <div className="min-w-0">
-                    <ChatboardTab
-                      activeMainTab={activeMainTab}
-                      setActiveMainTab={setActiveMainTab}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <WorkspaceTabs
-                      activeMainTab={activeMainTab}
-                      setActiveMainTab={setActiveMainTab}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <PlannerTabs
-                      activeMainTab={activeMainTab}
-                      setActiveMainTab={setActiveMainTab}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <IntelligenceTabs
-                      activeMainTab={activeMainTab}
-                      setActiveMainTab={setActiveMainTab}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <FunctionsTabs
-                      activeMainTab={activeMainTab}
-                      setActiveMainTab={setActiveMainTab}
-                    />
-                  </div>
-                </div>
-              </div>
+<div className="w-full px-6 mt-4 border-b border-blue-700 relative z-30">
+  <div
+    className="
+      grid grid-flow-col auto-cols-fr gap-4
+      [&_button]:w-full [&_button]:justify-center [&_button]:px-4
+      [&_button]:whitespace-nowrap
+    "
+  >
+    <div className="min-w-0">
+      <ChatboardTab
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+      />
+    </div>
+
+    <div className="min-w-0">
+      <WorkspaceTabs
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+      />
+    </div>
+
+    <div className="min-w-0">
+      <PlannerTabs
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+      />
+    </div>
+
+    <div className="min-w-0">
+      <IntelligenceTabs
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+      />
+    </div>
+  </div>
+</div>
+
 
               {activeMainTab === 'chat' && (
                 <ChatTab

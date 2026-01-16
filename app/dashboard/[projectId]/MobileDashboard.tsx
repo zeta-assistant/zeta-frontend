@@ -8,7 +8,6 @@ import ChatboardTab from '../dashboard_tabs/ChatboardTab';
 import WorkspaceTabs from '../dashboard_tabs/WorkspaceTabs';
 import PlannerTabs from '../dashboard_tabs/PlannerTabs';
 import IntelligenceTabs from '../dashboard_tabs/IntelligenceTabs';
-import FunctionsTabs from '../dashboard_tabs/FunctionsTabs';
 
 import ChatTab from '../dynamic_tab_content/ChatTab';
 import DiscussionsPanel from '../dashboard_tabs/dashboard_panels/Discussions/DiscussionsPanel';
@@ -107,32 +106,52 @@ export default function MobileDashboard({
             </div>
           </div>
 
-          {/* ==== Main Tabs (Equal Width) ==== */}
-          <div className="px-2 pb-2">
-            <div
-              className="
-                grid grid-cols-5 gap-2
-                [&_button]:w-full [&_button]:justify-center [&_button]:px-2
-                [&_button]:min-w-0 [&_*]:text-[13px] [&_*]:leading-5
-              "
-            >
-              <div className="min-w-0">
-                <ChatboardTab activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              </div>
-              <div className="min-w-0">
-                <WorkspaceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              </div>
-              <div className="min-w-0">
-                <PlannerTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              </div>
-              <div className="min-w-0">
-                <IntelligenceTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              </div>
-              <div className="min-w-0">
-                <FunctionsTabs activeMainTab={activeMainTab} setActiveMainTab={setActiveMainTab} />
-              </div>
-            </div>
-          </div>
+          {/* ==== Main Tabs (Equal Width, Auto-Fit) ==== */}
+<div className="px-2 pb-2">
+  <div
+    className="
+      grid grid-flow-col auto-cols-fr gap-2
+      [&_button]:w-full
+      [&_button]:justify-center
+      [&_button]:px-2
+      [&_button]:py-2
+      [&_button]:rounded-xl
+      [&_button]:min-w-0
+      [&_button]:text-[13px]
+      [&_button]:leading-5
+      [&_button]:whitespace-nowrap
+    "
+  >
+    <div className="min-w-0">
+      <ChatboardTab
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+      />
+    </div>
+
+    <div className="min-w-0">
+      <WorkspaceTabs
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+      />
+    </div>
+
+    <div className="min-w-0">
+      <PlannerTabs
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+      />
+    </div>
+
+    <div className="min-w-0">
+      <IntelligenceTabs
+        activeMainTab={activeMainTab}
+        setActiveMainTab={setActiveMainTab}
+      />
+    </div>
+  </div>
+</div>
+
         </div>
 
         {/* ==== Scrollable Content ==== */}
